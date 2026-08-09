@@ -23,21 +23,67 @@ enum MessageDirection {
   OUT
 }
 
-model Business {
-  id        String   @id @default(cuid())
-  name      String
-  slug      String   @unique
-  timezone  String   @default("America/Sao_Paulo")
-  apiKey    String   @unique @default(cuid())
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+// Nicho do negocio - determina qual template de configuracao/onboarding e
+// exibido, mas o core (booking, conversas, etc) e o mesmo para todos.
+enum BusinessIndustry {
+  EQUESTRIAN
+  KITE_SCHOOL
+  RESTAURANT
+  COFFEE_SHOP
+  HOSTEL
+  OTHER
+}
 
+enum Role {
+  OWNER
+  ADMIN
+  STAFF
+}
+
+model Business {
+  id        String           @id @default(cuid())
+  name      String
+  slug      String           @unique
+  industry  BusinessIndustry
+  timezone  String           @default("America/Sao_Paulo")
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+
+  memberships     Membership[]
   whatsAppAccount WhatsAppAccount?
   services        Service[]
   businessHours   BusinessHours[]
   customers       Customer[]
   bookings        Booking[]
   conversations   Conversation[]
+}
+
+// Usuario humano que faz login no painel/API de administracao (dono/equipe da
+// empresa) - diferente de Customer, que e quem conversa pelo WhatsApp.
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  name         String
+  createdAt    DateTime @default(now())
+
+  memberships Membership[]
+}
+
+// Vinculo de um User a um Business com um papel - garante isolamento
+// multi-tenant (nenhuma rota de negocio roda sem checar isso) e controla
+// permissoes (Role).
+model Membership {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  businessId String
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  role       Role
+  createdAt  DateTime @default(now())
+
+  @@unique([userId, businessId])
+  @@index([businessId])
 }
 
 model WhatsAppAccount {

@@ -1,19 +1,21 @@
-# OgrowNT
+# OgrowNT — AI Front Desk
 
 ## About
 
-Assistente de WhatsApp para agendamentos - um "funcionario virtual" que qualquer
-empresa pode conectar ao proprio numero de WhatsApp para agendar horarios, confirmar
-reservas, avisar clientes e responder duvidas automaticamente. Feito para ser facil de
-plugar no site (widget) e no atendimento de qualquer empresa, sem precisar reescrever
-nada do sistema existente dela.
+Plataforma SaaS multi-tenant de "recepcionista digital" por WhatsApp: cada empresa
+conecta o próprio número, configura seu negócio (nicho, serviços, horários) e o agente
+de IA passa a agendar, confirmar, lembrar e responder clientes como um funcionário de
+verdade. Vendida inicialmente para 5 nichos - hípicas, escolas de kite/watersports,
+restaurantes, coffeeshops e hostels - todos rodando sobre o **mesmo core universal**
+(reservas, conversas, IA, WhatsApp); o que muda por nicho é configuração, não código.
 
 ## Como funciona
 
+- **Multi-tenant real**: cada usuário faz login (`User`) e tem um papel (`Role`:
+  OWNER/ADMIN/STAFF) numa ou mais empresas (`Membership`) - nenhuma rota de negócio
+  roda sem confirmar esse vínculo (isolamento por `businessId`).
 - **Canal**: WhatsApp Business Platform (API Oficial da Meta / Cloud API) - grátis para
   conversas iniciadas pelo cliente, sem risco de banimento do número.
-- **Arquitetura**: SaaS multi-empresa - um único sistema, cada empresa conecta seu
-  próprio número e configura seus serviços/horários.
 - **Conversa hibrida**:
   - Um **fluxo guiado por botões/listas** cuida do caminho principal (agendar, ver, cancelar,
     remarcar) - rápido, previsível, sem erro.
@@ -26,8 +28,10 @@ nada do sistema existente dela.
   para abrir uma conversa de WhatsApp com um clique.
 
 Veja `src/` para a estrutura do código; cada pasta tem um comentário no topo do arquivo
-principal explicando seu papel (`booking/engine.ts`, `conversation/`, `ai/`, `whatsapp/`,
-`reminders/`).
+principal explicando seu papel (`auth/`, `booking/engine.ts`, `conversation/`, `ai/`,
+`whatsapp/`, `reminders/`). O plano completo de arquitetura e as 10 fases do produto
+estão documentados à parte (auditoria, schema alvo, roadmap) - este README cobre o que
+já está implementado.
 
 ## Pré-requisitos
 
@@ -51,6 +55,7 @@ Preencha o `.env`:
 - `DATABASE_URL`: string de conexão do Postgres
 - `MASTER_ENCRYPTION_KEY`: gere com `openssl rand -hex 32` (usada para criptografar os
   tokens de acesso do WhatsApp de cada empresa no banco)
+- `JWT_SECRET`: gere com `openssl rand -hex 32` (assina os tokens de login)
 - `WHATSAPP_APP_SECRET` e `WHATSAPP_WEBHOOK_VERIFY_TOKEN`: ver seção "Conectando um número
   real de WhatsApp" abaixo (para rodar só localmente sem número real, qualquer valor serve)
 - `ANTHROPIC_API_KEY`: sua chave da Anthropic (opcional em dev)
@@ -59,16 +64,63 @@ Depois:
 
 ```bash
 npx prisma migrate dev   # cria as tabelas no banco
-npm run create-business -- --name "Barbearia do Ze" --slug barbearia-ze --seed-demo
 npm run dev               # sobe o servidor em http://localhost:3000
 ```
 
-O comando `create-business` imprime a `apiKey` da empresa criada - use-a como
-`Authorization: Bearer <apiKey>` para chamar a API `/api/*` (listar/editar serviços,
-horários, agendamentos e conversas). Sem `--phone-number-id`/`--access-token`, o bot roda
-em **modo dry-run**: em vez de enviar mensagens reais pelo WhatsApp, ele só loga no console
-o que enviaria - dá para testar o fluxo inteiro (webhook -> conversa -> reserva no banco)
-sem gastar nada nem precisar de um número real.
+## Autenticação e multi-tenant
+
+Não existe mais API key por empresa - cada empresa é criada e acessada por um usuário
+logado (`User` → `Membership` com um `Role`: `OWNER`, `ADMIN` ou `STAFF`).
+
+```bash
+# Cria a conta, a empresa (com o nicho) e o dono (OWNER) num unico passo
+curl -X POST http://localhost:3000/api/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "dono@example.com",
+    "password": "senha-forte-123",
+    "name": "Fulano",
+    "businessName": "Sunset Horse Riding",
+    "industry": "EQUESTRIAN"
+  }'
+# -> { "token": "...", "user": {...}, "business": {...} }
+
+# Login (retorna um novo token)
+curl -X POST http://localhost:3000/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{ "email": "dono@example.com", "password": "senha-forte-123" }'
+
+# Quem sou eu / quais empresas tenho acesso
+curl http://localhost:3000/api/auth/me -H "Authorization: Bearer <token>"
+
+# Empresas do usuario logado
+curl http://localhost:3000/api/businesses -H "Authorization: Bearer <token>"
+
+# Rotas de uma empresa especifica (servicos, horarios, reservas, conversas) -
+# sempre exigem Membership naquele :businessId; escrita exige OWNER ou ADMIN
+curl http://localhost:3000/api/businesses/<businessId>/services -H "Authorization: Bearer <token>"
+
+# OWNER adiciona um colega (que ja tenha se cadastrado) com um papel
+curl -X POST http://localhost:3000/api/businesses/<businessId>/members \
+  -H "Authorization: Bearer <token>" -H "Content-Type: application/json" \
+  -d '{ "email": "equipe@example.com", "role": "STAFF" }'
+```
+
+`industry` aceita: `EQUESTRIAN`, `KITE_SCHOOL`, `RESTAURANT`, `COFFEE_SHOP`, `HOSTEL`,
+`OTHER`. `/api/auth/login` tem rate limit (10 tentativas / 15 min por IP).
+
+Para montar um cenário de teste completo (empresa + dono logável + dados de
+demonstração + WhatsApp em modo dry-run) num só comando:
+
+```bash
+npm run create-business -- --name "Barbearia do Ze" --industry OTHER \
+  --owner-email dono@example.com --owner-password "senha-forte-123" --seed-demo
+```
+
+Sem `--phone-number-id`/`--access-token`, o bot roda em **modo dry-run**: em vez de
+enviar mensagens reais pelo WhatsApp, ele só loga no console o que enviaria - dá para
+testar o fluxo inteiro (webhook -> conversa -> reserva no banco) sem gastar nada nem
+precisar de um número real.
 
 ## Conectando um número real de WhatsApp
 
@@ -105,17 +157,28 @@ sem gastar nada nem precisar de um número real.
 Sem dependências, funciona em qualquer site - abre uma conversa de WhatsApp já com uma
 mensagem pré-preenchida.
 
-## Fora do escopo desta fase (arquitetado para, mas ainda não implementado)
+## Roadmap (o que ainda não está implementado)
 
-- **Instagram Direct**: a Graph API da Meta cobre WhatsApp e Instagram Messaging com um
-  formato de webhook parecido; a camada de canal foi pensada para permitir adicionar um
-  adaptador de Instagram sem tocar no motor de reservas nem na IA.
-- **Dashboard visual**: por enquanto a configuração é via CLI (`npm run create-business`) e
-  API REST (`/api/*`). Um painel web fica para uma próxima fase.
-- **Conexão self-service (Embedded Signup)**: hoje conectar o número é um passo manual
-  (seção acima). Um fluxo de "conectar em 1 clique" é evolução futura.
-- **Múltiplos profissionais/recursos por empresa**: a Fase 1 usa uma única agenda
-  compartilhada por empresa.
+A plataforma é construída em 10 fases sobre o mesmo core universal (nenhum nicho tem
+código próprio - só configuração). Implementado até agora: **Fase 1 (Fundação)** -
+autenticação, usuários, papéis, isolamento multi-tenant, seleção de nicho - por cima do
+motor de reservas/WhatsApp/IA da rodada anterior.
+
+| Fase | Conteúdo |
+| --- | --- |
+| 2. Business Setup | Onboarding guiado por nicho, campos específicos por template |
+| 3. Agent Core | Identidade/voz do agente configurável, Knowledge Base, regras de negócio |
+| 4. Conversation Engine | Detecção automática de idioma, contexto entre mensagens |
+| 5. Tools | `Resource` (cavalo/mesa/quarto/instrutor), campos de reserva customizados |
+| 6. Channels | Formalizar adaptador de canal e adicionar Instagram Direct (premium) |
+| 7. Inbox | Central de atendimento (assumir conversa, notas, handoff humano na prática) |
+| 8. Dashboard | Métricas (taxa de resolução por IA, reservas, etc.) |
+| 9. Automations | Confirmação/lembrete/follow-up configuráveis |
+| 10. Billing | Planos, setup fee + primeiro mês grátis |
+
+Outras coisas fora do escopo atual: **conexão self-service do WhatsApp** (Embedded
+Signup - hoje é manual, ver seção acima) e **múltiplos recursos/profissionais por
+empresa** (por enquanto uma única agenda compartilhada; entra na Fase 5 com `Resource`).
 
 ## Scripts
 
@@ -126,4 +189,4 @@ mensagem pré-preenchida.
 | `npm run typecheck` | Checa tipos sem gerar arquivos |
 | `npm run db:migrate` | Aplica migrações do Prisma (dev) |
 | `npm run db:deploy` | Aplica migrações do Prisma (produção) |
-| `npm run create-business` | Cadastra uma nova empresa (tenant) |
+| `npm run create-business` | Cadastra empresa/dono/dados de teste via CLI (ops, ver seção de autenticação) |

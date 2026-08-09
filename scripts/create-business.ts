@@ -1,15 +1,20 @@
+import { BusinessIndustry } from "@prisma/client";
+import { hashPassword } from "../src/auth/passwords";
 import { encryptSecret } from "../src/crypto";
 import { prisma } from "../src/db";
 
-// CLI de bootstrap: cadastra uma empresa (tenant) e, opcionalmente, conecta um
-// numero de WhatsApp e cria dados de demonstracao. Existe porque a Fase 1
-// ainda nao tem um dashboard web - isso e o "onboarding" de uma empresa nova.
+// CLI de bootstrap/ops: cadastra uma empresa (tenant), opcionalmente conecta um
+// numero de WhatsApp, cria dados de demonstracao e (opcionalmente) um dono
+// logavel. O fluxo real de cadastro de uma empresa nova e
+// POST /api/auth/register; este script existe para testes end-to-end rapidos
+// e para tarefas que a API ainda nao cobre (conectar WhatsApp).
 //
 // Uso:
-//   npm run create-business -- --name "Barbearia do Ze" --slug barbearia-ze
-//   npm run create-business -- --name "Barbearia do Ze" --slug barbearia-ze \
-//     --phone-number-id 123456789 --waba-id 987654321 --access-token EAAB... \
-//     --seed-demo
+//   npm run create-business -- --name "Barbearia do Ze" --industry OTHER \
+//     --owner-email dono@example.com --owner-password "senha-forte-123" --seed-demo
+//
+//   npm run create-business -- --name "Sunset Horse Riding" --industry EQUESTRIAN \
+//     --phone-number-id 123456789 --waba-id 987654321 --access-token EAAB...
 
 function parseArgs(argv: string[]): Record<string, string | boolean> {
   const args: Record<string, string | boolean> = {};
@@ -28,27 +33,68 @@ function parseArgs(argv: string[]): Record<string, string | boolean> {
   return args;
 }
 
+function usageAndExit(): never {
+  console.error(
+    'Uso: npm run create-business -- --name "Barbearia do Ze" --industry OTHER ' +
+      `(valores: ${Object.values(BusinessIndustry).join(", ")}) ` +
+      "[--slug barbearia-ze] [--timezone America/Sao_Paulo] " +
+      "[--owner-email EMAIL --owner-password SENHA] " +
+      "[--phone-number-id ID] [--waba-id ID] [--access-token TOKEN] [--verified-name NOME] " +
+      "[--seed-demo]"
+  );
+  process.exit(1);
+}
+
+function slugify(input: string): string {
+  return input
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "")
+    .slice(0, 60);
+}
+
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
   const name = args.name as string | undefined;
-  const slug = args.slug as string | undefined;
+  const industry = args.industry as string | undefined;
 
-  if (!name || !slug) {
-    console.error(
-      'Uso: npm run create-business -- --name "Barbearia do Ze" --slug barbearia-ze ' +
-        "[--timezone America/Sao_Paulo] [--phone-number-id ID] [--waba-id ID] " +
-        "[--access-token TOKEN] [--verified-name NOME] [--seed-demo]"
-    );
+  if (!name || !industry) usageAndExit();
+  if (!Object.values(BusinessIndustry).includes(industry as BusinessIndustry)) {
+    console.error(`industry invalido. Valores aceitos: ${Object.values(BusinessIndustry).join(", ")}`);
     process.exit(1);
   }
+
+  const slug = (args.slug as string) || slugify(name);
 
   const business = await prisma.business.create({
     data: {
       name,
       slug,
+      industry: industry as BusinessIndustry,
       timezone: (args.timezone as string) || "America/Sao_Paulo",
     },
   });
+
+  const ownerEmail = args["owner-email"] as string | undefined;
+  const ownerPassword = args["owner-password"] as string | undefined;
+  if (ownerEmail) {
+    if (!ownerPassword || ownerPassword.length < 8) {
+      console.error("--owner-password precisa ter pelo menos 8 caracteres quando --owner-email e informado.");
+      process.exit(1);
+    }
+    const normalizedEmail = ownerEmail.trim().toLowerCase();
+    const owner = await prisma.user.upsert({
+      where: { email: normalizedEmail },
+      update: {},
+      create: { email: normalizedEmail, passwordHash: await hashPassword(ownerPassword), name },
+    });
+    await prisma.membership.create({
+      data: { userId: owner.id, businessId: business.id, role: "OWNER" },
+    });
+    console.log(`Dono cadastrado: ${normalizedEmail} (faca login em POST /api/auth/login).`);
+  }
 
   const phoneNumberId = args["phone-number-id"] as string | undefined;
   if (phoneNumberId) {
@@ -79,9 +125,9 @@ async function main(): Promise<void> {
   }
 
   console.log("\nEmpresa criada com sucesso!");
-  console.log(`  id:     ${business.id}`);
-  console.log(`  slug:   ${business.slug}`);
-  console.log(`  apiKey: ${business.apiKey}  <- use como "Authorization: Bearer <apiKey>" na API /api/*`);
+  console.log(`  id:       ${business.id}`);
+  console.log(`  slug:     ${business.slug}`);
+  console.log(`  industry: ${business.industry}`);
 
   if (!phoneNumberId) {
     console.log(

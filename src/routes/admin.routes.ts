@@ -1,39 +1,24 @@
-import { Prisma, type Business } from "@prisma/client";
-import { Router, type NextFunction, type Request, type Response } from "express";
+import { Prisma, type Role } from "@prisma/client";
+import { Router } from "express";
+import { currentBusiness, requireMembership, requireRole } from "../auth/middleware";
 import { prisma } from "../db";
 
-// API REST simples usada para configurar cada empresa (servicos, horarios) e
-// consultar agendamentos/conversas. Autenticacao por API key por empresa
-// (Business.apiKey) - suficiente para a Fase 1, ja que ainda nao existe um
-// dashboard web; um painel visual (com login de verdade) e evolucao futura.
+// Rotas de gestao de uma empresa (servicos, horarios, reservas, conversas).
+// Montado em /api/businesses/:businessId (ver server.ts) - o :businessId vem
+// do path de montagem, por isso mergeParams:true. requireAuth ja roda antes
+// (aplicado no mount /api/businesses); aqui so falta confirmar o vinculo com
+// ESSA empresa (requireMembership = isolamento multi-tenant) e o papel
+// necessario para cada acao (requireRole).
 
-export const adminRouter = Router();
+export const adminRouter = Router({ mergeParams: true });
 
-async function requireAuth(req: Request, res: Response, next: NextFunction): Promise<void> {
-  const header = req.header("authorization") ?? "";
-  const token = header.startsWith("Bearer ") ? header.slice(7) : "";
-  if (!token) {
-    res.status(401).json({ error: "Token de API ausente." });
-    return;
-  }
-  const business = await prisma.business.findUnique({ where: { apiKey: token } });
-  if (!business) {
-    res.status(401).json({ error: "Token de API invalido." });
-    return;
-  }
-  res.locals.business = business;
-  next();
-}
+const WRITE_ROLES: Role[] = ["OWNER", "ADMIN"];
 
-adminRouter.use(requireAuth);
+adminRouter.use(requireMembership);
 
-function currentBusiness(res: Response): Business {
-  return res.locals.business as Business;
-}
-
-adminRouter.get("/me", (_req, res) => {
+adminRouter.get("/", (_req, res) => {
   const business = currentBusiness(res);
-  res.json({ id: business.id, name: business.name, slug: business.slug, timezone: business.timezone });
+  res.json({ id: business.id, name: business.name, slug: business.slug, industry: business.industry, timezone: business.timezone });
 });
 
 adminRouter.get("/services", async (_req, res) => {
@@ -42,7 +27,7 @@ adminRouter.get("/services", async (_req, res) => {
   res.json(services);
 });
 
-adminRouter.post("/services", async (req, res) => {
+adminRouter.post("/services", requireRole(...WRITE_ROLES), async (req, res) => {
   const business = currentBusiness(res);
   const { name, durationMinutes, price, active } = req.body ?? {};
   if (!name || !durationMinutes) {
@@ -61,7 +46,7 @@ adminRouter.post("/services", async (req, res) => {
   res.status(201).json(service);
 });
 
-adminRouter.patch("/services/:id", async (req, res) => {
+adminRouter.patch("/services/:id", requireRole(...WRITE_ROLES), async (req, res) => {
   const business = currentBusiness(res);
   const existing = await prisma.service.findFirst({ where: { id: req.params.id, businessId: business.id } });
   if (!existing) {
@@ -93,7 +78,7 @@ adminRouter.get("/business-hours", async (_req, res) => {
 // Substitui o horario de funcionamento inteiro (mais simples e previsivel do
 // que editar entradas individuais). Corpo esperado: array de
 // { weekday: 0-6, openTime: "HH:mm", closeTime: "HH:mm" }.
-adminRouter.put("/business-hours", async (req, res) => {
+adminRouter.put("/business-hours", requireRole(...WRITE_ROLES), async (req, res) => {
   const business = currentBusiness(res);
   const entries = Array.isArray(req.body) ? req.body : [];
   const valid = entries.every(
@@ -154,7 +139,7 @@ adminRouter.get("/conversations", async (req, res) => {
 });
 
 // Devolve a conversa para o bot depois que um humano respondeu manualmente.
-adminRouter.post("/conversations/:id/resolve", async (req, res) => {
+adminRouter.post("/conversations/:id/resolve", requireRole(...WRITE_ROLES), async (req, res) => {
   const business = currentBusiness(res);
   const conversation = await prisma.conversation.findFirst({
     where: { id: req.params.id, businessId: business.id },

@@ -12,6 +12,8 @@ export const config = {
   port: Number(process.env.PORT ?? 3000),
   databaseUrl: required("DATABASE_URL"),
   masterEncryptionKey: required("MASTER_ENCRYPTION_KEY"),
+  jwtSecret: required("JWT_SECRET"),
+  jwtExpiresInSeconds: 60 * 60 * 24 * 7, // 7 dias
   whatsapp: {
     appSecret: process.env.WHATSAPP_APP_SECRET ?? "",
     webhookVerifyToken: process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN ?? "",
