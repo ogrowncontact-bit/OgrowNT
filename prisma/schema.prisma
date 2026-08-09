@@ -1,0 +1,154 @@
+// Schema do OgrowNT - assistente de WhatsApp para agendamentos (multi-empresa)
+// Toda tabela de negocio carrega businessId para isolar dados por tenant.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum BookingStatus {
+  PENDING
+  CONFIRMED
+  CANCELLED
+  COMPLETED
+  NO_SHOW
+}
+
+enum MessageDirection {
+  IN
+  OUT
+}
+
+model Business {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  timezone  String   @default("America/Sao_Paulo")
+  apiKey    String   @unique @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  whatsAppAccount WhatsAppAccount?
+  services        Service[]
+  businessHours   BusinessHours[]
+  customers       Customer[]
+  bookings        Booking[]
+  conversations   Conversation[]
+}
+
+model WhatsAppAccount {
+  id                  String   @id @default(cuid())
+  businessId          String   @unique
+  business            Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  phoneNumberId       String   @unique
+  wabaId              String
+  verifiedName        String?
+  // Token de acesso da Graph API, criptografado em repouso (ver src/crypto.ts)
+  encryptedAccessToken String
+  connectedAt         DateTime @default(now())
+}
+
+model Service {
+  id              String   @id @default(cuid())
+  businessId      String
+  business        Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  name            String
+  durationMinutes Int
+  price           Decimal? @db.Decimal(10, 2)
+  active          Boolean  @default(true)
+  createdAt       DateTime @default(now())
+
+  bookings Booking[]
+
+  @@index([businessId])
+}
+
+// Horario de funcionamento por dia da semana (0 = domingo .. 6 = sabado).
+// Pode haver mais de um intervalo por dia (ex: manha e tarde).
+model BusinessHours {
+  id         String   @id @default(cuid())
+  businessId String
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  weekday    Int // 0-6
+  openTime   String // "HH:mm"
+  closeTime  String // "HH:mm"
+
+  @@index([businessId, weekday])
+}
+
+model Customer {
+  id          String   @id @default(cuid())
+  businessId  String
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  phoneNumber String // formato E.164, ex: 5511999999999
+  name        String?
+  createdAt   DateTime @default(now())
+
+  bookings      Booking[]
+  conversations Conversation[]
+
+  @@unique([businessId, phoneNumber])
+}
+
+model Booking {
+  id         String        @id @default(cuid())
+  businessId String
+  business   Business      @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  customerId String
+  customer   Customer      @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  serviceId  String
+  service    Service       @relation(fields: [serviceId], references: [id])
+  startsAt   DateTime
+  endsAt     DateTime
+  status     BookingStatus @default(PENDING)
+  createdAt  DateTime      @default(now())
+  updatedAt  DateTime      @updatedAt
+
+  reminderLogs ReminderLog[]
+
+  @@index([businessId, startsAt])
+  @@index([serviceId, startsAt])
+}
+
+model ReminderLog {
+  id            String   @id @default(cuid())
+  bookingId     String
+  booking       Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  offsetMinutes Int
+  sentAt        DateTime @default(now())
+
+  @@unique([bookingId, offsetMinutes])
+}
+
+// Estado da conversa guiada (menu -> servico -> horario -> confirmacao) por cliente.
+model Conversation {
+  id           String   @id @default(cuid())
+  businessId   String
+  business     Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  customerId   String
+  customer     Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  step         String   @default("idle")
+  data         Json     @default("{}")
+  needsHuman   Boolean  @default(false)
+  lastMessageAt DateTime @default(now())
+
+  messages Message[]
+
+  @@unique([businessId, customerId])
+}
+
+model Message {
+  id                String            @id @default(cuid())
+  conversationId    String
+  conversation      Conversation      @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  direction         MessageDirection
+  content           String
+  whatsAppMessageId String?
+  createdAt         DateTime          @default(now())
+
+  @@index([conversationId, createdAt])
+}

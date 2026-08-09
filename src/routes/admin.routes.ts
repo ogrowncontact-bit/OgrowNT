@@ -1,0 +1,171 @@
+import { Prisma, type Business } from "@prisma/client";
+import { Router, type NextFunction, type Request, type Response } from "express";
+import { prisma } from "../db";
+
+// API REST simples usada para configurar cada empresa (servicos, horarios) e
+// consultar agendamentos/conversas. Autenticacao por API key por empresa
+// (Business.apiKey) - suficiente para a Fase 1, ja que ainda nao existe um
+// dashboard web; um painel visual (com login de verdade) e evolucao futura.
+
+export const adminRouter = Router();
+
+async function requireAuth(req: Request, res: Response, next: NextFunction): Promise<void> {
+  const header = req.header("authorization") ?? "";
+  const token = header.startsWith("Bearer ") ? header.slice(7) : "";
+  if (!token) {
+    res.status(401).json({ error: "Token de API ausente." });
+    return;
+  }
+  const business = await prisma.business.findUnique({ where: { apiKey: token } });
+  if (!business) {
+    res.status(401).json({ error: "Token de API invalido." });
+    return;
+  }
+  res.locals.business = business;
+  next();
+}
+
+adminRouter.use(requireAuth);
+
+function currentBusiness(res: Response): Business {
+  return res.locals.business as Business;
+}
+
+adminRouter.get("/me", (_req, res) => {
+  const business = currentBusiness(res);
+  res.json({ id: business.id, name: business.name, slug: business.slug, timezone: business.timezone });
+});
+
+adminRouter.get("/services", async (_req, res) => {
+  const business = currentBusiness(res);
+  const services = await prisma.service.findMany({ where: { businessId: business.id }, orderBy: { name: "asc" } });
+  res.json(services);
+});
+
+adminRouter.post("/services", async (req, res) => {
+  const business = currentBusiness(res);
+  const { name, durationMinutes, price, active } = req.body ?? {};
+  if (!name || !durationMinutes) {
+    res.status(400).json({ error: "name e durationMinutes sao obrigatorios." });
+    return;
+  }
+  const service = await prisma.service.create({
+    data: {
+      businessId: business.id,
+      name: String(name),
+      durationMinutes: Number(durationMinutes),
+      price: price !== undefined && price !== null ? new Prisma.Decimal(price) : null,
+      active: active ?? true,
+    },
+  });
+  res.status(201).json(service);
+});
+
+adminRouter.patch("/services/:id", async (req, res) => {
+  const business = currentBusiness(res);
+  const existing = await prisma.service.findFirst({ where: { id: req.params.id, businessId: business.id } });
+  if (!existing) {
+    res.sendStatus(404);
+    return;
+  }
+  const { name, durationMinutes, price, active } = req.body ?? {};
+  const updated = await prisma.service.update({
+    where: { id: existing.id },
+    data: {
+      ...(name !== undefined ? { name: String(name) } : {}),
+      ...(durationMinutes !== undefined ? { durationMinutes: Number(durationMinutes) } : {}),
+      ...(price !== undefined ? { price: price === null ? null : new Prisma.Decimal(price) } : {}),
+      ...(active !== undefined ? { active: Boolean(active) } : {}),
+    },
+  });
+  res.json(updated);
+});
+
+adminRouter.get("/business-hours", async (_req, res) => {
+  const business = currentBusiness(res);
+  const hours = await prisma.businessHours.findMany({
+    where: { businessId: business.id },
+    orderBy: { weekday: "asc" },
+  });
+  res.json(hours);
+});
+
+// Substitui o horario de funcionamento inteiro (mais simples e previsivel do
+// que editar entradas individuais). Corpo esperado: array de
+// { weekday: 0-6, openTime: "HH:mm", closeTime: "HH:mm" }.
+adminRouter.put("/business-hours", async (req, res) => {
+  const business = currentBusiness(res);
+  const entries = Array.isArray(req.body) ? req.body : [];
+  const valid = entries.every(
+    (e: any) =>
+      typeof e?.weekday === "number" &&
+      e.weekday >= 0 &&
+      e.weekday <= 6 &&
+      typeof e?.openTime === "string" &&
+      typeof e?.closeTime === "string"
+  );
+  if (!valid) {
+    res.status(400).json({ error: "Corpo invalido. Esperado array de {weekday, openTime, closeTime}." });
+    return;
+  }
+
+  await prisma.$transaction([
+    prisma.businessHours.deleteMany({ where: { businessId: business.id } }),
+    prisma.businessHours.createMany({
+      data: entries.map((e: any) => ({
+        businessId: business.id,
+        weekday: e.weekday,
+        openTime: e.openTime,
+        closeTime: e.closeTime,
+      })),
+    }),
+  ]);
+
+  const hours = await prisma.businessHours.findMany({
+    where: { businessId: business.id },
+    orderBy: { weekday: "asc" },
+  });
+  res.json(hours);
+});
+
+adminRouter.get("/bookings", async (_req, res) => {
+  const business = currentBusiness(res);
+  const bookings = await prisma.booking.findMany({
+    where: { businessId: business.id },
+    include: { service: true, customer: true },
+    orderBy: { startsAt: "desc" },
+    take: 100,
+  });
+  res.json(bookings);
+});
+
+adminRouter.get("/conversations", async (req, res) => {
+  const business = currentBusiness(res);
+  const needsHumanParam = req.query.needsHuman;
+  const needsHuman = needsHumanParam === "true" ? true : needsHumanParam === "false" ? false : undefined;
+
+  const conversations = await prisma.conversation.findMany({
+    where: { businessId: business.id, ...(needsHuman !== undefined ? { needsHuman } : {}) },
+    include: { customer: true },
+    orderBy: { lastMessageAt: "desc" },
+    take: 100,
+  });
+  res.json(conversations);
+});
+
+// Devolve a conversa para o bot depois que um humano respondeu manualmente.
+adminRouter.post("/conversations/:id/resolve", async (req, res) => {
+  const business = currentBusiness(res);
+  const conversation = await prisma.conversation.findFirst({
+    where: { id: req.params.id, businessId: business.id },
+  });
+  if (!conversation) {
+    res.sendStatus(404);
+    return;
+  }
+  const updated = await prisma.conversation.update({
+    where: { id: conversation.id },
+    data: { needsHuman: false, step: "idle" },
+  });
+  res.json(updated);
+});

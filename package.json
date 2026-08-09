@@ -1,0 +1,35 @@
+{
+  "name": "ogrownt",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Assistente de WhatsApp para agendamentos - conecta ao WhatsApp de qualquer empresa e cuida de reservas, confirmacoes e lembretes.",
+  "main": "dist/server.js",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/server.js",
+    "typecheck": "tsc --noEmit",
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate dev",
+    "db:deploy": "prisma migrate deploy",
+    "create-business": "tsx scripts/create-business.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.32.1",
+    "@prisma/client": "^5.22.0",
+    "date-fns": "^4.4.0",
+    "date-fns-tz": "^3.2.0",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.1"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^22.9.0",
+    "prisma": "^5.22.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
