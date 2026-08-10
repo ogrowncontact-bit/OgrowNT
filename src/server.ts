@@ -1,13 +1,14 @@
 import path from "node:path";
 import cors from "cors";
 import express, { type NextFunction, type Request, type Response } from "express";
+import { startAutomationScheduler } from "./automations/scheduler";
 import { requireAuth } from "./auth/middleware";
 import { config } from "./config";
 import { logger } from "./logger";
-import { startReminderScheduler } from "./reminders/scheduler";
 import { adminRouter } from "./routes/admin.routes";
 import { agentRouter } from "./routes/agent.routes";
 import { authRouter } from "./routes/auth.routes";
+import { automationsRouter } from "./routes/automations.routes";
 import { businessRouter } from "./routes/business.routes";
 import { inboxRouter } from "./routes/inbox.routes";
 import { metricsRouter } from "./routes/metrics.routes";
@@ -48,6 +49,7 @@ app.use("/api/businesses/:businessId", agentRouter);
 app.use("/api/businesses/:businessId", adminRouter);
 app.use("/api/businesses/:businessId", inboxRouter);
 app.use("/api/businesses/:businessId", metricsRouter);
+app.use("/api/businesses/:businessId", automationsRouter);
 
 app.use("/widget", express.static(path.join(__dirname, "..", "public")));
 
@@ -66,5 +68,5 @@ app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
 
 app.listen(config.port, () => {
   console.log(`OgrowNT rodando na porta ${config.port}`);
-  startReminderScheduler();
+  startAutomationScheduler();
 });

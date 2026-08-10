@@ -70,6 +70,15 @@ authRouter.post(
       await tx.membership.create({
         data: { userId: user.id, businessId: business.id, role: "OWNER" },
       });
+      // Automacoes padrao (Fase 9) - lembrete 24h e 2h antes do agendamento,
+      // ligadas por padrao; a empresa pode ajustar/desligar depois (ver
+      // src/routes/automations.routes.ts).
+      await tx.automation.createMany({
+        data: [
+          { businessId: business.id, trigger: "BOOKING_REMINDER", offsetMinutes: 24 * 60 },
+          { businessId: business.id, trigger: "BOOKING_REMINDER", offsetMinutes: 2 * 60 },
+        ],
+      });
       return { user, business };
     });
 

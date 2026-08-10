@@ -301,9 +301,10 @@ desta versão), basta trocar o stub por uma implementação real do mesmo contra
 6. Gere um token de acesso permanente (via um usuário de sistema no Business Manager) e
    rode `npm run create-business` com `--phone-number-id`, `--waba-id` e `--access-token`
    para essa empresa (ou crie um endpoint/telinha de conexão depois, no dashboard).
-7. Para lembretes automáticos (mensagens enviadas pela empresa fora da janela de 24h),
-   crie e aprove um template de mensagem chamado `appointment_reminder` (ou configure outro
-   nome via `WHATSAPP_REMINDER_TEMPLATE_NAME`) no Business Manager.
+7. Para as automações proativas (Fase 9 - mensagens enviadas pela empresa fora da janela
+   de 24h), crie e aprove no Business Manager um template chamado `appointment_reminder`
+   (lembrete) e outro chamado `appointment_followup` (follow-up pós-atendimento) - ou
+   configure outros nomes via `WHATSAPP_REMINDER_TEMPLATE_NAME`/`WHATSAPP_FOLLOWUP_TEMPLATE_NAME`.
 
 ## Embedando o widget no site da empresa
 
@@ -389,6 +390,34 @@ Novo endpoint no backend (`src/routes/metrics.routes.ts`):
 | --- | --- |
 | `GET /metrics?days=30` | Métricas agregadas do período (1-365 dias, padrão 30) |
 
+## Automações (`/automations`, lembretes e follow-ups configuráveis)
+
+Cada empresa liga/desliga e ajusta os gatilhos proativos por WhatsApp (`Automation` no
+schema): **lembrete** antes do horário agendado e **follow-up** depois dele. Antes desta
+fase isso era hardcoded globalmente (`config.reminders`, 24h e 2h fixos) - agora é uma
+entidade por empresa, com um worker (`src/automations/scheduler.ts`) que varre as
+automações ativas de todas as empresas a cada `AUTOMATION_CHECK_INTERVAL_MS` e usa
+`AutomationLog` para nunca reenviar a mesma automação para o mesmo agendamento.
+
+**O que É configurável**: se cada automação está ativa e o offset (quantos minutos antes
+do início, ou depois do fim do agendamento). **O que NÃO é**: o texto da mensagem em si.
+Fora da janela de 24h de uma conversa iniciada pelo cliente, o WhatsApp só permite enviar
+mensagens através de um **template pré-aprovado no Meta Business Manager** - a estrutura
+do texto (quantas variáveis, onde entram) é fixa no template, não no seu código. Deixar a
+empresa "escrever sua própria mensagem" para esses casos seria simular uma
+personalização que nunca chegaria ao cliente de verdade. Por isso o nome/idioma do
+template continua global por tipo de automação (`WHATSAPP_REMINDER_TEMPLATE_*` /
+`WHATSAPP_FOLLOWUP_TEMPLATE_*`), e só o *quando* é configurável por empresa. Novas
+empresas já nascem com dois lembretes ativos por padrão (24h e 2h antes), preservando o
+comportamento anterior.
+
+| Rota | O que faz |
+| --- | --- |
+| `GET /automations` | Lista as automações da empresa |
+| `POST /automations` | Cria `{ trigger: "BOOKING_REMINDER" \| "BOOKING_FOLLOWUP", offsetMinutes }` |
+| `PATCH /automations/:id` | Ativa/desativa ou ajusta o offset |
+| `DELETE /automations/:id` | Remove |
+
 ## Roadmap (o que ainda não está implementado)
 
 A plataforma é construída em 10 fases sobre o mesmo core universal (nenhum nicho tem
@@ -402,12 +431,13 @@ totalmente traduzidos, formatação de data/moeda por locale), **Fase 5 (Tools)*
 **Fase 6 (Channels)** (`ChannelAdapter` formalizado, WhatsApp real + Instagram como stub
 honesto preparado para a integração futura), **Fase 7 (Inbox)** (dashboard Next.js
 separado, assumir/devolver conversa, resposta manual, atribuição por membro da equipe,
-notas internas) e **Fase 8 (Dashboard)** (métricas: taxa de resolução por IA, reservas
-por status, serviços mais reservados, observabilidade de tools).
+notas internas), **Fase 8 (Dashboard)** (métricas: taxa de resolução por IA, reservas
+por status, serviços mais reservados, observabilidade de tools) e **Fase 9
+(Automations)** (lembrete/follow-up configuráveis por empresa via `Automation`,
+substituindo os offsets hardcoded).
 
 | Fase | Conteúdo |
 | --- | --- |
-| 9. Automations | Confirmação/lembrete/follow-up configuráveis |
 | 10. Billing | Planos, setup fee + primeiro mês grátis |
 
 Outras coisas fora do escopo atual: **conexão self-service do WhatsApp** (Embedded

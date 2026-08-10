@@ -7,6 +7,7 @@ import type { Membership } from "@/lib/types";
 const NAV_LINKS = [
   { href: "/inbox", label: "Inbox" },
   { href: "/dashboard", label: "Dashboard" },
+  { href: "/automations", label: "Automações" },
 ] as const;
 
 export function AppHeader({
@@ -15,7 +16,7 @@ export function AppHeader({
   memberships,
   onBusinessChange,
 }: {
-  active: "inbox" | "dashboard";
+  active: "inbox" | "dashboard" | "automations";
   businessId: string | null;
   memberships: Membership[];
   onBusinessChange: (id: string) => void;

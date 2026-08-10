@@ -68,6 +68,13 @@ async function main(): Promise<void> {
     },
   });
 
+  await prisma.automation.createMany({
+    data: [
+      { businessId: business.id, trigger: "BOOKING_REMINDER", offsetMinutes: 24 * 60 },
+      { businessId: business.id, trigger: "BOOKING_REMINDER", offsetMinutes: 2 * 60 },
+    ],
+  });
+
   const ownerEmail = args["owner-email"] as string | undefined;
   const ownerPassword = args["owner-password"] as string | undefined;
   if (ownerEmail) {

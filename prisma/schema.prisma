@@ -122,6 +122,7 @@ model Business {
   resources        Resource[]
   customFields     CustomBookingField[]
   toolCallLogs     ToolCallLog[]
+  automations      Automation[]
 }
 
 // Identidade/voz do "funcionario digital" da empresa - como ele fala, nao o
@@ -344,7 +345,7 @@ model Booking {
   createdAt  DateTime      @default(now())
   updatedAt  DateTime      @updatedAt
 
-  reminderLogs ReminderLog[]
+  automationLogs AutomationLog[]
 
   @@index([businessId, startsAt])
   @@index([serviceId, startsAt])
@@ -368,14 +369,48 @@ model ToolCallLog {
   @@index([businessId, createdAt])
 }
 
-model ReminderLog {
-  id            String   @id @default(cuid())
-  bookingId     String
-  booking       Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
-  offsetMinutes Int
-  sentAt        DateTime @default(now())
+// Automacao proativa configuravel por empresa (Fase 9) - lembrete antes do
+// horario ou follow-up depois. O TEXTO da mensagem em si NAO e livre: fora
+// da janela de 24h de uma conversa iniciada pelo cliente, o WhatsApp exige
+// um template pre-aprovado no Meta Business Manager (mesma regra ja usada
+// pelos lembretes desde a Fase 1) - por isso so o gatilho e o offset sao
+// configuraveis aqui; o nome/idioma do template de cada trigger continua
+// global (ver config.whatsapp.reminderTemplate*/followupTemplate*). Prometer
+// "personalize sua mensagem" quando isso na pratica nao chegaria ao cliente
+// seria simular uma integracao que nao existe de verdade.
+enum AutomationTrigger {
+  BOOKING_REMINDER
+  BOOKING_FOLLOWUP
+}
 
-  @@unique([bookingId, offsetMinutes])
+model Automation {
+  id            String            @id @default(cuid())
+  businessId    String
+  business      Business          @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  trigger       AutomationTrigger
+  active        Boolean           @default(true)
+  // REMINDER: minutos ANTES de Booking.startsAt. FOLLOWUP: minutos DEPOIS de Booking.endsAt.
+  offsetMinutes Int
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+
+  logs AutomationLog[]
+
+  @@unique([businessId, trigger, offsetMinutes])
+  @@index([businessId])
+}
+
+// Evita reenvio duplicado da mesma automacao para o mesmo agendamento -
+// substitui o antigo ReminderLog (que so cobria lembretes hardcoded).
+model AutomationLog {
+  id           String     @id @default(cuid())
+  automationId String
+  automation   Automation @relation(fields: [automationId], references: [id], onDelete: Cascade)
+  bookingId    String
+  booking      Booking    @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  sentAt       DateTime   @default(now())
+
+  @@unique([automationId, bookingId])
 }
 
 // Estado da conversa guiada (menu -> servico -> horario -> confirmacao) por cliente.

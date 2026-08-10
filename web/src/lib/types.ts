@@ -90,3 +90,15 @@ export interface Metrics {
   toolCalls: { total: number; successRate: number | null };
   messages: { in: number; out: number };
 }
+
+export type AutomationTrigger = "BOOKING_REMINDER" | "BOOKING_FOLLOWUP";
+
+export interface Automation {
+  id: string;
+  businessId: string;
+  trigger: AutomationTrigger;
+  active: boolean;
+  offsetMinutes: number;
+  createdAt: string;
+  updatedAt: string;
+}
