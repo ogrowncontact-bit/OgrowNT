@@ -10,6 +10,7 @@ import { agentRouter } from "./routes/agent.routes";
 import { authRouter } from "./routes/auth.routes";
 import { businessRouter } from "./routes/business.routes";
 import { inboxRouter } from "./routes/inbox.routes";
+import { metricsRouter } from "./routes/metrics.routes";
 import { onboardingRouter } from "./routes/onboarding.routes";
 import { webhookRouter } from "./routes/webhook.routes";
 
@@ -46,6 +47,7 @@ app.use("/api/businesses/:businessId", onboardingRouter);
 app.use("/api/businesses/:businessId", agentRouter);
 app.use("/api/businesses/:businessId", adminRouter);
 app.use("/api/businesses/:businessId", inboxRouter);
+app.use("/api/businesses/:businessId", metricsRouter);
 
 app.use("/widget", express.static(path.join(__dirname, "..", "public")));
 

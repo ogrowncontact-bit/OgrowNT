@@ -3,11 +3,11 @@
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { AppHeader } from "@/components/AppHeader";
-import { InboxView } from "@/components/inbox/InboxView";
+import { MetricsView } from "@/components/dashboard/MetricsView";
 import { useAuth } from "@/context/AuthContext";
 import { useActiveBusiness } from "@/hooks/useActiveBusiness";
 
-export default function InboxPage() {
+export default function DashboardPage() {
   const { token, user, memberships, loading } = useAuth();
   const router = useRouter();
   const { businessId, setBusinessId } = useActiveBusiness(memberships);
@@ -30,8 +30,8 @@ export default function InboxPage() {
 
   return (
     <div className="flex h-screen flex-col">
-      <AppHeader active="inbox" businessId={businessId} memberships={memberships} onBusinessChange={setBusinessId} />
-      {businessId && <InboxView key={businessId} businessId={businessId} token={token} />}
+      <AppHeader active="dashboard" businessId={businessId} memberships={memberships} onBusinessChange={setBusinessId} />
+      {businessId && <MetricsView key={businessId} businessId={businessId} token={token} />}
     </div>
   );
 }

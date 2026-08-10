@@ -70,3 +70,23 @@ export interface ConversationDetail extends ConversationListItem {
   messages: Message[];
   notes: ConversationNote[];
 }
+
+export type BookingStatus = "PENDING" | "CONFIRMED" | "CANCELLED" | "COMPLETED" | "NO_SHOW";
+
+export interface Metrics {
+  period: { days: number; since: string };
+  conversations: {
+    total: number;
+    aiResolved: number;
+    aiResolvedRate: number | null;
+    needingHumanNow: number;
+  };
+  bookings: {
+    total: number;
+    byStatus: Record<BookingStatus, number>;
+    upcomingConfirmed: number;
+  };
+  topServices: { serviceId: string; name: string; bookings: number }[];
+  toolCalls: { total: number; successRate: number | null };
+  messages: { in: number; out: number };
+}

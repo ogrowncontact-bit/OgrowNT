@@ -321,11 +321,11 @@ desta versão), basta trocar o stub por uma implementação real do mesmo contra
 Sem dependências, funciona em qualquer site - abre uma conversa de WhatsApp já com uma
 mensagem pré-preenchida.
 
-## Inbox (dashboard web, `web/`)
+## Painel web (`web/`) - Inbox e Dashboard
 
 Aplicação Next.js separada (irmã do backend, não um monorepo) que consome a mesma API
-REST autenticada por JWT - é a central de atendimento humano por cima da mesma conversa
-que o bot usa.
+REST autenticada por JWT - hoje tem duas telas: o **Inbox** (atendimento humano) e o
+**Dashboard** (métricas), com navegação entre as duas no cabeçalho.
 
 ```bash
 cd web
@@ -367,6 +367,28 @@ Novos endpoints no backend (`src/routes/inbox.routes.ts`, montados em
 | `POST /conversations/:id/notes` | Adiciona uma nota interna |
 | `GET /members` | Lista a equipe da empresa (para o seletor de atribuição) |
 
+### Dashboard (`/dashboard`, métricas)
+
+Cards com agregações somente-leitura sobre o que já existe no banco (nenhuma tabela
+nova) - taxa de resolução por IA, reservas, ferramentas de IA e mensagens - com
+seletor de período (7/30/90 dias).
+
+- **Conversas**: total no período e **taxa de resolução por IA** (% de conversas em
+  que nenhuma mensagem `sender: HUMAN` foi enviada - ou seja, o bot resolveu sozinho),
+  além de quantas precisam de atendimento agora.
+- **Reservas**: total no período, detalhamento por status (`PENDING`/`CONFIRMED`/
+  `CANCELLED`/`COMPLETED`/`NO_SHOW`) e quantas confirmadas ainda vão acontecer.
+- **Serviços mais reservados**: top 5 por número de reservas no período.
+- **Ferramentas de IA**: total de chamadas de tool-use e taxa de sucesso (via
+  `ToolCallLog`, ver Fase 5).
+- **Mensagens**: recebidas vs. enviadas no período.
+
+Novo endpoint no backend (`src/routes/metrics.routes.ts`):
+
+| Rota | O que faz |
+| --- | --- |
+| `GET /metrics?days=30` | Métricas agregadas do período (1-365 dias, padrão 30) |
+
 ## Roadmap (o que ainda não está implementado)
 
 A plataforma é construída em 10 fases sobre o mesmo core universal (nenhum nicho tem
@@ -378,13 +400,13 @@ código próprio - só configuração). Implementado até agora: **Fase 1 (Funda
 totalmente traduzidos, formatação de data/moeda por locale), **Fase 5 (Tools)**
 (`Resource` com capacidade, campos de reserva customizados, observabilidade de tools) e
 **Fase 6 (Channels)** (`ChannelAdapter` formalizado, WhatsApp real + Instagram como stub
-honesto preparado para a integração futura) e **Fase 7 (Inbox)** (dashboard Next.js
+honesto preparado para a integração futura), **Fase 7 (Inbox)** (dashboard Next.js
 separado, assumir/devolver conversa, resposta manual, atribuição por membro da equipe,
-notas internas).
+notas internas) e **Fase 8 (Dashboard)** (métricas: taxa de resolução por IA, reservas
+por status, serviços mais reservados, observabilidade de tools).
 
 | Fase | Conteúdo |
 | --- | --- |
-| 8. Dashboard | Métricas (taxa de resolução por IA, reservas, etc.) |
 | 9. Automations | Confirmação/lembrete/follow-up configuráveis |
 | 10. Billing | Planos, setup fee + primeiro mês grátis |
 
