@@ -2,9 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { ApiError } from "@/lib/api";
-import { getOnboarding, runQuickStart } from "@/lib/onboarding";
+import { getOnboarding, importFromWebsite, runQuickStart } from "@/lib/onboarding";
 import { createService, listBusinessHours, listServices, saveBusinessHours, updateService } from "@/lib/services";
-import type { BusinessHoursEntry, OnboardingStatus, Service } from "@/lib/types";
+import type { BusinessHoursEntry, OnboardingStatus, Service, WebsiteImportSuggestion } from "@/lib/types";
 
 const WEEKDAY_LABELS = ["Domingo", "Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado"];
 
@@ -13,6 +13,10 @@ interface HourRow {
   open: boolean;
   openTime: string;
   closeTime: string;
+}
+
+interface DraftSuggestion extends WebsiteImportSuggestion {
+  selected: boolean;
 }
 
 function buildHourRows(existing: BusinessHoursEntry[]): HourRow[] {
@@ -35,6 +39,12 @@ export function ServicesView({ businessId, token }: { businessId: string; token:
   const [newName, setNewName] = useState("");
   const [newDuration, setNewDuration] = useState(60);
   const [newPrice, setNewPrice] = useState("");
+
+  const [importUrl, setImportUrl] = useState("");
+  const [importBusy, setImportBusy] = useState(false);
+  const [importError, setImportError] = useState<string | null>(null);
+  const [suggestions, setSuggestions] = useState<DraftSuggestion[] | null>(null);
+  const [importingSelected, setImportingSelected] = useState(false);
 
   async function refresh() {
     const [serviceList, hourList, onboardingStatus] = await Promise.all([
@@ -83,6 +93,50 @@ export function ServicesView({ businessId, token }: { businessId: string; token:
       setError(err instanceof ApiError ? err.message : "Nao foi possivel usar as sugestoes.");
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function handleImportFetch(e: React.FormEvent) {
+    e.preventDefault();
+    setImportError(null);
+    setSuggestions(null);
+    setImportBusy(true);
+    try {
+      const result = await importFromWebsite(businessId, token, importUrl.trim());
+      setSuggestions(result.suggestions.map((s) => ({ ...s, selected: true })));
+    } catch (err) {
+      setImportError(err instanceof ApiError ? err.message : "Nao foi possivel importar dessa URL.");
+    } finally {
+      setImportBusy(false);
+    }
+  }
+
+  function updateSuggestion(index: number, patch: Partial<DraftSuggestion>) {
+    setSuggestions((prev) => prev?.map((s, i) => (i === index ? { ...s, ...patch } : s)) ?? null);
+  }
+
+  async function handleImportConfirm() {
+    if (!suggestions) return;
+    const toImport = suggestions.filter((s) => s.selected && s.name.trim());
+    if (toImport.length === 0) return;
+    setImportError(null);
+    setImportingSelected(true);
+    try {
+      for (const s of toImport) {
+        await createService(businessId, token, {
+          name: s.name.trim(),
+          durationMinutes: s.durationMinutes ?? 60,
+          price: s.price ?? undefined,
+        });
+      }
+      setSuggestions(null);
+      setImportUrl("");
+      setInfo(`${toImport.length} servico(s) importado(s).`);
+      await refresh();
+    } catch (err) {
+      setImportError(err instanceof ApiError ? err.message : "Nao foi possivel importar os servicos selecionados.");
+    } finally {
+      setImportingSelected(false);
     }
   }
 
@@ -167,6 +221,84 @@ export function ServicesView({ businessId, token }: { businessId: string; token:
           </button>
         </div>
       )}
+
+      <div className="mb-6 max-w-2xl rounded-lg border border-zinc-200 p-4 dark:border-zinc-800">
+        <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100">Importar do site da empresa</p>
+        <p className="mt-1 text-xs text-zinc-400">
+          Cole o link do cardápio, tabela de preços ou página de serviços do seu site — a IA lê a página e sugere os
+          serviços e preços pra você revisar antes de importar.
+        </p>
+        <form onSubmit={handleImportFetch} className="mt-3 flex flex-wrap gap-2">
+          <input
+            required
+            type="url"
+            value={importUrl}
+            onChange={(e) => setImportUrl(e.target.value)}
+            placeholder="https://seusite.com.br/cardapio"
+            className="min-w-64 flex-1 rounded-md border border-zinc-300 px-2.5 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+          />
+          <button
+            type="submit"
+            disabled={importBusy}
+            className="rounded-md bg-zinc-900 px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50 dark:bg-zinc-50 dark:text-zinc-900"
+          >
+            {importBusy ? "Analisando..." : "Buscar sugestões"}
+          </button>
+        </form>
+
+        {importError && <p className="mt-3 text-sm text-red-600">{importError}</p>}
+
+        {suggestions && suggestions.length > 0 && (
+          <div className="mt-4">
+            <p className="mb-2 text-xs text-zinc-400">
+              Encontramos {suggestions.length} item(ns). Desmarque o que não quiser, ajuste nome/preço/duração e
+              confirme.
+            </p>
+            <ul className="space-y-2">
+              {suggestions.map((s, i) => (
+                <li key={i} className="flex flex-wrap items-center gap-2 rounded-md border border-zinc-200 p-2 dark:border-zinc-800">
+                  <input
+                    type="checkbox"
+                    checked={s.selected}
+                    onChange={(e) => updateSuggestion(i, { selected: e.target.checked })}
+                  />
+                  <input
+                    value={s.name}
+                    onChange={(e) => updateSuggestion(i, { name: e.target.value })}
+                    className="min-w-40 flex-1 rounded-md border border-zinc-300 px-2 py-1 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+                  />
+                  <input
+                    type="number"
+                    min={1}
+                    value={s.durationMinutes ?? 60}
+                    onChange={(e) => updateSuggestion(i, { durationMinutes: Number(e.target.value) })}
+                    className="w-20 rounded-md border border-zinc-300 px-2 py-1 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+                  />
+                  <span className="text-xs text-zinc-400">min</span>
+                  <input
+                    type="number"
+                    min={0}
+                    step={0.01}
+                    value={s.price ?? ""}
+                    onChange={(e) => updateSuggestion(i, { price: e.target.value ? Number(e.target.value) : null })}
+                    placeholder="R$ (opcional)"
+                    className="w-28 rounded-md border border-zinc-300 px-2 py-1 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+                  />
+                </li>
+              ))}
+            </ul>
+            <button
+              onClick={handleImportConfirm}
+              disabled={importingSelected}
+              className="mt-3 rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50"
+            >
+              {importingSelected
+                ? "Importando..."
+                : `Importar ${suggestions.filter((s) => s.selected).length} selecionado(s)`}
+            </button>
+          </div>
+        )}
+      </div>
 
       <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-400">Serviços</h2>
       {!services && <p className="text-sm text-zinc-400">Carregando...</p>}

@@ -170,6 +170,17 @@ export interface QuickStartResult {
   message: string;
 }
 
+export interface WebsiteImportSuggestion {
+  name: string;
+  price: number | null;
+  durationMinutes: number | null;
+}
+
+export interface WebsiteImportResult {
+  sourceUrl: string;
+  suggestions: WebsiteImportSuggestion[];
+}
+
 export type WhatsAppConnection =
   | { connected: false }
   | {

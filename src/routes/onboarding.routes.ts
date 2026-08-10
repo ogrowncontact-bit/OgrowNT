@@ -1,9 +1,11 @@
 import { Router } from "express";
 import { asyncHandler } from "../asyncHandler";
 import { currentBusiness, requireMembership, requireRole } from "../auth/middleware";
+import { config } from "../config";
 import { encryptSecret } from "../crypto";
 import { prisma } from "../db";
 import { getIndustryTemplate } from "../templates/registry";
+import { extractServicesFromText, fetchWebsiteText } from "../onboarding/websiteImport";
 
 // Rotas de "Business Setup": expoe o template do nicho da empresa (campos
 // sugeridos, servicos de exemplo) e um checklist de onboarding, alem de um
@@ -89,6 +91,68 @@ onboardingRouter.post(
           ? "Ja havia servicos e horarios configurados - nada foi alterado."
           : "Configuracao inicial criada. Ajuste precos, duracoes e horarios quando quiser.",
     });
+  })
+);
+
+// Le o site da empresa e usa a IA (mesma conta/chave usada pelo agente de
+// conversas - ver src/ai/agent.ts) para sugerir servicos/precos a importar.
+// Nao grava nada no banco: so devolve sugestoes, o dono confirma quais
+// quer criar (via POST /services, ja existente) depois de revisar.
+onboardingRouter.post(
+  "/onboarding/import-from-website",
+  requireRole(...WRITE_ROLES),
+  asyncHandler(async (req, res) => {
+    if (!config.anthropic.apiKey) {
+      res.status(501).json({
+        error:
+          "Importacao automatica requer a IA configurada (ANTHROPIC_API_KEY) no backend. Cadastre os servicos manualmente por enquanto.",
+      });
+      return;
+    }
+
+    const business = currentBusiness(res);
+    const { url } = req.body ?? {};
+    if (!url || typeof url !== "string") {
+      res.status(400).json({ error: "url e obrigatoria." });
+      return;
+    }
+
+    let parsedUrl: URL;
+    try {
+      parsedUrl = new URL(url);
+    } catch {
+      res.status(400).json({ error: "URL invalida." });
+      return;
+    }
+
+    let pageText: string;
+    try {
+      pageText = await fetchWebsiteText(parsedUrl.toString());
+    } catch (err) {
+      res.status(422).json({ error: err instanceof Error ? err.message : "Nao foi possivel acessar essa URL." });
+      return;
+    }
+
+    if (!pageText || pageText.length < 30) {
+      res.status(422).json({ error: "Nao encontramos texto suficiente nessa pagina para analisar." });
+      return;
+    }
+
+    const template = getIndustryTemplate(business.industry);
+    let suggestions;
+    try {
+      suggestions = await extractServicesFromText(pageText, template.label);
+    } catch (err) {
+      res.status(502).json({ error: err instanceof Error ? err.message : "Nao foi possivel interpretar os servicos dessa pagina." });
+      return;
+    }
+
+    if (suggestions.length === 0) {
+      res.status(422).json({ error: "Nao encontramos servicos ou precos reconheciveis nessa pagina." });
+      return;
+    }
+
+    res.json({ sourceUrl: parsedUrl.toString(), suggestions });
   })
 );
 
