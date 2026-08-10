@@ -224,6 +224,47 @@ Teste rápido (mesmo fluxo, três idiomas): mande "Olá, vocês têm horário am
 "Hi, do you have availability tomorrow?" e "Hola, ¿tenéis disponibilidad para mañana?"
 para o mesmo número - cada uma recebe o menu no idioma correspondente.
 
+## Recursos, quantidade e campos de reserva customizados
+
+O motor de reservas é universal: por padrão cada empresa usa uma única agenda
+compartilhada (como nas fases anteriores). Quando um serviço precisa de um recurso
+específico e limitado - cavalo, mesa, quarto, instrutor - configure `Resource` e ligue o
+serviço a ele via `requiresResourceType`; o motor passa a só oferecer um horário se
+houver pelo menos um recurso daquele tipo, com capacidade suficiente, livre naquele
+intervalo (e reserva um automaticamente, com proteção contra concorrência).
+
+```bash
+# Cadastra 2 mesas (recurso "table") com capacidades diferentes
+curl -X POST http://localhost:3000/api/businesses/<businessId>/resources \
+  -H "Authorization: Bearer <token>" -H "Content-Type: application/json" \
+  -d '{ "type": "table", "name": "Mesa 1", "capacity": 4 }'
+curl -X POST http://localhost:3000/api/businesses/<businessId>/resources \
+  -H "Authorization: Bearer <token>" -H "Content-Type: application/json" \
+  -d '{ "type": "table", "name": "Mesa 2", "capacity": 2 }'
+
+# Liga o servico "Mesa" ao tipo de recurso "table"
+curl -X PATCH http://localhost:3000/api/businesses/<businessId>/services/<serviceId> \
+  -H "Authorization: Bearer <token>" -H "Content-Type: application/json" \
+  -d '{ "requiresResourceType": "table" }'
+
+# Campo de reserva customizado (ex: nivel de experiencia na hipica)
+curl -X POST http://localhost:3000/api/businesses/<businessId>/custom-fields \
+  -H "Authorization: Bearer <token>" -H "Content-Type: application/json" \
+  -d '{ "serviceId": "<serviceId ou omita para valer em todos>",
+        "label": "Qual seu nivel de experiencia?", "fieldType": "SELECT",
+        "options": ["iniciante", "intermediario", "avancado"], "required": true }'
+```
+
+- No **fluxo guiado**, um serviço com `requiresResourceType` passa a perguntar "Para
+  quantas pessoas?" antes de mostrar horários (a disponibilidade já leva em conta a
+  capacidade). Serviços sem recurso continuam exatamente como antes - sem esse passo.
+- O **agente de IA** vê os `customFields` de cada serviço via `list_services` e sabe que
+  precisa perguntar antes de reservar - as respostas vão para `Booking.metadata`.
+  Perguntas abertas (texto livre) ficam a cargo da IA; o fluxo guiado por botões não
+  coleta campos customizados.
+- Toda chamada de ferramenta da IA é registrada em `ToolCallLog` (nome, parâmetros,
+  sucesso) para observabilidade - sem guardar o conteúdo das mensagens.
+
 ## Conectando um número real de WhatsApp
 
 1. Crie um app em [developers.facebook.com](https://developers.facebook.com) do tipo
@@ -265,13 +306,13 @@ A plataforma é construída em 10 fases sobre o mesmo core universal (nenhum nic
 código próprio - só configuração). Implementado até agora: **Fase 1 (Fundação)**
 (autenticação, usuários, papéis, isolamento multi-tenant, seleção de nicho), **Fase 2
 (Business Setup)** (template por nicho, onboarding, perfil da empresa), **Fase 3
-(Agent Core)** (identidade/voz configurável, Knowledge Base, regras de negócio) e
+(Agent Core)** (identidade/voz configurável, Knowledge Base, regras de negócio),
 **Fase 4 (motor multilíngue)** (detecção automática de idioma, fluxo guiado e IA
-totalmente traduzidos, formatação de data/moeda por locale).
+totalmente traduzidos, formatação de data/moeda por locale) e **Fase 5 (Tools)**
+(`Resource` com capacidade, campos de reserva customizados, observabilidade de tools).
 
 | Fase | Conteúdo |
 | --- | --- |
-| 5. Tools | `Resource` (cavalo/mesa/quarto/instrutor), campos de reserva customizados |
 | 6. Channels | Formalizar adaptador de canal e adicionar Instagram Direct (premium) |
 | 7. Inbox | Central de atendimento (assumir conversa, notas, handoff humano na prática) |
 | 8. Dashboard | Métricas (taxa de resolução por IA, reservas, etc.) |

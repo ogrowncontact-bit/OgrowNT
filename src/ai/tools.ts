@@ -1,5 +1,5 @@
 import type Anthropic from "@anthropic-ai/sdk";
-import { KnowledgeCategory } from "@prisma/client";
+import { KnowledgeCategory, Prisma } from "@prisma/client";
 import { prisma } from "../db";
 import * as booking from "../booking/engine";
 import { BookingConflictError, NotFoundError } from "../booking/errors";
@@ -25,22 +25,26 @@ export function buildToolDefinitions(): Anthropic.Tool[] {
     {
       name: "list_services",
       description:
-        "Lista os servicos ativos oferecidos pela empresa, com id, nome, duracao e preco. Use o id retornado aqui para chamar check_availability ou create_booking.",
+        "Lista os servicos ativos oferecidos pela empresa, com id, nome, duracao, preco e quais perguntas extras (customFields) fazer antes de reservar cada um. Use o id retornado aqui para chamar check_availability ou create_booking.",
       input_schema: { type: "object", properties: {} },
     },
     {
       name: "check_availability",
-      description: "Retorna os proximos horarios livres para um servico especifico.",
+      description:
+        "Retorna os proximos horarios livres para um servico especifico. Informe quantity se o cliente ja disse para quantas pessoas/unidades e (nao pergunte de novo se ja souber).",
       input_schema: {
         type: "object",
-        properties: { serviceId: { type: "string" } },
+        properties: {
+          serviceId: { type: "string" },
+          quantity: { type: "number", description: "Numero de pessoas/unidades. Padrao 1." },
+        },
         required: ["serviceId"],
       },
     },
     {
       name: "create_booking",
       description:
-        "Cria (confirma) um agendamento para o cliente atual num servico e horario especificos. So chame depois que o cliente confirmar explicitamente o horario escolhido.",
+        "Cria (confirma) um agendamento para o cliente atual num servico e horario especificos. So chame depois que o cliente confirmar explicitamente o horario escolhido E depois de coletar as respostas dos customFields obrigatorios desse servico (retornados por list_services), colocando-as em metadata.",
       input_schema: {
         type: "object",
         properties: {
@@ -48,6 +52,12 @@ export function buildToolDefinitions(): Anthropic.Tool[] {
           startsAtIso: {
             type: "string",
             description: "Data/hora ISO 8601 do horario escolhido, exatamente como retornado por check_availability.",
+          },
+          quantity: { type: "number", description: "Numero de pessoas/unidades. Padrao 1." },
+          notes: { type: "string", description: "Observacoes livres do cliente sobre a reserva." },
+          metadata: {
+            type: "object",
+            description: "Respostas dos customFields do servico, no formato { chaveDoCampo: valor }.",
           },
         },
         required: ["serviceId", "startsAtIso"],
@@ -100,8 +110,47 @@ export function buildToolDefinitions(): Anthropic.Tool[] {
   ];
 }
 
+async function logToolCall(
+  ctx: FlowContext,
+  toolName: string,
+  input: Record<string, unknown>,
+  success: boolean
+): Promise<void> {
+  try {
+    await prisma.toolCallLog.create({
+      data: {
+        businessId: ctx.business.id,
+        conversationId: ctx.conversationId,
+        toolName,
+        input: input as Prisma.InputJsonValue,
+        success,
+      },
+    });
+  } catch (err) {
+    // Observabilidade nunca deve derrubar o atendimento - so loga no console.
+    console.error("[ai] falha ao registrar ToolCallLog:", err);
+  }
+}
+
+// Registra toda chamada de ferramenta (nome, input, sucesso) para
+// observabilidade (secao "Tool Execution"). "Sucesso" aqui significa que a
+// ferramenta rodou e devolveu uma resposta (mesmo que a resposta seja um erro
+// de negocio, como horario indisponivel) - so marca falha quando algo
+// realmente inesperado acontece.
 export function createToolExecutor(ctx: FlowContext) {
   return async function executeTool(name: string, input: Record<string, unknown>): Promise<string> {
+    try {
+      const result = await runTool(ctx, name, input);
+      await logToolCall(ctx, name, input, true);
+      return result;
+    } catch (err) {
+      await logToolCall(ctx, name, input, false);
+      throw err;
+    }
+  };
+}
+
+async function runTool(ctx: FlowContext, name: string, input: Record<string, unknown>): Promise<string> {
     try {
       switch (name) {
         case "list_business_info": {
@@ -120,18 +169,31 @@ export function createToolExecutor(ctx: FlowContext) {
           const services = await prisma.service.findMany({
             where: { businessId: ctx.business.id, active: true },
           });
+          const fields = await prisma.customBookingField.findMany({
+            where: { businessId: ctx.business.id },
+          });
           return JSON.stringify(
             services.map((s) => ({
               id: s.id,
               name: s.name,
               durationMinutes: s.durationMinutes,
               price: formatPrice(s.price, ctx.business.currency, ctx.language),
+              customFields: fields
+                .filter((f) => f.serviceId === null || f.serviceId === s.id)
+                .map((f) => ({
+                  key: f.id,
+                  label: f.label,
+                  type: f.fieldType,
+                  options: f.options,
+                  required: f.required,
+                })),
             }))
           );
         }
 
         case "check_availability": {
-          const slots = await booking.getAvailableSlots(ctx.business.id, String(input.serviceId ?? ""));
+          const quantity = typeof input.quantity === "number" ? input.quantity : undefined;
+          const slots = await booking.getAvailableSlots(ctx.business.id, String(input.serviceId ?? ""), { quantity });
           return JSON.stringify(
             slots.map((s) => ({
               startsAtIso: s.start.toISOString(),
@@ -141,11 +203,19 @@ export function createToolExecutor(ctx: FlowContext) {
         }
 
         case "create_booking": {
+          const quantity = typeof input.quantity === "number" ? input.quantity : undefined;
+          const notes = typeof input.notes === "string" ? input.notes : undefined;
+          const metadata =
+            input.metadata && typeof input.metadata === "object" ? (input.metadata as Record<string, unknown>) : undefined;
+
           const created = await booking.createBooking({
             businessId: ctx.business.id,
             customerId: ctx.customer.id,
             serviceId: String(input.serviceId ?? ""),
             startsAt: new Date(String(input.startsAtIso ?? "")),
+            quantity,
+            notes,
+            metadata,
           });
           return JSON.stringify({
             ok: true,
@@ -238,5 +308,4 @@ export function createToolExecutor(ctx: FlowContext) {
       }
       throw err;
     }
-  };
 }

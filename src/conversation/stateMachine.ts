@@ -88,9 +88,25 @@ async function sendServiceList(ctx: FlowContext): Promise<boolean> {
   return true;
 }
 
-async function sendSlotList(ctx: FlowContext, serviceId: string): Promise<boolean> {
+const QUANTITY_OPTIONS = [1, 2, 3, 4, 5, 6, 7, 8];
+
+async function sendQuantityList(ctx: FlowContext): Promise<void> {
   const t = ui(ctx);
-  const slots = await booking.getAvailableSlots(ctx.business.id, serviceId);
+  await outbox.sendList(ctx, {
+    bodyText: t.chooseQuantityBody,
+    buttonText: t.chooseQuantityButton,
+    sections: [
+      {
+        title: t.quantitySectionTitle,
+        rows: QUANTITY_OPTIONS.map((n) => ({ id: String(n), title: t.quantityRowLabel(n) })),
+      },
+    ],
+  });
+}
+
+async function sendSlotList(ctx: FlowContext, serviceId: string, quantity = 1): Promise<boolean> {
+  const t = ui(ctx);
+  const slots = await booking.getAvailableSlots(ctx.business.id, serviceId, { quantity });
   if (slots.length === 0) {
     await outbox.sendText(ctx, t.noSlotsAvailable);
     return false;
@@ -192,9 +208,41 @@ export async function handleInteractiveReply(
         await backToMenu(ctx, conversation.id);
         return;
       }
+
+      // Servicos ligados a um Resource (ex: mesa com capacidade) precisam
+      // saber a quantidade antes de calcular disponibilidade; servicos sem
+      // recurso pulam direto para os horarios, como nas fases anteriores.
+      if (service.requiresResourceType) {
+        await sendQuantityList(ctx);
+        await setConversationState(conversation.id, STEP.CHOOSING_QUANTITY, { serviceId: service.id });
+        return;
+      }
+
       const ok = await sendSlotList(ctx, service.id);
       if (ok) {
         await setConversationState(conversation.id, STEP.CHOOSING_SLOT, { serviceId: service.id });
+      } else {
+        await backToMenu(ctx, conversation.id);
+      }
+      return;
+    }
+
+    case STEP.CHOOSING_QUANTITY: {
+      if (!data.serviceId) {
+        await backToMenu(ctx, conversation.id);
+        return;
+      }
+      const quantity = Number(replyId);
+      if (!Number.isInteger(quantity) || quantity < 1) {
+        await backToMenu(ctx, conversation.id);
+        return;
+      }
+      const ok = await sendSlotList(ctx, data.serviceId, quantity);
+      if (ok) {
+        await setConversationState(conversation.id, STEP.CHOOSING_SLOT, {
+          serviceId: data.serviceId,
+          quantity: String(quantity),
+        });
       } else {
         await backToMenu(ctx, conversation.id);
       }
@@ -221,6 +269,7 @@ export async function handleInteractiveReply(
         ]
       );
       await setConversationState(conversation.id, STEP.CONFIRMING, {
+        quantity: data.quantity,
         serviceId: service.id,
         startsAt: startsAt.toISOString(),
       });
@@ -235,12 +284,14 @@ export async function handleInteractiveReply(
       }
 
       if (replyId === REPLY.CONFIRM_YES) {
+        const quantity = data.quantity ? Number(data.quantity) : undefined;
         try {
           const created = await booking.createBooking({
             businessId: ctx.business.id,
             customerId: ctx.customer.id,
             serviceId: data.serviceId,
             startsAt: new Date(data.startsAt),
+            quantity,
           });
           await outbox.sendText(
             ctx,
@@ -250,9 +301,12 @@ export async function handleInteractiveReply(
         } catch (err) {
           if (err instanceof BookingConflictError) {
             await outbox.sendText(ctx, t.slotTaken);
-            const ok = await sendSlotList(ctx, data.serviceId);
+            const ok = await sendSlotList(ctx, data.serviceId, quantity ?? 1);
             if (ok) {
-              await setConversationState(conversation.id, STEP.CHOOSING_SLOT, { serviceId: data.serviceId });
+              await setConversationState(conversation.id, STEP.CHOOSING_SLOT, {
+                serviceId: data.serviceId,
+                quantity: data.quantity,
+              });
             } else {
               await backToMenu(ctx, conversation.id);
             }
@@ -285,6 +339,7 @@ export async function handleInteractiveReply(
       await setConversationState(conversation.id, STEP.BOOKING_ACTION, {
         bookingId: target.id,
         serviceId: target.serviceId,
+        quantity: String(target.quantity),
       });
       return;
     }
@@ -303,7 +358,7 @@ export async function handleInteractiveReply(
       }
 
       if (replyId === REPLY.ACTION_RESCHEDULE && data.serviceId) {
-        const ok = await sendSlotList(ctx, data.serviceId);
+        const ok = await sendSlotList(ctx, data.serviceId, data.quantity ? Number(data.quantity) : 1);
         if (ok) {
           await setConversationState(conversation.id, STEP.CHOOSING_RESCHEDULE_SLOT, {
             bookingId: data.bookingId,

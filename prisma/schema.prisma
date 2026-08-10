@@ -100,6 +100,9 @@ model Business {
   agent            Agent?
   knowledgeEntries KnowledgeEntry[]
   businessRules    BusinessRule[]
+  resources        Resource[]
+  customFields     CustomBookingField[]
+  toolCallLogs     ToolCallLog[]
 }
 
 // Identidade/voz do "funcionario digital" da empresa - como ele fala, nao o
@@ -204,9 +207,68 @@ model Service {
   // Campos especificos do nicho (ex: experienceLevel, minAge, skillLevel) -
   // ver src/templates/registry.ts.
   metadata        Json     @default("{}")
+  // Tipo de Resource necessario para este servico (ex: "horse", "table",
+  // "room") - null (padrao) = agenda compartilhada da empresa, sem recurso
+  // dedicado, comportamento identico as fases anteriores. Quando definido, o
+  // motor de reservas (src/booking/engine.ts) so oferece um horario se
+  // houver pelo menos um Resource desse tipo livre e com capacidade
+  // suficiente.
+  requiresResourceType String?
   createdAt       DateTime @default(now())
 
+  bookings     Booking[]
+  customFields CustomBookingField[]
+
+  @@index([businessId])
+}
+
+// Recurso escasso necessario para realizar um servico - universal entre
+// nichos (cavalo/instrutor/arena na hipica, mesa/sala no restaurante,
+// quarto/cama no hostel, etc). "type" e texto livre (nao enum) porque varia
+// demais entre nichos; Service.requiresResourceType e o que os conecta.
+model Resource {
+  id         String   @id @default(cuid())
+  businessId String
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  type       String
+  name       String
+  // Quantas reservas/pessoas este recurso comporta ao mesmo tempo (ex: mesa
+  // capacidade 4, cavalo capacidade 1).
+  capacity   Int      @default(1)
+  active     Boolean  @default(true)
+  metadata   Json     @default("{}")
+  createdAt  DateTime @default(now())
+
   bookings Booking[]
+
+  @@index([businessId, type])
+}
+
+enum FieldType {
+  TEXT
+  NUMBER
+  BOOLEAN
+  SELECT
+}
+
+// Pergunta especifica que a empresa quer que o agente faca ao reservar um
+// servico (ex: "Qual seu nivel de experiencia?"). serviceId nulo = pergunta
+// vale para qualquer servico da empresa. Consultado pela IA (tool
+// list_services) para saber o que perguntar antes de criar a reserva; as
+// respostas vao em Booking.metadata. O fluxo guiado (botoes) nao coleta
+// campos customizados - fica a cargo da IA, que lida melhor com perguntas
+// abertas.
+model CustomBookingField {
+  id         String    @id @default(cuid())
+  businessId String
+  business   Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  serviceId  String?
+  service    Service?  @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  label      String
+  fieldType  FieldType
+  options    String[]  @default([]) // usado quando fieldType = SELECT
+  required   Boolean   @default(false)
+  createdAt  DateTime  @default(now())
 
   @@index([businessId])
 }
@@ -249,6 +311,12 @@ model Booking {
   customer   Customer      @relation(fields: [customerId], references: [id], onDelete: Cascade)
   serviceId  String
   service    Service       @relation(fields: [serviceId], references: [id])
+  resourceId String?
+  resource   Resource?     @relation(fields: [resourceId], references: [id])
+  quantity   Int           @default(1)
+  notes      String?
+  // Respostas dos CustomBookingField desse servico (ex: {"experienceLevel":"iniciante"}).
+  metadata   Json          @default("{}")
   startsAt   DateTime
   endsAt     DateTime
   status     BookingStatus @default(PENDING)
@@ -259,6 +327,24 @@ model Booking {
 
   @@index([businessId, startsAt])
   @@index([serviceId, startsAt])
+  @@index([resourceId, startsAt])
+}
+
+// Log de observabilidade das chamadas de ferramentas da IA (secao "Tool
+// Execution" / observabilidade). Sem FK para Conversation de proposito (log
+// operacional, nao precisa de integridade referencial forte); guarda so o
+// necessario para depurar - nunca o conteudo completo de mensagens.
+model ToolCallLog {
+  id             String   @id @default(cuid())
+  businessId     String
+  business       Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  conversationId String
+  toolName       String
+  input          Json
+  success        Boolean
+  createdAt      DateTime @default(now())
+
+  @@index([businessId, createdAt])
 }
 
 model ReminderLog {

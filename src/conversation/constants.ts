@@ -2,6 +2,7 @@ export const STEP = {
   IDLE: "idle",
   MENU: "menu",
   CHOOSING_SERVICE: "choosing_service",
+  CHOOSING_QUANTITY: "choosing_quantity",
   CHOOSING_SLOT: "choosing_slot",
   CONFIRMING: "confirming",
   CHOOSING_BOOKING_ACTION: "choosing_booking_action",

@@ -86,7 +86,7 @@ adminRouter.get("/services", async (_req, res) => {
 
 adminRouter.post("/services", requireRole(...WRITE_ROLES), async (req, res) => {
   const business = currentBusiness(res);
-  const { name, durationMinutes, price, active, metadata } = req.body ?? {};
+  const { name, durationMinutes, price, active, metadata, requiresResourceType } = req.body ?? {};
   if (!name || !durationMinutes) {
     res.status(400).json({ error: "name e durationMinutes sao obrigatorios." });
     return;
@@ -99,6 +99,7 @@ adminRouter.post("/services", requireRole(...WRITE_ROLES), async (req, res) => {
       price: price !== undefined && price !== null ? new Prisma.Decimal(price) : null,
       active: active ?? true,
       metadata: (metadata ?? {}) as Prisma.InputJsonValue,
+      requiresResourceType: requiresResourceType ? String(requiresResourceType) : null,
     },
   });
   res.status(201).json(service);
@@ -111,7 +112,7 @@ adminRouter.patch("/services/:id", requireRole(...WRITE_ROLES), async (req, res)
     res.sendStatus(404);
     return;
   }
-  const { name, durationMinutes, price, active, metadata } = req.body ?? {};
+  const { name, durationMinutes, price, active, metadata, requiresResourceType } = req.body ?? {};
   const updated = await prisma.service.update({
     where: { id: existing.id },
     data: {
@@ -120,9 +121,132 @@ adminRouter.patch("/services/:id", requireRole(...WRITE_ROLES), async (req, res)
       ...(price !== undefined ? { price: price === null ? null : new Prisma.Decimal(price) } : {}),
       ...(active !== undefined ? { active: Boolean(active) } : {}),
       ...(metadata !== undefined ? { metadata: metadata as Prisma.InputJsonValue } : {}),
+      ...(requiresResourceType !== undefined
+        ? { requiresResourceType: requiresResourceType === null ? null : String(requiresResourceType) }
+        : {}),
     },
   });
   res.json(updated);
+});
+
+// --- Recursos (cavalo/mesa/quarto/instrutor - ver Resource no schema) ---
+
+adminRouter.get("/resources", async (req, res) => {
+  const business = currentBusiness(res);
+  const type = typeof req.query.type === "string" ? req.query.type : undefined;
+  const resources = await prisma.resource.findMany({
+    where: { businessId: business.id, ...(type ? { type } : {}) },
+    orderBy: { name: "asc" },
+  });
+  res.json(resources);
+});
+
+adminRouter.post("/resources", requireRole(...WRITE_ROLES), async (req, res) => {
+  const business = currentBusiness(res);
+  const { type, name, capacity, active, metadata } = req.body ?? {};
+  if (!type || !name) {
+    res.status(400).json({ error: "type e name sao obrigatorios." });
+    return;
+  }
+  const resource = await prisma.resource.create({
+    data: {
+      businessId: business.id,
+      type: String(type),
+      name: String(name),
+      capacity: capacity !== undefined ? Number(capacity) : 1,
+      active: active ?? true,
+      metadata: (metadata ?? {}) as Prisma.InputJsonValue,
+    },
+  });
+  res.status(201).json(resource);
+});
+
+adminRouter.patch("/resources/:id", requireRole(...WRITE_ROLES), async (req, res) => {
+  const business = currentBusiness(res);
+  const existing = await prisma.resource.findFirst({ where: { id: req.params.id, businessId: business.id } });
+  if (!existing) {
+    res.sendStatus(404);
+    return;
+  }
+  const { type, name, capacity, active, metadata } = req.body ?? {};
+  const updated = await prisma.resource.update({
+    where: { id: existing.id },
+    data: {
+      ...(type !== undefined ? { type: String(type) } : {}),
+      ...(name !== undefined ? { name: String(name) } : {}),
+      ...(capacity !== undefined ? { capacity: Number(capacity) } : {}),
+      ...(active !== undefined ? { active: Boolean(active) } : {}),
+      ...(metadata !== undefined ? { metadata: metadata as Prisma.InputJsonValue } : {}),
+    },
+  });
+  res.json(updated);
+});
+
+adminRouter.delete("/resources/:id", requireRole(...WRITE_ROLES), async (req, res) => {
+  const business = currentBusiness(res);
+  const existing = await prisma.resource.findFirst({ where: { id: req.params.id, businessId: business.id } });
+  if (!existing) {
+    res.sendStatus(404);
+    return;
+  }
+  await prisma.resource.delete({ where: { id: existing.id } });
+  res.sendStatus(204);
+});
+
+// --- Campos de reserva customizados (ver CustomBookingField no schema) ---
+
+const FIELD_TYPES = ["TEXT", "NUMBER", "BOOLEAN", "SELECT"];
+
+adminRouter.get("/custom-fields", async (req, res) => {
+  const business = currentBusiness(res);
+  const serviceId = typeof req.query.serviceId === "string" ? req.query.serviceId : undefined;
+  const fields = await prisma.customBookingField.findMany({
+    where: { businessId: business.id, ...(serviceId ? { serviceId } : {}) },
+    orderBy: { createdAt: "asc" },
+  });
+  res.json(fields);
+});
+
+adminRouter.post("/custom-fields", requireRole(...WRITE_ROLES), async (req, res) => {
+  const business = currentBusiness(res);
+  const { serviceId, label, fieldType, options, required } = req.body ?? {};
+
+  if (!label || !fieldType || !FIELD_TYPES.includes(fieldType)) {
+    res.status(400).json({ error: `label obrigatorio e fieldType deve ser um de: ${FIELD_TYPES.join(", ")}` });
+    return;
+  }
+  if (serviceId) {
+    const service = await prisma.service.findFirst({ where: { id: serviceId, businessId: business.id } });
+    if (!service) {
+      res.status(404).json({ error: "serviceId nao encontrado nesta empresa." });
+      return;
+    }
+  }
+
+  const field = await prisma.customBookingField.create({
+    data: {
+      businessId: business.id,
+      serviceId: serviceId ?? null,
+      label: String(label),
+      fieldType,
+      options: Array.isArray(options) ? options.map(String) : [],
+      required: Boolean(required),
+    },
+  });
+  res.status(201).json(field);
+});
+
+adminRouter.delete("/custom-fields/:id", requireRole(...WRITE_ROLES), async (req, res) => {
+  const business = currentBusiness(res);
+  const existing = await prisma.customBookingField.findFirst({
+    where: { id: req.params.id, businessId: business.id },
+  });
+  if (!existing) {
+    res.sendStatus(404);
+    return;
+  }
+  await prisma.customBookingField.delete({ where: { id: existing.id } });
+  res.sendStatus(204);
 });
 
 adminRouter.get("/business-hours", async (_req, res) => {

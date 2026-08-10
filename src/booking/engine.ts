@@ -1,4 +1,4 @@
-import { Prisma, type Booking } from "@prisma/client";
+import { Prisma, type Booking, type Resource } from "@prisma/client";
 import { addDays, addMinutes } from "date-fns";
 import { fromZonedTime, toZonedTime } from "date-fns-tz";
 import { prisma } from "../db";
@@ -9,8 +9,11 @@ import { BookingConflictError, NotFoundError } from "./errors";
 // chamam estas mesmas funcoes, nunca logica duplicada - evita overbooking e
 // divergencia de regras entre os dois caminhos.
 //
-// Simplificacao da Fase 1: uma unica agenda compartilhada por empresa (sem
-// multiplos profissionais/recursos). Multi-staff e evolucao futura.
+// Por padrao (Service.requiresResourceType nulo) a empresa usa uma unica
+// agenda compartilhada, como nas fases anteriores. Quando o servico declara
+// um tipo de recurso (ex: "horse", "table"), a disponibilidade passa a
+// considerar Resource: so oferece um horario se houver pelo menos um recurso
+// desse tipo, com capacidade suficiente, livre naquele intervalo.
 
 export interface Slot {
   start: Date;
@@ -19,10 +22,20 @@ export interface Slot {
 
 const MIN_LEAD_MINUTES = 30; // nao permite agendar em cima da hora atual
 
+async function findQualifyingResources(
+  businessId: string,
+  resourceType: string,
+  quantity: number
+): Promise<Resource[]> {
+  return prisma.resource.findMany({
+    where: { businessId, type: resourceType, active: true, capacity: { gte: quantity } },
+  });
+}
+
 export async function getAvailableSlots(
   businessId: string,
   serviceId: string,
-  opts: { fromDate?: Date; daysAhead?: number; limit?: number } = {}
+  opts: { fromDate?: Date; daysAhead?: number; limit?: number; quantity?: number } = {}
 ): Promise<Slot[]> {
   const business = await prisma.business.findUniqueOrThrow({ where: { id: businessId } });
   const service = await prisma.service.findFirstOrThrow({
@@ -33,9 +46,17 @@ export async function getAvailableSlots(
   const timeZone = business.timezone;
   const daysAhead = opts.daysAhead ?? 7;
   const limit = opts.limit ?? 8;
+  const quantity = opts.quantity ?? 1;
   const now = opts.fromDate ?? new Date();
   const earliestStart = addMinutes(now, MIN_LEAD_MINUTES);
   const windowEnd = addDays(now, daysAhead + 1);
+
+  let qualifyingResourceIds: string[] | null = null;
+  if (service.requiresResourceType) {
+    const resources = await findQualifyingResources(businessId, service.requiresResourceType, quantity);
+    qualifyingResourceIds = resources.map((r) => r.id);
+    if (qualifyingResourceIds.length === 0) return []; // nenhum recurso compativel configurado
+  }
 
   const existingBookings = await prisma.booking.findMany({
     where: {
@@ -43,8 +64,9 @@ export async function getAvailableSlots(
       status: { in: ["PENDING", "CONFIRMED"] },
       startsAt: { lt: windowEnd },
       endsAt: { gt: now },
+      ...(qualifyingResourceIds ? { resourceId: { in: qualifyingResourceIds } } : {}),
     },
-    select: { startsAt: true, endsAt: true },
+    select: { startsAt: true, endsAt: true, resourceId: true },
   });
 
   const slots: Slot[] = [];
@@ -76,9 +98,15 @@ export async function getAvailableSlots(
         const end = addMinutes(start, service.durationMinutes);
 
         if (start >= earliestStart) {
-          const overlaps = existingBookings.some((b) => start < b.endsAt && end > b.startsAt);
-          if (!overlaps) {
-            slots.push({ start, end });
+          if (qualifyingResourceIds) {
+            const busyResourceIds = new Set(
+              existingBookings.filter((b) => start < b.endsAt && end > b.startsAt).map((b) => b.resourceId)
+            );
+            const anyResourceFree = qualifyingResourceIds.some((id) => !busyResourceIds.has(id));
+            if (anyResourceFree) slots.push({ start, end });
+          } else {
+            const overlaps = existingBookings.some((b) => start < b.endsAt && end > b.startsAt);
+            if (!overlaps) slots.push({ start, end });
           }
         }
 
@@ -95,31 +123,73 @@ export async function createBooking(params: {
   customerId: string;
   serviceId: string;
   startsAt: Date;
+  quantity?: number;
+  notes?: string;
+  metadata?: Record<string, unknown>;
 }): Promise<Booking> {
   const service = await prisma.service.findFirstOrThrow({
     where: { id: params.serviceId, businessId: params.businessId, active: true },
   });
   const endsAt = addMinutes(params.startsAt, service.durationMinutes);
+  const quantity = params.quantity ?? 1;
 
   try {
     return await prisma.$transaction(
       async (tx) => {
-        const conflict = await tx.booking.findFirst({
-          where: {
-            businessId: params.businessId,
-            status: { in: ["PENDING", "CONFIRMED"] },
-            startsAt: { lt: endsAt },
-            endsAt: { gt: params.startsAt },
-          },
-        });
-        if (conflict) {
-          throw new BookingConflictError();
+        let resourceId: string | null = null;
+
+        if (service.requiresResourceType) {
+          const candidates = await tx.resource.findMany({
+            where: {
+              businessId: params.businessId,
+              type: service.requiresResourceType,
+              active: true,
+              capacity: { gte: quantity },
+            },
+          });
+          if (candidates.length === 0) {
+            throw new NotFoundError("Nenhum recurso compativel configurado para este servico.");
+          }
+
+          const busy = await tx.booking.findMany({
+            where: {
+              businessId: params.businessId,
+              resourceId: { in: candidates.map((r) => r.id) },
+              status: { in: ["PENDING", "CONFIRMED"] },
+              startsAt: { lt: endsAt },
+              endsAt: { gt: params.startsAt },
+            },
+            select: { resourceId: true },
+          });
+          const busyIds = new Set(busy.map((b) => b.resourceId));
+          const free = candidates.find((r) => !busyIds.has(r.id));
+          if (!free) {
+            throw new BookingConflictError();
+          }
+          resourceId = free.id;
+        } else {
+          const conflict = await tx.booking.findFirst({
+            where: {
+              businessId: params.businessId,
+              status: { in: ["PENDING", "CONFIRMED"] },
+              startsAt: { lt: endsAt },
+              endsAt: { gt: params.startsAt },
+            },
+          });
+          if (conflict) {
+            throw new BookingConflictError();
+          }
         }
+
         return tx.booking.create({
           data: {
             businessId: params.businessId,
             customerId: params.customerId,
             serviceId: params.serviceId,
+            resourceId,
+            quantity,
+            notes: params.notes,
+            metadata: (params.metadata ?? {}) as Prisma.InputJsonValue,
             startsAt: params.startsAt,
             endsAt,
             status: "CONFIRMED",
@@ -163,6 +233,10 @@ export async function rescheduleBooking(
   try {
     return await prisma.$transaction(
       async (tx) => {
+        // Se a reserva ja tem um recurso especifico atribuido, so
+        // verificamos SE ESSE recurso continua livre no novo horario (nao
+        // tentamos trocar de recurso ao remarcar - mantem o comportamento
+        // previsivel; se nao estiver livre, o cliente escolhe outro horario).
         const conflict = await tx.booking.findFirst({
           where: {
             businessId,
@@ -170,6 +244,7 @@ export async function rescheduleBooking(
             status: { in: ["PENDING", "CONFIRMED"] },
             startsAt: { lt: newEndsAt },
             endsAt: { gt: newStartsAt },
+            ...(existing.resourceId ? { resourceId: existing.resourceId } : {}),
           },
         });
         if (conflict) {

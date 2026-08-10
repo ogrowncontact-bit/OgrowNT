@@ -16,6 +16,10 @@ export interface UiStrings {
   chooseServiceBody: string;
   chooseServiceButton: string;
   servicesSectionTitle: string;
+  chooseQuantityBody: string;
+  chooseQuantityButton: string;
+  quantitySectionTitle: string;
+  quantityRowLabel: (n: number) => string;
   noSlotsAvailable: string;
   chooseSlotBody: string;
   chooseSlotButton: string;
@@ -57,6 +61,10 @@ const PT: UiStrings = {
   chooseServiceBody: "Qual servico voce quer agendar?",
   chooseServiceButton: "Escolher servico",
   servicesSectionTitle: "Servicos",
+  chooseQuantityBody: "Para quantas pessoas?",
+  chooseQuantityButton: "Escolher quantidade",
+  quantitySectionTitle: "Quantidade",
+  quantityRowLabel: (n) => (n === 1 ? "1 pessoa" : `${n} pessoas`),
   noSlotsAvailable: "Nao encontrei horarios livres nos proximos dias para esse servico. Quer tentar outro servico ou falar com um atendente?",
   chooseSlotBody: "Escolha um horario:",
   chooseSlotButton: "Ver horarios",
@@ -99,6 +107,10 @@ const EN: UiStrings = {
   chooseServiceBody: "Which service would you like to book?",
   chooseServiceButton: "Choose service",
   servicesSectionTitle: "Services",
+  chooseQuantityBody: "How many people?",
+  chooseQuantityButton: "Choose quantity",
+  quantitySectionTitle: "Quantity",
+  quantityRowLabel: (n) => (n === 1 ? "1 person" : `${n} people`),
   noSlotsAvailable: "I couldn't find any open times for this service in the next few days. Want to try another service or talk to our team?",
   chooseSlotBody: "Choose a time:",
   chooseSlotButton: "See times",
@@ -141,6 +153,10 @@ const ES: UiStrings = {
   chooseServiceBody: "Que servicio te gustaria reservar?",
   chooseServiceButton: "Elegir servicio",
   servicesSectionTitle: "Servicios",
+  chooseQuantityBody: "Para cuantas personas?",
+  chooseQuantityButton: "Elegir cantidad",
+  quantitySectionTitle: "Cantidad",
+  quantityRowLabel: (n) => (n === 1 ? "1 persona" : `${n} personas`),
   noSlotsAvailable: "No encontre horarios libres en los proximos dias para ese servicio. Quieres probar otro servicio o hablar con nuestro equipo?",
   chooseSlotBody: "Elige un horario:",
   chooseSlotButton: "Ver horarios",
