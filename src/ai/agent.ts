@@ -3,27 +3,18 @@ import { config } from "../config";
 import { prisma } from "../db";
 import * as outbox from "../conversation/outbox";
 import type { FlowContext } from "../conversation/types";
+import { buildSystemPrompt, getAgent } from "./identity";
 import { buildToolDefinitions, createToolExecutor } from "./tools";
 
 // Camada de IA hibrida: cuida de qualquer mensagem em texto livre que nao
 // bate com um passo esperado do fluxo guiado (perguntas, pedidos fora do
 // padrao). Usa as mesmas ferramentas do motor de reservas via tool-use, para
 // que a IA nunca invente horarios/precos e nunca crie um agendamento
-// divergente do que o fluxo guiado permitiria.
+// divergente do que o fluxo guiado permitiria. O prompt em si (identidade,
+// regras) vem de src/ai/identity.ts - configuravel por empresa.
 
 const MAX_TOOL_ITERATIONS = 6;
 const HISTORY_MESSAGES = 12;
-
-function buildSystemPrompt(ctx: FlowContext): string {
-  return [
-    `Voce e o atendente virtual da empresa "${ctx.business.name}", respondendo pelo WhatsApp como um funcionario de verdade.`,
-    "Seja educado, direto e breve (estilo mensagem de WhatsApp, sem formalidade excessiva).",
-    "NUNCA invente horarios, precos ou servicos - sempre use as ferramentas disponiveis para consultar dados reais antes de responder.",
-    "So chame create_booking depois que o cliente disser claramente que quer aquele horario especifico.",
-    "Se o cliente pedir para falar com uma pessoa, ou se voce nao tiver certeza de como ajudar, use a ferramenta request_human.",
-    "Responda sempre no mesmo idioma que o cliente estiver usando.",
-  ].join(" ");
-}
 
 export async function runAiAgent(ctx: FlowContext): Promise<void> {
   if (!config.anthropic.apiKey) {
@@ -36,6 +27,8 @@ export async function runAiAgent(ctx: FlowContext): Promise<void> {
   }
 
   const anthropic = new Anthropic({ apiKey: config.anthropic.apiKey });
+  const agent = await getAgent(ctx.business.id);
+  const systemPrompt = await buildSystemPrompt(ctx.business, agent);
 
   const history = await prisma.message.findMany({
     where: { conversationId: ctx.conversationId },
@@ -56,7 +49,7 @@ export async function runAiAgent(ctx: FlowContext): Promise<void> {
     const response = await anthropic.messages.create({
       model: config.anthropic.model,
       max_tokens: 1024,
-      system: buildSystemPrompt(ctx),
+      system: systemPrompt,
       tools,
       messages,
     });

@@ -1,4 +1,5 @@
 import { Prisma, type Conversation } from "@prisma/client";
+import { buildGreeting, getAgent } from "../ai/identity";
 import { prisma } from "../db";
 import * as booking from "../booking/engine";
 import { BookingConflictError } from "../booking/errors";
@@ -25,8 +26,9 @@ async function setConversationState(
 }
 
 export async function sendMainMenu(ctx: FlowContext): Promise<void> {
+  const agent = await getAgent(ctx.business.id);
   await outbox.sendList(ctx, {
-    bodyText: `Ola! Aqui e o assistente virtual da ${ctx.business.name}. Como posso ajudar?`,
+    bodyText: buildGreeting(ctx.business, agent),
     buttonText: "Ver opcoes",
     sections: [
       {

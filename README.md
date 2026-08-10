@@ -154,6 +154,46 @@ curl -X POST http://localhost:3000/api/businesses/<businessId>/services \
         "metadata": { "experienceLevel": "iniciante", "minAge": 8 } }'
 ```
 
+## Agent Core (identidade, conhecimento e regras)
+
+O "funcionário digital" de cada empresa tem três camadas independentes, montadas em
+`src/ai/identity.ts` e consultadas por `src/ai/agent.ts` (e a saudação do fluxo guiado,
+em `src/conversation/stateMachine.ts`):
+
+- **Identidade** (`Agent`) - como ele fala: nome, tom (`FRIENDLY`/`PROFESSIONAL`/
+  `CASUAL`/`PREMIUM`), formalidade, uso de emojis, saudação e instruções extras.
+- **Conhecimento** (`KnowledgeEntry`) - o que ele sabe: FAQ, políticas, localização,
+  regras, etc, por categoria. Consultado sob demanda pela IA via tool (`search_knowledge`)
+  - nunca despejado inteiro no prompt, e a IA nunca inventa o que não está aqui.
+- **Regras de negócio** (`BusinessRule`) - o que ele pode/não pode fazer (ex: "não
+  aceitamos grupos maiores que 10 pessoas") - injetadas no prompt com prioridade sobre o
+  tom de conversa.
+
+```bash
+# Configura a identidade do agente
+curl -X PUT http://localhost:3000/api/businesses/<businessId>/agent \
+  -H "Authorization: Bearer <token>" -H "Content-Type: application/json" \
+  -d '{ "name": "Luna", "tone": "FRIENDLY", "formality": "CASUAL", "emojiUsage": "MEDIUM" }'
+# valores aceitos: tone FRIENDLY|PROFESSIONAL|CASUAL|PREMIUM,
+# formality FORMAL|NEUTRAL|CASUAL, emojiUsage NONE|LOW|MEDIUM|HIGH
+
+# Adiciona conhecimento (a IA so usa o que estiver aqui - nunca inventa)
+curl -X POST http://localhost:3000/api/businesses/<businessId>/knowledge \
+  -H "Authorization: Bearer <token>" -H "Content-Type: application/json" \
+  -d '{ "category": "POLICIES", "title": "Cancelamento",
+        "content": "Cancelamentos devem ser feitos com 24h de antecedencia." }'
+# categorias: COMPANY, SERVICES, PRICING, FAQ, POLICIES, LOCATION, RULES, DOCUMENTS
+
+# Adiciona uma regra de negocio (guardrail consultado pela IA)
+curl -X POST http://localhost:3000/api/businesses/<businessId>/rules \
+  -H "Authorization: Bearer <token>" -H "Content-Type: application/json" \
+  -d '{ "description": "Menores de 12 anos precisam estar acompanhados de um adulto." }'
+```
+
+Com `Luna`/`FRIENDLY`/`MEDIUM` configurados, o menu inicial do WhatsApp passa a começar
+com "Olá! Eu sou Luna, assistente virtual da <empresa>. 😊" em vez do texto genérico -
+e a mesma identidade guia o tom das respostas livres do agente de IA.
+
 ## Conectando um número real de WhatsApp
 
 1. Crie um app em [developers.facebook.com](https://developers.facebook.com) do tipo
@@ -192,14 +232,13 @@ mensagem pré-preenchida.
 ## Roadmap (o que ainda não está implementado)
 
 A plataforma é construída em 10 fases sobre o mesmo core universal (nenhum nicho tem
-código próprio - só configuração). Implementado até agora: **Fase 1 (Fundação)** -
-autenticação, usuários, papéis, isolamento multi-tenant, seleção de nicho - e **Fase 2
-(Business Setup)** - template por nicho, checklist de onboarding, quick-start e perfil
-da empresa - por cima do motor de reservas/WhatsApp/IA da rodada anterior.
+código próprio - só configuração). Implementado até agora: **Fase 1 (Fundação)**
+(autenticação, usuários, papéis, isolamento multi-tenant, seleção de nicho), **Fase 2
+(Business Setup)** (template por nicho, onboarding, perfil da empresa) e **Fase 3
+(Agent Core)** (identidade/voz configurável, Knowledge Base, regras de negócio).
 
 | Fase | Conteúdo |
 | --- | --- |
-| 3. Agent Core | Identidade/voz do agente configurável, Knowledge Base, regras de negócio |
 | 4. Conversation Engine | Detecção automática de idioma, contexto entre mensagens |
 | 5. Tools | `Resource` (cavalo/mesa/quarto/instrutor), campos de reserva customizados |
 | 6. Channels | Formalizar adaptador de canal e adicionar Instagram Direct (premium) |

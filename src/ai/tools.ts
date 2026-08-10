@@ -1,4 +1,5 @@
 import type Anthropic from "@anthropic-ai/sdk";
+import { KnowledgeCategory } from "@prisma/client";
 import { prisma } from "../db";
 import * as booking from "../booking/engine";
 import { BookingConflictError, NotFoundError } from "../booking/errors";
@@ -11,6 +12,7 @@ import type { FlowContext } from "../conversation/types";
 // agente so consegue ler/agir dentro do tenant e do cliente da conversa atual.
 
 const WEEKDAY_NAMES = ["Domingo", "Segunda", "Terca", "Quarta", "Quinta", "Sexta", "Sabado"];
+const KNOWLEDGE_CATEGORIES = Object.values(KnowledgeCategory);
 
 export function buildToolDefinitions(): Anthropic.Tool[] {
   return [
@@ -82,6 +84,18 @@ export function buildToolDefinitions(): Anthropic.Tool[] {
       description:
         "Encaminha a conversa para um atendente humano e para as respostas automaticas do bot. Use quando o cliente pedir explicitamente para falar com uma pessoa, ou quando voce nao conseguir ajudar com seguranca.",
       input_schema: { type: "object", properties: {} },
+    },
+    {
+      name: "search_knowledge",
+      description:
+        "Busca na base de conhecimento da empresa (politicas, FAQ, localizacao, regras, documentos, etc). Use antes de responder qualquer pergunta sobre a empresa que voce nao tenha certeza absoluta - nunca invente politicas ou informacoes.",
+      input_schema: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "Palavras-chave para buscar, ex: 'cancelamento', 'animais de estimacao'." },
+          category: { type: "string", enum: KNOWLEDGE_CATEGORIES, description: "Filtra por categoria, se souber qual." },
+        },
+      },
     },
   ];
 }
@@ -178,6 +192,41 @@ export function createToolExecutor(ctx: FlowContext) {
             data: { needsHuman: true },
           });
           return JSON.stringify({ ok: true });
+        }
+
+        case "search_knowledge": {
+          const query = typeof input.query === "string" ? input.query.trim() : "";
+          const categoryInput = typeof input.category === "string" ? input.category : undefined;
+          const category = KNOWLEDGE_CATEGORIES.includes(categoryInput as KnowledgeCategory)
+            ? (categoryInput as KnowledgeCategory)
+            : undefined;
+
+          const entries = await prisma.knowledgeEntry.findMany({
+            where: {
+              businessId: ctx.business.id,
+              ...(category ? { category } : {}),
+              ...(query
+                ? {
+                    OR: [
+                      { title: { contains: query, mode: "insensitive" } },
+                      { content: { contains: query, mode: "insensitive" } },
+                    ],
+                  }
+                : {}),
+            },
+            take: 5,
+          });
+
+          if (entries.length === 0) {
+            return JSON.stringify({
+              found: false,
+              message: "Nenhuma informacao encontrada na base de conhecimento para essa busca.",
+            });
+          }
+          return JSON.stringify({
+            found: true,
+            entries: entries.map((e) => ({ category: e.category, title: e.title, content: e.content })),
+          });
         }
 
         default:

@@ -40,6 +40,37 @@ enum Role {
   STAFF
 }
 
+enum AgentTone {
+  FRIENDLY
+  PROFESSIONAL
+  CASUAL
+  PREMIUM
+}
+
+enum Formality {
+  FORMAL
+  NEUTRAL
+  CASUAL
+}
+
+enum EmojiUsage {
+  NONE
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum KnowledgeCategory {
+  COMPANY
+  SERVICES
+  PRICING
+  FAQ
+  POLICIES
+  LOCATION
+  RULES
+  DOCUMENTS
+}
+
 model Business {
   id          String           @id @default(cuid())
   name        String
@@ -55,13 +86,67 @@ model Business {
   createdAt   DateTime         @default(now())
   updatedAt   DateTime         @updatedAt
 
-  memberships     Membership[]
-  whatsAppAccount WhatsAppAccount?
-  services        Service[]
-  businessHours   BusinessHours[]
-  customers       Customer[]
-  bookings        Booking[]
-  conversations   Conversation[]
+  memberships      Membership[]
+  whatsAppAccount  WhatsAppAccount?
+  services         Service[]
+  businessHours    BusinessHours[]
+  customers        Customer[]
+  bookings         Booking[]
+  conversations    Conversation[]
+  agent            Agent?
+  knowledgeEntries KnowledgeEntry[]
+  businessRules    BusinessRule[]
+}
+
+// Identidade/voz do "funcionario digital" da empresa - como ele fala, nao o
+// que ele sabe (isso e KnowledgeEntry) nem o que pode fazer (isso sao as
+// tools em src/ai/tools.ts). Um agente por empresa no MVP.
+model Agent {
+  id              String     @id @default(cuid())
+  businessId      String     @unique
+  business        Business   @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  name            String     @default("Assistente")
+  tone            AgentTone  @default(FRIENDLY)
+  formality       Formality  @default(NEUTRAL)
+  emojiUsage      EmojiUsage @default(LOW)
+  greetingMessage String?
+  // Instrucoes extras em linguagem natural definidas pela empresa (exibido
+  // no futuro dashboard como "Comportamento do agente", nao "system prompt").
+  instructions    String?
+  active          Boolean    @default(true)
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+}
+
+// Base de conhecimento consultada pelo agente via tool (search_knowledge) -
+// nunca injetada por inteiro no prompt. Regra de ouro: o agente NAO inventa
+// informacao que nao esta aqui.
+model KnowledgeEntry {
+  id         String            @id @default(cuid())
+  businessId String
+  business   Business          @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  category   KnowledgeCategory
+  title      String
+  content    String
+  language   String            @default("pt")
+  createdAt  DateTime          @default(now())
+  updatedAt  DateTime          @updatedAt
+
+  @@index([businessId, category])
+}
+
+// Regras de negocio em linguagem natural (ex: "nao aceitamos grupos maiores
+// que 10 pessoas") - injetadas no system prompt do agente, acima da
+// identidade, para que tenham prioridade sobre o "tom" da conversa.
+model BusinessRule {
+  id          String   @id @default(cuid())
+  businessId  String
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  description String
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  @@index([businessId])
 }
 
 // Usuario humano que faz login no painel/API de administracao (dono/equipe da
