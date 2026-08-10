@@ -23,6 +23,16 @@ enum MessageDirection {
   OUT
 }
 
+// Quem efetivamente escreveu a mensagem OUT (o cliente so gera CUSTOMER).
+// Separado de MessageDirection porque uma mensagem OUT tanto pode vir do
+// agente de IA quanto de um humano que assumiu a conversa no Inbox (Fase 7).
+enum MessageSender {
+  CUSTOMER
+  AGENT
+  HUMAN
+  SYSTEM
+}
+
 // Nicho do negocio - determina qual template de configuracao/onboarding e
 // exibido, mas o core (booking, conversas, etc) e o mesmo para todos.
 enum BusinessIndustry {
@@ -174,7 +184,9 @@ model User {
   name         String
   createdAt    DateTime @default(now())
 
-  memberships Membership[]
+  memberships           Membership[]
+  assignedConversations Conversation[]
+  conversationNotes     ConversationNote[]
 }
 
 // Vinculo de um User a um Business com um papel - garante isolamento
@@ -377,11 +389,16 @@ model Conversation {
   data         Json     @default("{}")
   needsHuman   Boolean  @default(false)
   channel      ChannelType @default(WHATSAPP)
+  // Funcionario que "assumiu" a conversa no Inbox (ver Fase 7) - null =
+  // ninguem assumiu ainda, qualquer membro da equipe pode responder.
+  assignedToUserId String?
+  assignedTo       User?   @relation(fields: [assignedToUserId], references: [id])
   // Idioma (ISO 639-1) detectado na ultima mensagem de texto do cliente.
   detectedLanguage String?
   lastMessageAt DateTime @default(now())
 
   messages Message[]
+  notes    ConversationNote[]
 
   @@unique([businessId, customerId])
 }
@@ -391,9 +408,25 @@ model Message {
   conversationId    String
   conversation      Conversation      @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   direction         MessageDirection
+  sender            MessageSender     @default(CUSTOMER)
   content           String
   whatsAppMessageId String?
   createdAt         DateTime          @default(now())
 
   @@index([conversationId, createdAt])
+}
+
+// Nota interna da equipe numa conversa (visivel so no Inbox, nunca enviada
+// ao cliente) - para contexto entre atendentes (ex: "cliente e alergico a
+// amendoim", "ja ligamos, aguardando retorno").
+model ConversationNote {
+  id             String       @id @default(cuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  userId         String
+  user           User         @relation(fields: [userId], references: [id])
+  content        String
+  createdAt      DateTime     @default(now())
+
+  @@index([conversationId])
 }

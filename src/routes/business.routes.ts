@@ -32,6 +32,22 @@ businessRouter.get(
   })
 );
 
+// Lista os membros (equipe) da empresa - usado pelo Inbox (Fase 7) para
+// preencher o seletor de "atribuir conversa a".
+businessRouter.get(
+  "/:businessId/members",
+  requireMembership,
+  asyncHandler(async (req, res) => {
+    const business = currentBusiness(res);
+    const memberships = await prisma.membership.findMany({
+      where: { businessId: business.id },
+      include: { user: { select: { id: true, name: true, email: true } } },
+      orderBy: { createdAt: "asc" },
+    });
+    res.json(memberships.map((m) => ({ userId: m.user.id, name: m.user.name, email: m.user.email, role: m.role })));
+  })
+);
+
 // Adiciona um usuario JA CADASTRADO como membro da empresa com um papel.
 // Sem convite por e-mail nesta fase - fora do escopo da Fundacao.
 businessRouter.post(

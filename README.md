@@ -59,6 +59,8 @@ Preencha o `.env`:
 - `WHATSAPP_APP_SECRET` e `WHATSAPP_WEBHOOK_VERIFY_TOKEN`: ver seção "Conectando um número
   real de WhatsApp" abaixo (para rodar só localmente sem número real, qualquer valor serve)
 - `ANTHROPIC_API_KEY`: sua chave da Anthropic (opcional em dev)
+- `CORS_ORIGINS`: origens do dashboard (`web/`) autorizadas a chamar a API pelo navegador,
+  separadas por vírgula (ex: `http://localhost:3001` em dev)
 
 Depois:
 
@@ -319,6 +321,52 @@ desta versão), basta trocar o stub por uma implementação real do mesmo contra
 Sem dependências, funciona em qualquer site - abre uma conversa de WhatsApp já com uma
 mensagem pré-preenchida.
 
+## Inbox (dashboard web, `web/`)
+
+Aplicação Next.js separada (irmã do backend, não um monorepo) que consome a mesma API
+REST autenticada por JWT - é a central de atendimento humano por cima da mesma conversa
+que o bot usa.
+
+```bash
+cd web
+npm install
+cp .env.local.example .env.local   # ajuste NEXT_PUBLIC_API_BASE_URL se necessário
+npm run dev                          # sobe em http://localhost:3001 (ou a próxima porta livre)
+```
+
+Fluxo:
+
+1. Login (`/login`) com a mesma conta criada via `POST /api/auth/register` - o JWT fica
+   em `localStorage` e é anexado como `Authorization: Bearer` em toda chamada.
+2. Inbox (`/inbox`, 3 colunas):
+   - **Conversas**: lista com filtro "precisam de atendimento" vs "todas" (polling a
+     cada 6s).
+   - **Conversa**: histórico completo (cliente/bot/atendente diferenciados por cor),
+     caixa de resposta manual (grava como `sender: HUMAN`, passa pelo mesmo
+     `ChannelAdapter`/`outbox.ts` do bot), botão para assumir a conversa (pausa o bot,
+     `needsHuman: true`) ou devolvê-la (`resolve`).
+   - **Detalhes**: dados do cliente, atribuição da conversa a um membro da equipe, e
+     notas internas (nunca enviadas ao cliente).
+
+Sem WebSocket: as atualizações usam polling simples (a cada 4-6s) - suficiente para uma
+central de atendimento com poucos atendentes simultâneos, sem a complexidade de
+infraestrutura em tempo real. Se um número de WhatsApp real não estiver conectado à
+empresa, a resposta manual retorna `501` com uma mensagem clara em vez de fingir que foi
+enviada (mesmo princípio dos stubs de canal, ver seção acima).
+
+Novos endpoints no backend (`src/routes/inbox.routes.ts`, montados em
+`/api/businesses/:businessId`):
+
+| Rota | O que faz |
+| --- | --- |
+| `GET /conversations/:id` | Detalhe completo (mensagens, cliente, atribuição, notas) |
+| `POST /conversations/:id/messages` | Resposta manual do atendente (`sender: HUMAN`) |
+| `POST /conversations/:id/assign` | Atribui/desatribui a conversa a um membro da equipe |
+| `POST /conversations/:id/handoff` | Marca `needsHuman: true` (pausa o bot) |
+| `POST /conversations/:id/resolve` | Devolve a conversa ao bot (já existia) |
+| `POST /conversations/:id/notes` | Adiciona uma nota interna |
+| `GET /members` | Lista a equipe da empresa (para o seletor de atribuição) |
+
 ## Roadmap (o que ainda não está implementado)
 
 A plataforma é construída em 10 fases sobre o mesmo core universal (nenhum nicho tem
@@ -330,11 +378,12 @@ código próprio - só configuração). Implementado até agora: **Fase 1 (Funda
 totalmente traduzidos, formatação de data/moeda por locale), **Fase 5 (Tools)**
 (`Resource` com capacidade, campos de reserva customizados, observabilidade de tools) e
 **Fase 6 (Channels)** (`ChannelAdapter` formalizado, WhatsApp real + Instagram como stub
-honesto preparado para a integração futura).
+honesto preparado para a integração futura) e **Fase 7 (Inbox)** (dashboard Next.js
+separado, assumir/devolver conversa, resposta manual, atribuição por membro da equipe,
+notas internas).
 
 | Fase | Conteúdo |
 | --- | --- |
-| 7. Inbox | Central de atendimento (assumir conversa, notas, handoff humano na prática) |
 | 8. Dashboard | Métricas (taxa de resolução por IA, reservas, etc.) |
 | 9. Automations | Confirmação/lembrete/follow-up configuráveis |
 | 10. Billing | Planos, setup fee + primeiro mês grátis |

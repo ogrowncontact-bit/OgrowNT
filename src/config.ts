@@ -14,6 +14,13 @@ export const config = {
   masterEncryptionKey: required("MASTER_ENCRYPTION_KEY"),
   jwtSecret: required("JWT_SECRET"),
   jwtExpiresInSeconds: 60 * 60 * 24 * 7, // 7 dias
+  // Origens do dashboard (Next.js, ver web/) autorizadas a chamar a API a
+  // partir do navegador. Lista separada por virgula; vazio = nenhuma origem
+  // liberada (a API continua acessivel via server-to-server sem CORS).
+  corsOrigins: (process.env.CORS_ORIGINS ?? "")
+    .split(",")
+    .map((o) => o.trim())
+    .filter(Boolean),
   whatsapp: {
     appSecret: process.env.WHATSAPP_APP_SECRET ?? "",
     webhookVerifyToken: process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN ?? "",

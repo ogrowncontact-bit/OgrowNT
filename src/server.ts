@@ -1,4 +1,5 @@
 import path from "node:path";
+import cors from "cors";
 import express, { type NextFunction, type Request, type Response } from "express";
 import { requireAuth } from "./auth/middleware";
 import { config } from "./config";
@@ -8,10 +9,22 @@ import { adminRouter } from "./routes/admin.routes";
 import { agentRouter } from "./routes/agent.routes";
 import { authRouter } from "./routes/auth.routes";
 import { businessRouter } from "./routes/business.routes";
+import { inboxRouter } from "./routes/inbox.routes";
 import { onboardingRouter } from "./routes/onboarding.routes";
 import { webhookRouter } from "./routes/webhook.routes";
 
 const app = express();
+
+// Libera o dashboard (Next.js, ver web/) a chamar /api/* a partir do
+// navegador - so as origens listadas em CORS_ORIGINS (ver src/config.ts).
+// Nao se aplica a /webhooks (server-to-server, Meta nunca envia Origin).
+app.use(
+  "/api",
+  cors({
+    origin: config.corsOrigins.length > 0 ? config.corsOrigins : false,
+    credentials: false,
+  })
+);
 
 app.use(
   "/webhooks",
@@ -32,6 +45,7 @@ app.use("/api/businesses", businessRouter);
 app.use("/api/businesses/:businessId", onboardingRouter);
 app.use("/api/businesses/:businessId", agentRouter);
 app.use("/api/businesses/:businessId", adminRouter);
+app.use("/api/businesses/:businessId", inboxRouter);
 
 app.use("/widget", express.static(path.join(__dirname, "..", "public")));
 

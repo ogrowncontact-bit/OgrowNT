@@ -32,6 +32,7 @@ export async function routeIncomingMessage(
     data: {
       conversationId: conversation.id,
       direction: "IN",
+      sender: "CUSTOMER",
       content: inboundContent,
       whatsAppMessageId: message.waMessageId,
     },
