@@ -12,7 +12,8 @@
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
-    "create-business": "tsx scripts/create-business.ts"
+    "create-business": "tsx scripts/create-business.ts",
+    "mark-subscription-paid": "tsx scripts/mark-subscription-paid.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.1",

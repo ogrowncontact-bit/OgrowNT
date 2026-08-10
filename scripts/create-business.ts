@@ -1,8 +1,12 @@
 import { BusinessIndustry } from "@prisma/client";
+import { addDays } from "date-fns";
 import { hashPassword } from "../src/auth/passwords";
 import { encryptSecret } from "../src/crypto";
 import { prisma } from "../src/db";
 import { slugify } from "../src/slug";
+
+const DEFAULT_PLAN_KEY = "starter";
+const TRIAL_DAYS = 30;
 
 // CLI de bootstrap/ops: cadastra uma empresa (tenant), opcionalmente conecta um
 // numero de WhatsApp, cria dados de demonstracao e (opcionalmente) um dono
@@ -74,6 +78,13 @@ async function main(): Promise<void> {
       { businessId: business.id, trigger: "BOOKING_REMINDER", offsetMinutes: 2 * 60 },
     ],
   });
+
+  const defaultPlan = await prisma.plan.findUnique({ where: { key: DEFAULT_PLAN_KEY } });
+  if (defaultPlan) {
+    await prisma.subscription.create({
+      data: { businessId: business.id, planId: defaultPlan.id, trialEndsAt: addDays(new Date(), TRIAL_DAYS) },
+    });
+  }
 
   const ownerEmail = args["owner-email"] as string | undefined;
   const ownerPassword = args["owner-password"] as string | undefined;

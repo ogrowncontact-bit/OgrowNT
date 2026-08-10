@@ -22,16 +22,20 @@ restaurantes, coffeeshops e hostels - todos rodando sobre o **mesmo core univers
   - Um **agente de IA (Claude)** responde perguntas livres e casos fora do fluxo, usando as
     mesmas funções do motor de reservas via tool-use - nunca inventa horário, preço ou
     serviço, e nunca cria uma reserva com regras diferentes do fluxo guiado.
-- **Lembretes automáticos**: um worker interno varre os agendamentos confirmados e envia
-  lembretes de WhatsApp (24h e 2h antes, por padrão).
+- **Automações configuráveis**: um worker interno varre os agendamentos e envia
+  lembretes (antes) e follow-ups (depois) por WhatsApp - cada empresa liga/desliga e
+  ajusta o offset de cada um (ver seção "Automações" abaixo).
+- **Painel web** (`web/`, Next.js): Inbox para atendimento humano, Dashboard de
+  métricas, tela de Automações e de Assinatura - tudo consumindo a mesma API REST.
+- **Assinatura**: toda empresa nasce com trial de 30 dias; sem processador de pagamento
+  automático ainda (ver seção "Assinatura" abaixo).
 - **Widget para o site**: um `<script>` estático que qualquer empresa cola no próprio site
   para abrir uma conversa de WhatsApp com um clique.
 
 Veja `src/` para a estrutura do código; cada pasta tem um comentário no topo do arquivo
 principal explicando seu papel (`auth/`, `booking/engine.ts`, `conversation/`, `ai/`,
-`whatsapp/`, `reminders/`). O plano completo de arquitetura e as 10 fases do produto
-estão documentados à parte (auditoria, schema alvo, roadmap) - este README cobre o que
-já está implementado.
+`whatsapp/`, `automations/`, `billing/`). O roadmap completo das 10 fases do produto está
+na seção "Roadmap" abaixo.
 
 ## Pré-requisitos
 
@@ -322,11 +326,12 @@ desta versão), basta trocar o stub por uma implementação real do mesmo contra
 Sem dependências, funciona em qualquer site - abre uma conversa de WhatsApp já com uma
 mensagem pré-preenchida.
 
-## Painel web (`web/`) - Inbox e Dashboard
+## Painel web (`web/`) - Inbox, Dashboard, Automações e Assinatura
 
 Aplicação Next.js separada (irmã do backend, não um monorepo) que consome a mesma API
-REST autenticada por JWT - hoje tem duas telas: o **Inbox** (atendimento humano) e o
-**Dashboard** (métricas), com navegação entre as duas no cabeçalho.
+REST autenticada por JWT - hoje tem quatro telas, com navegação entre elas no
+cabeçalho: **Inbox** (atendimento humano), **Dashboard** (métricas), **Automações**
+(lembretes/follow-ups) e **Assinatura** (plano/trial).
 
 ```bash
 cd web
@@ -418,31 +423,63 @@ comportamento anterior.
 | `PATCH /automations/:id` | Ativa/desativa ou ajusta o offset |
 | `DELETE /automations/:id` | Remove |
 
-## Roadmap (o que ainda não está implementado)
+## Assinatura (`/billing`, planos e cobrança)
 
-A plataforma é construída em 10 fases sobre o mesmo core universal (nenhum nicho tem
-código próprio - só configuração). Implementado até agora: **Fase 1 (Fundação)**
-(autenticação, usuários, papéis, isolamento multi-tenant, seleção de nicho), **Fase 2
-(Business Setup)** (template por nicho, onboarding, perfil da empresa), **Fase 3
-(Agent Core)** (identidade/voz configurável, Knowledge Base, regras de negócio),
-**Fase 4 (motor multilíngue)** (detecção automática de idioma, fluxo guiado e IA
-totalmente traduzidos, formatação de data/moeda por locale), **Fase 5 (Tools)**
-(`Resource` com capacidade, campos de reserva customizados, observabilidade de tools) e
-**Fase 6 (Channels)** (`ChannelAdapter` formalizado, WhatsApp real + Instagram como stub
-honesto preparado para a integração futura), **Fase 7 (Inbox)** (dashboard Next.js
-separado, assumir/devolver conversa, resposta manual, atribuição por membro da equipe,
-notas internas), **Fase 8 (Dashboard)** (métricas: taxa de resolução por IA, reservas
-por status, serviços mais reservados, observabilidade de tools) e **Fase 9
-(Automations)** (lembrete/follow-up configuráveis por empresa via `Automation`,
-substituindo os offsets hardcoded).
+`Plan` (tabela de preços, sem valores hardcoded no código - mudar um preço é um
+`UPDATE`, não um deploy) e `Subscription` (uma por empresa, ligando-a a um plano e a um
+estado). Toda empresa nasce com uma `Subscription` em **trial de 30 dias** (o "primeiro
+mês grátis" do MVP) no plano `starter`, `setupFeePaid: false`.
 
-| Fase | Conteúdo |
+**Não há processador de pagamento online integrado nesta versão** - `POST
+/subscription/checkout` é um stub honesto (retorna `501` com uma mensagem clara) em vez
+de fingir cobrar um cartão que não existe. Hoje a taxa de configuração e a mensalidade
+são pagas por fora (Pix/transferência) e confirmadas manualmente pelo time com:
+
+```bash
+npm run mark-subscription-paid -- --slug slug-da-empresa --setup-fee-paid --status ACTIVE
+```
+
+Nenhuma rota bloqueia o uso do produto quando o trial expira ou a taxa não foi paga -
+`Subscription` hoje só *rastreia* o estado comercial; o enforcement (pausar o acesso)
+fica para quando um processador de pagamento real (ex: Stripe) for integrado de verdade.
+
+| Rota | O que faz |
 | --- | --- |
-| 10. Billing | Planos, setup fee + primeiro mês grátis |
+| `GET /api/plans` | Lista os planos ativos (pública, sem autenticação) |
+| `GET /subscription` | Assinatura atual da empresa + plano |
+| `POST /subscription/plan` | Troca de plano (`{ planKey }`, só `OWNER`) |
+| `POST /subscription/checkout` | Stub honesto (`501`) - sem pagamento online ainda |
 
-Outras coisas fora do escopo atual: **conexão self-service do WhatsApp** (Embedded
-Signup - hoje é manual, ver seção acima) e **múltiplos recursos/profissionais por
-empresa** (por enquanto uma única agenda compartilhada; entra na Fase 5 com `Resource`).
+## Roadmap
+
+A plataforma foi construída em 10 fases sobre o mesmo core universal (nenhum nicho tem
+código próprio - só configuração), na ordem pedida originalmente:
+
+1. **Fundação** - autenticação, usuários, papéis, isolamento multi-tenant, seleção de nicho.
+2. **Business Setup** - template por nicho, onboarding, perfil da empresa.
+3. **Agent Core** - identidade/voz configurável, Knowledge Base, regras de negócio.
+4. **Motor multilíngue** - detecção automática de idioma, fluxo guiado e IA totalmente
+   traduzidos, formatação de data/moeda por locale.
+5. **Tools** - `Resource` com capacidade, campos de reserva customizados, observabilidade
+   de tool-use.
+6. **Channels** - `ChannelAdapter` formalizado, WhatsApp real + Instagram como stub
+   honesto preparado para a integração futura.
+7. **Inbox** - dashboard Next.js separado (`web/`), assumir/devolver conversa, resposta
+   manual, atribuição por membro da equipe, notas internas.
+8. **Dashboard** - métricas (taxa de resolução por IA, reservas por status, serviços mais
+   reservados, observabilidade de tools).
+9. **Automations** - lembrete/follow-up configuráveis por empresa via `Automation`,
+   substituindo os offsets hardcoded.
+10. **Billing** - `Plan`/`Subscription`, trial de 30 dias, taxa de configuração; checkout
+    online como stub honesto (sem processador de pagamento real integrado ainda).
+
+Coisas conscientemente fora do escopo desta versão (não fingidas, documentadas em cada
+seção acima): **integração real com Instagram Direct** (stub honesto), **conexão
+self-service do WhatsApp** (Embedded Signup - hoje é manual, ver seção acima),
+**múltiplos recursos/profissionais por empresa além de `Resource`** (agenda simples por
+padrão), **cobrança automática de fato** (checkout é um stub honesto - `501`, não uma
+simulação de pagamento) e **enforcement de plano/trial** (Subscription só rastreia
+estado, nenhuma rota bloqueia acesso ainda).
 
 ## Scripts
 

@@ -9,6 +9,7 @@ import { adminRouter } from "./routes/admin.routes";
 import { agentRouter } from "./routes/agent.routes";
 import { authRouter } from "./routes/auth.routes";
 import { automationsRouter } from "./routes/automations.routes";
+import { billingRouter, plansRouter } from "./routes/billing.routes";
 import { businessRouter } from "./routes/business.routes";
 import { inboxRouter } from "./routes/inbox.routes";
 import { metricsRouter } from "./routes/metrics.routes";
@@ -38,10 +39,12 @@ app.use(
   webhookRouter
 );
 
-// /api/auth e publico (registro/login). Tudo em /api/businesses exige um
-// usuario autenticado (requireAuth); o isolamento por empresa/papel acontece
-// dentro de cada router (requireMembership/requireRole).
+// /api/auth e /api/plans sao publicos (registro/login e tabela de precos).
+// Tudo em /api/businesses exige um usuario autenticado (requireAuth); o
+// isolamento por empresa/papel acontece dentro de cada router
+// (requireMembership/requireRole).
 app.use("/api/auth", express.json(), authRouter);
+app.use("/api/plans", express.json(), plansRouter);
 app.use("/api/businesses", express.json(), requireAuth);
 app.use("/api/businesses", businessRouter);
 app.use("/api/businesses/:businessId", onboardingRouter);
@@ -50,6 +53,7 @@ app.use("/api/businesses/:businessId", adminRouter);
 app.use("/api/businesses/:businessId", inboxRouter);
 app.use("/api/businesses/:businessId", metricsRouter);
 app.use("/api/businesses/:businessId", automationsRouter);
+app.use("/api/businesses/:businessId", billingRouter);
 
 app.use("/widget", express.static(path.join(__dirname, "..", "public")));
 

@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { BusinessIndustry } from "@prisma/client";
+import { addDays } from "date-fns";
 import { Router } from "express";
 import rateLimit from "express-rate-limit";
 import { asyncHandler } from "../asyncHandler";
@@ -14,6 +15,11 @@ import { slugify } from "../slug";
 // a Business (com o nicho escolhido) + a Membership(OWNER) - cobre "criar
 // conta" + "escolher nicho" do fluxo de onboarding.
 export const authRouter = Router();
+
+// Plano padrao e duracao do primeiro mes gratis para quem se cadastra pela
+// API (Fase 10 - ver Plan/Subscription no schema).
+const DEFAULT_PLAN_KEY = "starter";
+const TRIAL_DAYS = 30;
 
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -79,6 +85,17 @@ authRouter.post(
           { businessId: business.id, trigger: "BOOKING_REMINDER", offsetMinutes: 2 * 60 },
         ],
       });
+      // Assinatura em trial (Fase 10) - primeiro mes gratis no plano padrao;
+      // setup fee ainda nao paga (ver src/routes/billing.routes.ts e
+      // scripts/mark-subscription-paid.ts - nao ha checkout automatico).
+      const defaultPlan = await tx.plan.findUnique({ where: { key: DEFAULT_PLAN_KEY } });
+      if (defaultPlan) {
+        await tx.subscription.create({
+          data: { businessId: business.id, planId: defaultPlan.id, trialEndsAt: addDays(new Date(), TRIAL_DAYS) },
+        });
+      } else {
+        logger.warn("auth.register.missing_default_plan", { planKey: DEFAULT_PLAN_KEY });
+      }
       return { user, business };
     });
 

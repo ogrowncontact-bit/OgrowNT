@@ -123,6 +123,7 @@ model Business {
   customFields     CustomBookingField[]
   toolCallLogs     ToolCallLog[]
   automations      Automation[]
+  subscription     Subscription?
 }
 
 // Identidade/voz do "funcionario digital" da empresa - como ele fala, nao o
@@ -464,4 +465,50 @@ model ConversationNote {
   createdAt      DateTime     @default(now())
 
   @@index([conversationId])
+}
+
+// Plano comercial (Fase 10) - tabela configuravel no banco, SEM precos
+// hardcoded no codigo (mudar um preco e um UPDATE, nao um deploy).
+model Plan {
+  id           String   @id @default(cuid())
+  key          String   @unique
+  name         String
+  priceMonthly Decimal  @db.Decimal(10, 2)
+  setupFee     Decimal  @db.Decimal(10, 2) @default(0)
+  currency     String   @default("BRL")
+  // Limites do plano (ex: {"maxBookingsPerMonth": 200}) - informativo por
+  // enquanto; nenhuma rota aplica esses limites ainda (ver README).
+  limits       Json     @default("{}")
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+
+  subscriptions Subscription[]
+}
+
+enum SubscriptionStatus {
+  TRIALING
+  ACTIVE
+  PAST_DUE
+  CANCELED
+}
+
+// Vinculo de uma empresa a um Plan. NAO ha processador de pagamento real
+// integrado nesta versao (ver src/billing/errors.ts e a rota de checkout) -
+// setupFeePaid/status sao alterados manualmente hoje (pelo time, apos
+// receber o pagamento fora do sistema - ver scripts/mark-subscription-paid.ts),
+// nunca fingidos como automaticos.
+model Subscription {
+  id               String             @id @default(cuid())
+  businessId       String             @unique
+  business         Business           @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  planId           String
+  plan             Plan               @relation(fields: [planId], references: [id])
+  status           SubscriptionStatus @default(TRIALING)
+  setupFeePaid     Boolean            @default(false)
+  // Fim do primeiro mes gratis (ver adendo do MVP - "setup fee + primeiro
+  // mes gratis"). Nenhuma rota bloqueia acesso apos essa data ainda.
+  trialEndsAt      DateTime
+  currentPeriodEnd DateTime?
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
 }

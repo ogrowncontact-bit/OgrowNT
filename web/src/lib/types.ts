@@ -102,3 +102,30 @@ export interface Automation {
   createdAt: string;
   updatedAt: string;
 }
+
+export interface Plan {
+  id: string;
+  key: string;
+  name: string;
+  priceMonthly: string;
+  setupFee: string;
+  currency: string;
+  limits: Record<string, unknown>;
+  active: boolean;
+  createdAt: string;
+}
+
+export type SubscriptionStatus = "TRIALING" | "ACTIVE" | "PAST_DUE" | "CANCELED";
+
+export interface Subscription {
+  id: string;
+  businessId: string;
+  planId: string;
+  status: SubscriptionStatus;
+  setupFeePaid: boolean;
+  trialEndsAt: string;
+  currentPeriodEnd: string | null;
+  createdAt: string;
+  updatedAt: string;
+  plan: Plan;
+}
