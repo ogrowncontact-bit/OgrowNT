@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { asyncHandler } from "../asyncHandler";
 import { currentBusiness, requireMembership, requireRole } from "../auth/middleware";
+import { encryptSecret } from "../crypto";
 import { prisma } from "../db";
 import { getIndustryTemplate } from "../templates/registry";
 
@@ -88,5 +89,70 @@ onboardingRouter.post(
           ? "Ja havia servicos e horarios configurados - nada foi alterado."
           : "Configuracao inicial criada. Ajuste precos, duracoes e horarios quando quiser.",
     });
+  })
+);
+
+function whatsAppAccountView(account: {
+  phoneNumberId: string;
+  wabaId: string;
+  verifiedName: string | null;
+  connectedAt: Date;
+}) {
+  return {
+    connected: true,
+    phoneNumberId: account.phoneNumberId,
+    wabaId: account.wabaId,
+    verifiedName: account.verifiedName,
+    connectedAt: account.connectedAt,
+  };
+}
+
+// Le o numero de WhatsApp conectado (sem expor o access token, que fica
+// criptografado no banco - ver src/crypto.ts).
+onboardingRouter.get(
+  "/whatsapp",
+  asyncHandler(async (_req, res) => {
+    const business = currentBusiness(res);
+    const account = await prisma.whatsAppAccount.findUnique({ where: { businessId: business.id } });
+    res.json(account ? whatsAppAccountView(account) : { connected: false });
+  })
+);
+
+// Conecta (ou atualiza) o numero de WhatsApp Business Cloud API da empresa.
+// phoneNumberId, wabaId e accessToken vem do Meta Business Manager - ver
+// guia de deploy. O token e criptografado antes de ir pro banco.
+onboardingRouter.put(
+  "/whatsapp",
+  requireRole(...WRITE_ROLES),
+  asyncHandler(async (req, res) => {
+    const business = currentBusiness(res);
+    const { phoneNumberId, wabaId, accessToken, verifiedName } = req.body ?? {};
+
+    if (!phoneNumberId || !wabaId || !accessToken) {
+      res.status(400).json({ error: "phoneNumberId, wabaId e accessToken sao obrigatorios." });
+      return;
+    }
+
+    const data = {
+      phoneNumberId: String(phoneNumberId),
+      wabaId: String(wabaId),
+      verifiedName: verifiedName ? String(verifiedName) : null,
+      encryptedAccessToken: encryptSecret(String(accessToken)),
+    };
+
+    try {
+      const account = await prisma.whatsAppAccount.upsert({
+        where: { businessId: business.id },
+        update: data,
+        create: { businessId: business.id, ...data },
+      });
+      res.json(whatsAppAccountView(account));
+    } catch (err) {
+      if ((err as { code?: string }).code === "P2002") {
+        res.status(409).json({ error: "Esse numero de WhatsApp ja esta conectado a outra empresa." });
+        return;
+      }
+      throw err;
+    }
   })
 );

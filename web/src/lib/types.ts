@@ -129,3 +129,13 @@ export interface Subscription {
   updatedAt: string;
   plan: Plan;
 }
+
+export type WhatsAppConnection =
+  | { connected: false }
+  | {
+      connected: true;
+      phoneNumberId: string;
+      wabaId: string;
+      verifiedName: string | null;
+      connectedAt: string;
+    };
