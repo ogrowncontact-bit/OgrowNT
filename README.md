@@ -122,6 +122,38 @@ enviar mensagens reais pelo WhatsApp, ele só loga no console o que enviaria - d
 testar o fluxo inteiro (webhook -> conversa -> reserva no banco) sem gastar nada nem
 precisar de um número real.
 
+## Business Setup (onboarding por nicho)
+
+Cada `industry` tem um template (`src/templates/registry.ts`) com serviços sugeridos e
+campos específicos do nicho - o mesmo core (banco, motor de reservas, rotas) atende
+todos; o que muda é só esse template.
+
+```bash
+# Template do nicho da empresa + checklist de configuracao
+curl http://localhost:3000/api/businesses/<businessId>/onboarding -H "Authorization: Bearer <token>"
+
+# Cria servicos de exemplo + horario padrao (seg-sab 09:00-18:00) de uma vez -
+# so preenche o que ainda estiver vazio, seguro de chamar mais de uma vez
+curl -X POST http://localhost:3000/api/businesses/<businessId>/onboarding/quick-start \
+  -H "Authorization: Bearer <token>"
+
+# Edita o perfil da empresa (dados gerais + campos do nicho em "metadata")
+curl -X PATCH http://localhost:3000/api/businesses/<businessId> \
+  -H "Authorization: Bearer <token>" -H "Content-Type: application/json" \
+  -d '{
+    "description": "Passeios a cavalo para todos os niveis, num haras familiar.",
+    "address": "Estrada Rural km 4, Sao Roque - SP",
+    "phone": "+55 11 99999-0000",
+    "metadata": { "arrivalInstructions": "Portao azul, seguir placas ate o estacionamento." }
+  }'
+
+# Servicos tambem aceitam "metadata" com campos do nicho (ver o template)
+curl -X POST http://localhost:3000/api/businesses/<businessId>/services \
+  -H "Authorization: Bearer <token>" -H "Content-Type: application/json" \
+  -d '{ "name": "Passeio a cavalo", "durationMinutes": 60, "price": 80,
+        "metadata": { "experienceLevel": "iniciante", "minAge": 8 } }'
+```
+
 ## Conectando um número real de WhatsApp
 
 1. Crie um app em [developers.facebook.com](https://developers.facebook.com) do tipo
@@ -161,12 +193,12 @@ mensagem pré-preenchida.
 
 A plataforma é construída em 10 fases sobre o mesmo core universal (nenhum nicho tem
 código próprio - só configuração). Implementado até agora: **Fase 1 (Fundação)** -
-autenticação, usuários, papéis, isolamento multi-tenant, seleção de nicho - por cima do
-motor de reservas/WhatsApp/IA da rodada anterior.
+autenticação, usuários, papéis, isolamento multi-tenant, seleção de nicho - e **Fase 2
+(Business Setup)** - template por nicho, checklist de onboarding, quick-start e perfil
+da empresa - por cima do motor de reservas/WhatsApp/IA da rodada anterior.
 
 | Fase | Conteúdo |
 | --- | --- |
-| 2. Business Setup | Onboarding guiado por nicho, campos específicos por template |
 | 3. Agent Core | Identidade/voz do agente configurável, Knowledge Base, regras de negócio |
 | 4. Conversation Engine | Detecção automática de idioma, contexto entre mensagens |
 | 5. Tools | `Resource` (cavalo/mesa/quarto/instrutor), campos de reserva customizados |

@@ -41,13 +41,19 @@ enum Role {
 }
 
 model Business {
-  id        String           @id @default(cuid())
-  name      String
-  slug      String           @unique
-  industry  BusinessIndustry
-  timezone  String           @default("America/Sao_Paulo")
-  createdAt DateTime         @default(now())
-  updatedAt DateTime         @updatedAt
+  id          String           @id @default(cuid())
+  name        String
+  slug        String           @unique
+  industry    BusinessIndustry
+  timezone    String           @default("America/Sao_Paulo")
+  description String?
+  address     String?
+  phone       String?
+  // Campos especificos do nicho que nao justificam uma coluna propria (ver
+  // src/templates/registry.ts para o que cada industry costuma usar aqui).
+  metadata    Json             @default("{}")
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
 
   memberships     Membership[]
   whatsAppAccount WhatsAppAccount?
@@ -106,6 +112,9 @@ model Service {
   durationMinutes Int
   price           Decimal? @db.Decimal(10, 2)
   active          Boolean  @default(true)
+  // Campos especificos do nicho (ex: experienceLevel, minAge, skillLevel) -
+  // ver src/templates/registry.ts.
+  metadata        Json     @default("{}")
   createdAt       DateTime @default(now())
 
   bookings Booking[]

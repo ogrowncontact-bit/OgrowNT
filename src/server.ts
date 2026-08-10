@@ -6,6 +6,7 @@ import { startReminderScheduler } from "./reminders/scheduler";
 import { adminRouter } from "./routes/admin.routes";
 import { authRouter } from "./routes/auth.routes";
 import { businessRouter } from "./routes/business.routes";
+import { onboardingRouter } from "./routes/onboarding.routes";
 import { webhookRouter } from "./routes/webhook.routes";
 
 const app = express();
@@ -26,6 +27,7 @@ app.use(
 app.use("/api/auth", express.json(), authRouter);
 app.use("/api/businesses", express.json(), requireAuth);
 app.use("/api/businesses", businessRouter);
+app.use("/api/businesses/:businessId", onboardingRouter);
 app.use("/api/businesses/:businessId", adminRouter);
 
 app.use("/widget", express.static(path.join(__dirname, "..", "public")));

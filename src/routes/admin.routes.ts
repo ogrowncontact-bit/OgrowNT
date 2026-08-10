@@ -18,7 +18,36 @@ adminRouter.use(requireMembership);
 
 adminRouter.get("/", (_req, res) => {
   const business = currentBusiness(res);
-  res.json({ id: business.id, name: business.name, slug: business.slug, industry: business.industry, timezone: business.timezone });
+  res.json({
+    id: business.id,
+    name: business.name,
+    slug: business.slug,
+    industry: business.industry,
+    timezone: business.timezone,
+    description: business.description,
+    address: business.address,
+    phone: business.phone,
+    metadata: business.metadata,
+  });
+});
+
+// Edita o perfil da empresa (dados gerais + campos especificos do nicho em
+// metadata - ver src/templates/registry.ts para o que cada industry sugere).
+adminRouter.patch("/", requireRole(...WRITE_ROLES), async (req, res) => {
+  const business = currentBusiness(res);
+  const { name, description, address, phone, timezone, metadata } = req.body ?? {};
+  const updated = await prisma.business.update({
+    where: { id: business.id },
+    data: {
+      ...(name !== undefined ? { name: String(name) } : {}),
+      ...(description !== undefined ? { description: description === null ? null : String(description) } : {}),
+      ...(address !== undefined ? { address: address === null ? null : String(address) } : {}),
+      ...(phone !== undefined ? { phone: phone === null ? null : String(phone) } : {}),
+      ...(timezone !== undefined ? { timezone: String(timezone) } : {}),
+      ...(metadata !== undefined ? { metadata: metadata as Prisma.InputJsonValue } : {}),
+    },
+  });
+  res.json(updated);
 });
 
 adminRouter.get("/services", async (_req, res) => {
@@ -29,7 +58,7 @@ adminRouter.get("/services", async (_req, res) => {
 
 adminRouter.post("/services", requireRole(...WRITE_ROLES), async (req, res) => {
   const business = currentBusiness(res);
-  const { name, durationMinutes, price, active } = req.body ?? {};
+  const { name, durationMinutes, price, active, metadata } = req.body ?? {};
   if (!name || !durationMinutes) {
     res.status(400).json({ error: "name e durationMinutes sao obrigatorios." });
     return;
@@ -41,6 +70,7 @@ adminRouter.post("/services", requireRole(...WRITE_ROLES), async (req, res) => {
       durationMinutes: Number(durationMinutes),
       price: price !== undefined && price !== null ? new Prisma.Decimal(price) : null,
       active: active ?? true,
+      metadata: (metadata ?? {}) as Prisma.InputJsonValue,
     },
   });
   res.status(201).json(service);
@@ -53,7 +83,7 @@ adminRouter.patch("/services/:id", requireRole(...WRITE_ROLES), async (req, res)
     res.sendStatus(404);
     return;
   }
-  const { name, durationMinutes, price, active } = req.body ?? {};
+  const { name, durationMinutes, price, active, metadata } = req.body ?? {};
   const updated = await prisma.service.update({
     where: { id: existing.id },
     data: {
@@ -61,6 +91,7 @@ adminRouter.patch("/services/:id", requireRole(...WRITE_ROLES), async (req, res)
       ...(durationMinutes !== undefined ? { durationMinutes: Number(durationMinutes) } : {}),
       ...(price !== undefined ? { price: price === null ? null : new Prisma.Decimal(price) } : {}),
       ...(active !== undefined ? { active: Boolean(active) } : {}),
+      ...(metadata !== undefined ? { metadata: metadata as Prisma.InputJsonValue } : {}),
     },
   });
   res.json(updated);
