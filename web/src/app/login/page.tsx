@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { useAuth } from "@/context/AuthContext";
 import { ApiError } from "@/lib/api";
 
@@ -69,6 +70,13 @@ export default function LoginPage() {
         >
           {submitting ? "Entrando..." : "Entrar"}
         </button>
+
+        <p className="mt-4 text-center text-sm text-zinc-500">
+          Ainda nao tem conta?{" "}
+          <Link href="/register" className="font-medium text-zinc-900 dark:text-zinc-50">
+            Criar conta
+          </Link>
+        </p>
       </form>
     </div>
   );

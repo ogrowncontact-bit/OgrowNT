@@ -6,12 +6,21 @@ import type { AuthUser, Membership } from "@/lib/types";
 
 const TOKEN_STORAGE_KEY = "ogrownt.token";
 
+interface RegisterInput {
+  email: string;
+  password: string;
+  name: string;
+  businessName: string;
+  industry: string;
+}
+
 interface AuthContextValue {
   token: string | null;
   user: AuthUser | null;
   memberships: Membership[];
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
+  register: (input: RegisterInput) => Promise<void>;
   logout: () => void;
   refreshMe: () => Promise<void>;
 }
@@ -63,6 +72,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     [loadMe]
   );
 
+  const register = useCallback(
+    async (input: RegisterInput) => {
+      const result = await apiFetch<{ token: string }>("/api/auth/register", null, {
+        method: "POST",
+        body: JSON.stringify(input),
+      });
+      localStorage.setItem(TOKEN_STORAGE_KEY, result.token);
+      setToken(result.token);
+      await loadMe(result.token);
+    },
+    [loadMe]
+  );
+
   const logout = useCallback(() => {
     localStorage.removeItem(TOKEN_STORAGE_KEY);
     setToken(null);
@@ -75,7 +97,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [token, loadMe]);
 
   return (
-    <AuthContext.Provider value={{ token, user, memberships, loading, login, logout, refreshMe }}>
+    <AuthContext.Provider value={{ token, user, memberships, loading, login, register, logout, refreshMe }}>
       {children}
     </AuthContext.Provider>
   );
