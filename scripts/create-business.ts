@@ -2,6 +2,7 @@ import { BusinessIndustry } from "@prisma/client";
 import { hashPassword } from "../src/auth/passwords";
 import { encryptSecret } from "../src/crypto";
 import { prisma } from "../src/db";
+import { slugify } from "../src/slug";
 
 // CLI de bootstrap/ops: cadastra uma empresa (tenant), opcionalmente conecta um
 // numero de WhatsApp, cria dados de demonstracao e (opcionalmente) um dono
@@ -43,16 +44,6 @@ function usageAndExit(): never {
       "[--seed-demo]"
   );
   process.exit(1);
-}
-
-function slugify(input: string): string {
-  return input
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/\p{Diacritic}/gu, "")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/(^-|-$)/g, "")
-    .slice(0, 60);
 }
 
 async function main(): Promise<void> {

@@ -37,6 +37,7 @@ export interface UiStrings {
   bookingNotConfirmed: string;
   bookingConfirmed: (when: string) => string;
   slotTaken: string;
+  slotNoLongerAvailable: string;
   whatToDoWithBooking: (service: string, when: string) => string;
   actionCancel: string;
   actionReschedule: string;
@@ -82,6 +83,7 @@ const PT: UiStrings = {
   bookingNotConfirmed: "Sem problemas, agendamento nao confirmado.",
   bookingConfirmed: (when) => `Agendamento confirmado para ${when}. Te esperamos!`,
   slotTaken: "Ih, esse horario acabou de ser reservado por outra pessoa. Vamos escolher outro?",
+  slotNoLongerAvailable: "Esse horario nao esta mais disponivel. Vamos escolher outro?",
   whatToDoWithBooking: (service, when) => `O que deseja fazer com ${service} em ${when}?`,
   actionCancel: "Cancelar",
   actionReschedule: "Remarcar",
@@ -128,6 +130,7 @@ const EN: UiStrings = {
   bookingNotConfirmed: "No problem, booking not confirmed.",
   bookingConfirmed: (when) => `Booking confirmed for ${when}. See you then!`,
   slotTaken: "That time was just taken by someone else. Want to pick another one?",
+  slotNoLongerAvailable: "That time is no longer available. Want to pick another one?",
   whatToDoWithBooking: (service, when) => `What would you like to do with ${service} on ${when}?`,
   actionCancel: "Cancel",
   actionReschedule: "Reschedule",
@@ -174,6 +177,7 @@ const ES: UiStrings = {
   bookingNotConfirmed: "Sin problema, reserva no confirmada.",
   bookingConfirmed: (when) => `Reserva confirmada para ${when}. Te esperamos!`,
   slotTaken: "Ese horario acaba de ser reservado por otra persona. Elegimos otro?",
+  slotNoLongerAvailable: "Ese horario ya no esta disponible. Elegimos otro?",
   whatToDoWithBooking: (service, when) => `Que deseas hacer con ${service} el ${when}?`,
   actionCancel: "Cancelar",
   actionReschedule: "Reprogramar",

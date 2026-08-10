@@ -2,7 +2,7 @@ import type Anthropic from "@anthropic-ai/sdk";
 import { KnowledgeCategory, Prisma } from "@prisma/client";
 import { prisma } from "../db";
 import * as booking from "../booking/engine";
-import { BookingConflictError, NotFoundError } from "../booking/errors";
+import { BookingConflictError, NotFoundError, OutsideBusinessHoursError } from "../booking/errors";
 import { formatPrice, formatSlotLong } from "../conversation/format";
 import type { FlowContext } from "../conversation/types";
 
@@ -303,7 +303,11 @@ async function runTool(ctx: FlowContext, name: string, input: Record<string, unk
           return JSON.stringify({ error: `Ferramenta desconhecida: ${name}` });
       }
     } catch (err) {
-      if (err instanceof BookingConflictError || err instanceof NotFoundError) {
+      if (
+        err instanceof BookingConflictError ||
+        err instanceof NotFoundError ||
+        err instanceof OutsideBusinessHoursError
+      ) {
         return JSON.stringify({ error: err.message });
       }
       throw err;

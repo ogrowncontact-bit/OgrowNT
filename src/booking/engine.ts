@@ -1,8 +1,8 @@
-import { Prisma, type Booking, type Resource } from "@prisma/client";
+import { Prisma, type Booking, type BusinessHours, type Resource } from "@prisma/client";
 import { addDays, addMinutes } from "date-fns";
 import { fromZonedTime, toZonedTime } from "date-fns-tz";
 import { prisma } from "../db";
-import { BookingConflictError, NotFoundError } from "./errors";
+import { BookingConflictError, NotFoundError, OutsideBusinessHoursError } from "./errors";
 
 // Motor de reservas: fonte unica de verdade para disponibilidade e criacao/
 // cancelamento/remarcacao. Tanto o fluxo guiado (botoes) quanto o agente de IA
@@ -14,6 +14,11 @@ import { BookingConflictError, NotFoundError } from "./errors";
 // um tipo de recurso (ex: "horse", "table"), a disponibilidade passa a
 // considerar Resource: so oferece um horario se houver pelo menos um recurso
 // desse tipo, com capacidade suficiente, livre naquele intervalo.
+//
+// IMPORTANTE: createBooking/rescheduleBooking revalidam horario de
+// funcionamento e antecedencia minima por conta propria (nao confiam so no
+// chamador ter usado getAvailableSlots antes) - o agente de IA recebe
+// startsAtIso do modelo, que pode nao ter passado por check_availability.
 
 export interface Slot {
   start: Date;
@@ -21,6 +26,52 @@ export interface Slot {
 }
 
 const MIN_LEAD_MINUTES = 30; // nao permite agendar em cima da hora atual
+
+async function getServiceOrThrow(businessId: string, serviceId: string) {
+  const service = await prisma.service.findFirst({ where: { id: serviceId, businessId, active: true } });
+  if (!service) {
+    throw new NotFoundError("Servico nao encontrado ou inativo.");
+  }
+  return service;
+}
+
+async function getBusinessOrThrow(businessId: string) {
+  const business = await prisma.business.findUnique({ where: { id: businessId } });
+  if (!business) {
+    throw new NotFoundError("Empresa nao encontrada.");
+  }
+  return business;
+}
+
+function meetsLeadTime(startsAt: Date, now: Date): boolean {
+  return startsAt.getTime() >= addMinutes(now, MIN_LEAD_MINUTES).getTime();
+}
+
+// Verifica se [startsAt, startsAt+durationMinutes) cabe inteiramente dentro
+// de algum intervalo de BusinessHours daquele dia da semana, no fuso da
+// empresa. Mesma logica de "cabe no expediente" usada para gerar os
+// candidatos em getAvailableSlots, reaproveitada aqui para revalidar
+// qualquer horario que chegue de fora (ex: da IA).
+function isWithinBusinessHours(
+  hoursRows: Pick<BusinessHours, "weekday" | "openTime" | "closeTime">[],
+  timeZone: string,
+  startsAt: Date,
+  durationMinutes: number
+): boolean {
+  const zonedStart = toZonedTime(startsAt, timeZone);
+  const weekday = zonedStart.getUTCDay();
+  const startMinutes = zonedStart.getUTCHours() * 60 + zonedStart.getUTCMinutes();
+  const endMinutes = startMinutes + durationMinutes;
+
+  return hoursRows.some((h) => {
+    if (h.weekday !== weekday) return false;
+    const [openH, openM] = h.openTime.split(":").map(Number);
+    const [closeH, closeM] = h.closeTime.split(":").map(Number);
+    const openMinutes = openH * 60 + openM;
+    const closeMinutes = closeH * 60 + closeM;
+    return startMinutes >= openMinutes && endMinutes <= closeMinutes;
+  });
+}
 
 async function findQualifyingResources(
   businessId: string,
@@ -37,10 +88,8 @@ export async function getAvailableSlots(
   serviceId: string,
   opts: { fromDate?: Date; daysAhead?: number; limit?: number; quantity?: number } = {}
 ): Promise<Slot[]> {
-  const business = await prisma.business.findUniqueOrThrow({ where: { id: businessId } });
-  const service = await prisma.service.findFirstOrThrow({
-    where: { id: serviceId, businessId, active: true },
-  });
+  const business = await getBusinessOrThrow(businessId);
+  const service = await getServiceOrThrow(businessId, serviceId);
   const hoursRows = await prisma.businessHours.findMany({ where: { businessId } });
 
   const timeZone = business.timezone;
@@ -127,11 +176,20 @@ export async function createBooking(params: {
   notes?: string;
   metadata?: Record<string, unknown>;
 }): Promise<Booking> {
-  const service = await prisma.service.findFirstOrThrow({
-    where: { id: params.serviceId, businessId: params.businessId, active: true },
-  });
-  const endsAt = addMinutes(params.startsAt, service.durationMinutes);
+  const business = await getBusinessOrThrow(params.businessId);
+  const service = await getServiceOrThrow(params.businessId, params.serviceId);
   const quantity = params.quantity ?? 1;
+
+  if (!meetsLeadTime(params.startsAt, new Date())) {
+    throw new OutsideBusinessHoursError("Esse horario e muito proximo ou ja passou.");
+  }
+
+  const hoursRows = await prisma.businessHours.findMany({ where: { businessId: params.businessId } });
+  if (!isWithinBusinessHours(hoursRows, business.timezone, params.startsAt, service.durationMinutes)) {
+    throw new OutsideBusinessHoursError();
+  }
+
+  const endsAt = addMinutes(params.startsAt, service.durationMinutes);
 
   try {
     return await prisma.$transaction(
@@ -227,7 +285,18 @@ export async function rescheduleBooking(
   if (!existing) {
     throw new NotFoundError("Agendamento nao encontrado.");
   }
-  const service = await prisma.service.findUniqueOrThrow({ where: { id: existing.serviceId } });
+  const business = await getBusinessOrThrow(businessId);
+  const service = await getServiceOrThrow(businessId, existing.serviceId);
+
+  if (!meetsLeadTime(newStartsAt, new Date())) {
+    throw new OutsideBusinessHoursError("Esse horario e muito proximo ou ja passou.");
+  }
+
+  const hoursRows = await prisma.businessHours.findMany({ where: { businessId } });
+  if (!isWithinBusinessHours(hoursRows, business.timezone, newStartsAt, service.durationMinutes)) {
+    throw new OutsideBusinessHoursError();
+  }
+
   const newEndsAt = addMinutes(newStartsAt, service.durationMinutes);
 
   try {

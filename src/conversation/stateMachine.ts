@@ -2,7 +2,7 @@ import { Prisma, type Conversation } from "@prisma/client";
 import { buildGreeting, getAgent } from "../ai/identity";
 import { prisma } from "../db";
 import * as booking from "../booking/engine";
-import { BookingConflictError } from "../booking/errors";
+import { BookingConflictError, OutsideBusinessHoursError } from "../booking/errors";
 import { getUiStrings } from "../language/strings";
 import type { IncomingInteractiveMessage } from "../whatsapp/webhook";
 import { REPLY, STEP } from "./constants";
@@ -283,37 +283,42 @@ export async function handleInteractiveReply(
         return;
       }
 
-      if (replyId === REPLY.CONFIRM_YES) {
-        const quantity = data.quantity ? Number(data.quantity) : undefined;
-        try {
-          const created = await booking.createBooking({
-            businessId: ctx.business.id,
-            customerId: ctx.customer.id,
-            serviceId: data.serviceId,
-            startsAt: new Date(data.startsAt),
-            quantity,
-          });
-          await outbox.sendText(
-            ctx,
-            t.bookingConfirmed(formatSlotLong(created.startsAt, ctx.business.timezone, ctx.language))
-          );
-          await backToMenu(ctx, conversation.id);
-        } catch (err) {
-          if (err instanceof BookingConflictError) {
-            await outbox.sendText(ctx, t.slotTaken);
-            const ok = await sendSlotList(ctx, data.serviceId, quantity ?? 1);
-            if (ok) {
-              await setConversationState(conversation.id, STEP.CHOOSING_SLOT, {
-                serviceId: data.serviceId,
-                quantity: data.quantity,
-              });
-            } else {
-              await backToMenu(ctx, conversation.id);
-            }
-            return;
+      if (replyId !== REPLY.CONFIRM_YES) {
+        // Resposta inesperada nesse passo (ex: mensagem duplicada/atrasada
+        // do WhatsApp) - nunca deixa a conversa travada sem resposta.
+        await backToMenu(ctx, conversation.id);
+        return;
+      }
+
+      const quantity = data.quantity ? Number(data.quantity) : undefined;
+      try {
+        const created = await booking.createBooking({
+          businessId: ctx.business.id,
+          customerId: ctx.customer.id,
+          serviceId: data.serviceId,
+          startsAt: new Date(data.startsAt),
+          quantity,
+        });
+        await outbox.sendText(
+          ctx,
+          t.bookingConfirmed(formatSlotLong(created.startsAt, ctx.business.timezone, ctx.language))
+        );
+        await backToMenu(ctx, conversation.id);
+      } catch (err) {
+        if (err instanceof BookingConflictError || err instanceof OutsideBusinessHoursError) {
+          await outbox.sendText(ctx, err instanceof BookingConflictError ? t.slotTaken : t.slotNoLongerAvailable);
+          const ok = await sendSlotList(ctx, data.serviceId, quantity ?? 1);
+          if (ok) {
+            await setConversationState(conversation.id, STEP.CHOOSING_SLOT, {
+              serviceId: data.serviceId,
+              quantity: data.quantity,
+            });
+          } else {
+            await backToMenu(ctx, conversation.id);
           }
-          throw err;
+          return;
         }
+        throw err;
       }
       return;
     }
@@ -391,7 +396,7 @@ export async function handleInteractiveReply(
           t.bookingRescheduled(formatSlotLong(updated.startsAt, ctx.business.timezone, ctx.language))
         );
       } catch (err) {
-        if (err instanceof BookingConflictError) {
+        if (err instanceof BookingConflictError || err instanceof OutsideBusinessHoursError) {
           await outbox.sendText(ctx, t.rescheduleSlotTaken);
         } else {
           throw err;
