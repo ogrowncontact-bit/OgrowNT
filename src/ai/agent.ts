@@ -3,6 +3,7 @@ import { config } from "../config";
 import { prisma } from "../db";
 import * as outbox from "../conversation/outbox";
 import type { FlowContext } from "../conversation/types";
+import { getUiStrings } from "../language/strings";
 import { buildSystemPrompt, getAgent } from "./identity";
 import { buildToolDefinitions, createToolExecutor } from "./tools";
 
@@ -17,18 +18,17 @@ const MAX_TOOL_ITERATIONS = 6;
 const HISTORY_MESSAGES = 12;
 
 export async function runAiAgent(ctx: FlowContext): Promise<void> {
+  const t = getUiStrings(ctx.language, ctx.business.defaultLanguage);
+
   if (!config.anthropic.apiKey) {
     console.warn("[ai] ANTHROPIC_API_KEY nao configurada - respondendo com fallback estatico.");
-    await outbox.sendText(
-      ctx,
-      "Nao entendi bem sua mensagem. Digite qualquer coisa para ver o menu de opcoes, ou peca para falar com um atendente."
-    );
+    await outbox.sendText(ctx, t.aiFallback);
     return;
   }
 
   const anthropic = new Anthropic({ apiKey: config.anthropic.apiKey });
   const agent = await getAgent(ctx.business.id);
-  const systemPrompt = await buildSystemPrompt(ctx.business, agent);
+  const systemPrompt = await buildSystemPrompt(ctx.business, agent, ctx.language);
 
   const history = await prisma.message.findMany({
     where: { conversationId: ctx.conversationId },
@@ -80,6 +80,6 @@ export async function runAiAgent(ctx: FlowContext): Promise<void> {
     messages.push({ role: "user", content: toolResults });
   }
 
-  await outbox.sendText(ctx, "Deixa eu chamar um atendente humano para te ajudar melhor com isso.");
+  await outbox.sendText(ctx, t.aiHandoffToHuman);
   await prisma.conversation.update({ where: { id: ctx.conversationId }, data: { needsHuman: true } });
 }

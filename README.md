@@ -194,6 +194,36 @@ Com `Luna`/`FRIENDLY`/`MEDIUM` configurados, o menu inicial do WhatsApp passa a 
 com "Olá! Eu sou Luna, assistente virtual da <empresa>. 😊" em vez do texto genérico -
 e a mesma identidade guia o tom das respostas livres do agente de IA.
 
+## Motor multilíngue
+
+Cada mensagem de texto recebida tem o idioma detectado automaticamente
+(`src/language/detect.ts`, restrito aos idiomas que a empresa suporta - melhora muito a
+precisão em mensagens curtas de WhatsApp) e a resposta - tanto do fluxo guiado quanto da
+IA - sai nesse idioma. O cliente pode trocar de idioma a qualquer momento simplesmente
+escrevendo na outra língua; a preferência (`Customer.preferredLanguage`) é atualizada
+automaticamente.
+
+```bash
+# Configura os idiomas e a moeda da empresa
+curl -X PATCH http://localhost:3000/api/businesses/<businessId> \
+  -H "Authorization: Bearer <token>" -H "Content-Type: application/json" \
+  -d '{ "defaultLanguage": "pt", "supportedLanguages": ["pt", "en", "es"], "currency": "BRL" }'
+```
+
+- `defaultLanguage`/`supportedLanguages` aceitam: `pt`, `en`, `es`, `fr`, `de`, `it`, `nl`
+  (códigos ISO 639-1). A detecção e as ferramentas de IA funcionam para todos; as
+  strings do fluxo guiado (menus/botões) hoje têm tradução completa em `pt`/`en`/`es` -
+  um idioma suportado sem tradução de UI ainda cai para o idioma padrão da empresa
+  (nunca mistura idiomas nem mostra texto quebrado).
+- `currency` aceita qualquer código ISO 4217 (`BRL`, `USD`, `EUR`, `GBP`...) - usado para
+  formatar preços de serviço de forma nativa no idioma de cada conversa.
+- Sem nenhuma configuração, o comportamento padrão é `pt`/`BRL` (compatível com o que já
+  existia antes desta fase).
+
+Teste rápido (mesmo fluxo, três idiomas): mande "Olá, vocês têm horário amanhã?",
+"Hi, do you have availability tomorrow?" e "Hola, ¿tenéis disponibilidad para mañana?"
+para o mesmo número - cada uma recebe o menu no idioma correspondente.
+
 ## Conectando um número real de WhatsApp
 
 1. Crie um app em [developers.facebook.com](https://developers.facebook.com) do tipo
@@ -234,12 +264,13 @@ mensagem pré-preenchida.
 A plataforma é construída em 10 fases sobre o mesmo core universal (nenhum nicho tem
 código próprio - só configuração). Implementado até agora: **Fase 1 (Fundação)**
 (autenticação, usuários, papéis, isolamento multi-tenant, seleção de nicho), **Fase 2
-(Business Setup)** (template por nicho, onboarding, perfil da empresa) e **Fase 3
-(Agent Core)** (identidade/voz configurável, Knowledge Base, regras de negócio).
+(Business Setup)** (template por nicho, onboarding, perfil da empresa), **Fase 3
+(Agent Core)** (identidade/voz configurável, Knowledge Base, regras de negócio) e
+**Fase 4 (motor multilíngue)** (detecção automática de idioma, fluxo guiado e IA
+totalmente traduzidos, formatação de data/moeda por locale).
 
 | Fase | Conteúdo |
 | --- | --- |
-| 4. Conversation Engine | Detecção automática de idioma, contexto entre mensagens |
 | 5. Tools | `Resource` (cavalo/mesa/quarto/instrutor), campos de reserva customizados |
 | 6. Channels | Formalizar adaptador de canal e adicionar Instagram Direct (premium) |
 | 7. Inbox | Central de atendimento (assumir conversa, notas, handoff humano na prática) |

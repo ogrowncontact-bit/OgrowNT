@@ -1,11 +1,23 @@
 import type { Agent, Business } from "@prisma/client";
 import { prisma } from "../db";
+import { getUiStrings } from "../language/strings";
 
 // Business Identity Engine (unificado com o "Voice Profile" - ver plano):
 // separa "como o agente fala" (aqui) de "o que ele sabe" (KnowledgeEntry,
 // consultado via tool) e "o que ele pode fazer" (tools em src/ai/tools.ts).
 // Usado tanto pelo fluxo guiado (saudacao) quanto pelo agente de IA (system
-// prompt), para que os dois "soem" como o mesmo funcionario digital.
+// prompt), para que os dois "soem" como o mesmo funcionario digital - e nos
+// dois casos no idioma resolvido por src/language/detect.ts.
+
+const LANGUAGE_NAMES: Record<string, string> = {
+  pt: "portugues",
+  en: "ingles",
+  es: "espanhol",
+  fr: "frances",
+  de: "alemao",
+  it: "italiano",
+  nl: "holandes",
+};
 
 const TONE_DESCRIPTIONS: Record<Agent["tone"], string> = {
   FRIENDLY: "amigavel e acolhedor",
@@ -34,14 +46,19 @@ export async function getAgent(businessId: string): Promise<Agent | null> {
   return agent && agent.active ? agent : null;
 }
 
-export function buildGreeting(business: Business, agent: Agent | null): string {
+// Se a empresa escreveu uma saudacao propria (agent.greetingMessage), ela e
+// usada literalmente - nao ha traducao automatica de texto livre escrito
+// pelo dono da empresa (limitacao conhecida do MVP). Sem saudacao propria,
+// gera uma no idioma resolvido para esta conversa.
+export function buildGreeting(business: Business, agent: Agent | null, language: string): string {
   if (agent?.greetingMessage) return agent.greetingMessage;
+  const t = getUiStrings(language, business.defaultLanguage);
   const name = agent?.name ?? "Assistente";
-  const emoji = !agent || agent.emojiUsage !== "NONE" ? " 😊" : "";
-  return `Ola! Eu sou ${name}, assistente virtual da ${business.name}.${emoji} Como posso ajudar?`;
+  const withEmoji = !agent || agent.emojiUsage !== "NONE";
+  return t.defaultGreeting(name, business.name, withEmoji);
 }
 
-export async function buildSystemPrompt(business: Business, agent: Agent | null): Promise<string> {
+export async function buildSystemPrompt(business: Business, agent: Agent | null, language: string): Promise<string> {
   const rules = await prisma.businessRule.findMany({
     where: { businessId: business.id, active: true },
     orderBy: { createdAt: "asc" },
@@ -75,7 +92,10 @@ export async function buildSystemPrompt(business: Business, agent: Agent | null)
     lines.push(`- Instrucoes adicionais definidas pela empresa: ${agent.instructions}`);
   }
 
-  lines.push("- Responda sempre no mesmo idioma que o cliente estiver usando.");
+  const languageName = LANGUAGE_NAMES[language] ?? language;
+  lines.push(
+    `- Responda nesta conversa em ${languageName} (codigo ${language}) - esse idioma ja foi identificado a partir da mensagem do cliente. Se o cliente pedir explicitamente para mudar de idioma, atenda o pedido.`
+  );
 
   return lines.join("\n");
 }

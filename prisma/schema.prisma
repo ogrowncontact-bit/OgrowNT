@@ -83,6 +83,10 @@ model Business {
   // Campos especificos do nicho que nao justificam uma coluna propria (ver
   // src/templates/registry.ts para o que cada industry costuma usar aqui).
   metadata    Json             @default("{}")
+  // Motor multilingue (ver src/language/) - codigos ISO 639-1 (pt, en, es...).
+  defaultLanguage    String   @default("pt")
+  supportedLanguages String[] @default(["pt"])
+  currency           String   @default("BRL")
   createdAt   DateTime         @default(now())
   updatedAt   DateTime         @updatedAt
 
@@ -226,6 +230,9 @@ model Customer {
   business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
   phoneNumber String // formato E.164, ex: 5511999999999
   name        String?
+  // "auto" = segue a deteccao automatica a cada mensagem; um codigo ISO 639-1
+  // (pt/en/es...) = cliente ja trocou de idioma ou definiu preferencia.
+  preferredLanguage String @default("auto")
   createdAt   DateTime @default(now())
 
   bookings      Booking[]
@@ -274,6 +281,8 @@ model Conversation {
   step         String   @default("idle")
   data         Json     @default("{}")
   needsHuman   Boolean  @default(false)
+  // Idioma (ISO 639-1) detectado na ultima mensagem de texto do cliente.
+  detectedLanguage String?
   lastMessageAt DateTime @default(now())
 
   messages Message[]

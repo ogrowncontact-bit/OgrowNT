@@ -1,5 +1,5 @@
 import { addMinutes } from "date-fns";
-import { formatSlotShort } from "../conversation/format";
+import { formatSlotLong } from "../conversation/format";
 import { config } from "../config";
 import { decryptSecret } from "../crypto";
 import { prisma } from "../db";
@@ -34,8 +34,16 @@ async function sendDueReminders(offsetMinutes: number, now: Date, bufferMinutes:
       phoneNumberId: account.phoneNumberId,
       accessToken: decryptSecret(account.encryptedAccessToken),
     };
-    const label = formatSlotShort(booking.startsAt, booking.business.timezone);
+    const customerLanguage =
+      booking.customer.preferredLanguage !== "auto" ? booking.customer.preferredLanguage : booking.business.defaultLanguage;
+    const label = formatSlotLong(booking.startsAt, booking.business.timezone, customerLanguage);
 
+    // O NOME/IDIOMA do template em si (aprovado no Meta Business Manager) e
+    // uma configuracao global por enquanto (config.whatsapp.reminderTemplate*)
+    // - selecionar automaticamente um template por idioma do cliente exigiria
+    // a empresa cadastrar um template aprovado por idioma, o que fica para
+    // uma proxima fase. O texto interpolado (a data/hora) ja respeita o
+    // idioma do cliente.
     try {
       await wa.sendTemplateMessage(
         waCtx,

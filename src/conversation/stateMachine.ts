@@ -3,16 +3,22 @@ import { buildGreeting, getAgent } from "../ai/identity";
 import { prisma } from "../db";
 import * as booking from "../booking/engine";
 import { BookingConflictError } from "../booking/errors";
+import { getUiStrings } from "../language/strings";
 import type { IncomingInteractiveMessage } from "../whatsapp/webhook";
 import { REPLY, STEP } from "./constants";
-import { formatPrice, formatSlotShort } from "./format";
+import { formatPrice, formatSlotLong, formatSlotShort } from "./format";
 import * as outbox from "./outbox";
 import type { FlowContext } from "./types";
 
 // Fluxo guiado por botoes/listas: caminho principal e deterministico para
 // agendar, ver, cancelar e remarcar. Chama sempre as mesmas funcoes de
 // src/booking/engine.ts que o agente de IA usa, para nunca haver divergencia
-// de regras entre os dois caminhos.
+// de regras entre os dois caminhos. Todo texto vem de
+// src/language/strings.ts (ctx.language) - nunca hardcoded aqui.
+
+function ui(ctx: FlowContext) {
+  return getUiStrings(ctx.language, ctx.business.defaultLanguage);
+}
 
 async function setConversationState(
   conversationId: string,
@@ -27,17 +33,18 @@ async function setConversationState(
 
 export async function sendMainMenu(ctx: FlowContext): Promise<void> {
   const agent = await getAgent(ctx.business.id);
+  const t = ui(ctx);
   await outbox.sendList(ctx, {
-    bodyText: buildGreeting(ctx.business, agent),
-    buttonText: "Ver opcoes",
+    bodyText: buildGreeting(ctx.business, agent, ctx.language),
+    buttonText: t.menuButton,
     sections: [
       {
-        title: "Menu",
+        title: t.menuSectionTitle,
         rows: [
-          { id: REPLY.MENU_BOOK, title: "Agendar horario" },
-          { id: REPLY.MENU_MY_BOOKINGS, title: "Meus agendamentos" },
-          { id: REPLY.MENU_CANCEL, title: "Cancelar/remarcar" },
-          { id: REPLY.MENU_HUMAN, title: "Falar com atendente" },
+          { id: REPLY.MENU_BOOK, title: t.menuRowBook },
+          { id: REPLY.MENU_MY_BOOKINGS, title: t.menuRowMyBookings },
+          { id: REPLY.MENU_CANCEL, title: t.menuRowCancel },
+          { id: REPLY.MENU_HUMAN, title: t.menuRowHuman },
         ],
       },
     ],
@@ -50,6 +57,7 @@ async function backToMenu(ctx: FlowContext, conversationId: string): Promise<voi
 }
 
 async function sendServiceList(ctx: FlowContext): Promise<boolean> {
+  const t = ui(ctx);
   const services = await prisma.service.findMany({
     where: { businessId: ctx.business.id, active: true },
     take: 10,
@@ -57,23 +65,22 @@ async function sendServiceList(ctx: FlowContext): Promise<boolean> {
   });
 
   if (services.length === 0) {
-    await outbox.sendText(
-      ctx,
-      "No momento nao temos servicos configurados. Vou avisar um atendente para te ajudar."
-    );
+    await outbox.sendText(ctx, t.noServicesConfigured);
     return false;
   }
 
   await outbox.sendList(ctx, {
-    bodyText: "Qual servico voce quer agendar?",
-    buttonText: "Escolher servico",
+    bodyText: t.chooseServiceBody,
+    buttonText: t.chooseServiceButton,
     sections: [
       {
-        title: "Servicos",
+        title: t.servicesSectionTitle,
         rows: services.map((s) => ({
           id: s.id,
           title: s.name.slice(0, 24),
-          description: [formatPrice(s.price), `${s.durationMinutes} min`].filter(Boolean).join(" - "),
+          description: [formatPrice(s.price, ctx.business.currency, ctx.language), `${s.durationMinutes} min`]
+            .filter(Boolean)
+            .join(" - "),
         })),
       },
     ],
@@ -82,23 +89,23 @@ async function sendServiceList(ctx: FlowContext): Promise<boolean> {
 }
 
 async function sendSlotList(ctx: FlowContext, serviceId: string): Promise<boolean> {
+  const t = ui(ctx);
   const slots = await booking.getAvailableSlots(ctx.business.id, serviceId);
   if (slots.length === 0) {
-    await outbox.sendText(
-      ctx,
-      "Nao encontrei horarios livres nos proximos dias para esse servico. Quer tentar outro servico ou falar com um atendente?"
-    );
+    await outbox.sendText(ctx, t.noSlotsAvailable);
     return false;
   }
 
   await outbox.sendList(ctx, {
-    bodyText: "Escolha um horario:",
-    buttonText: "Ver horarios",
+    bodyText: t.chooseSlotBody,
+    buttonText: t.chooseSlotButton,
     sections: [
       {
-        title: "Horarios disponiveis",
+        title: t.slotsSectionTitle,
         rows: slots.map((s) => ({
           id: s.start.toISOString(),
+          // titulo de linha do WhatsApp tem limite de 24 caracteres -
+          // mantido compacto/numerico independente do idioma.
           title: formatSlotShort(s.start, ctx.business.timezone),
         })),
       },
@@ -112,6 +119,7 @@ export async function handleInteractiveReply(
   conversation: Conversation,
   message: IncomingInteractiveMessage
 ): Promise<void> {
+  const t = ui(ctx);
   const { replyId } = message;
   const data = conversation.data as Record<string, string | undefined>;
 
@@ -130,10 +138,10 @@ export async function handleInteractiveReply(
       if (replyId === REPLY.MENU_MY_BOOKINGS) {
         const bookings = await booking.listUpcomingBookingsForCustomer(ctx.business.id, ctx.customer.id);
         if (bookings.length === 0) {
-          await outbox.sendText(ctx, "Voce nao tem agendamentos futuros.");
+          await outbox.sendText(ctx, t.noUpcomingBookings);
         } else {
-          const lines = bookings.map(
-            (b) => `- ${b.service.name} em ${formatSlotShort(b.startsAt, ctx.business.timezone)}`
+          const lines = bookings.map((b) =>
+            t.upcomingBookingLine(b.service.name, formatSlotLong(b.startsAt, ctx.business.timezone, ctx.language))
           );
           await outbox.sendText(ctx, lines.join("\n"));
         }
@@ -144,16 +152,16 @@ export async function handleInteractiveReply(
       if (replyId === REPLY.MENU_CANCEL) {
         const bookings = await booking.listUpcomingBookingsForCustomer(ctx.business.id, ctx.customer.id);
         if (bookings.length === 0) {
-          await outbox.sendText(ctx, "Voce nao tem agendamentos futuros para cancelar ou remarcar.");
+          await outbox.sendText(ctx, t.noUpcomingBookingsToChange);
           await backToMenu(ctx, conversation.id);
           return;
         }
         await outbox.sendList(ctx, {
-          bodyText: "Qual agendamento voce quer alterar?",
-          buttonText: "Escolher",
+          bodyText: t.chooseBookingToChangeBody,
+          buttonText: t.chooseButton,
           sections: [
             {
-              title: "Seus agendamentos",
+              title: t.yourBookingsSectionTitle,
               rows: bookings.map((b) => ({
                 id: b.id,
                 title: formatSlotShort(b.startsAt, ctx.business.timezone),
@@ -168,7 +176,7 @@ export async function handleInteractiveReply(
 
       if (replyId === REPLY.MENU_HUMAN) {
         await prisma.conversation.update({ where: { id: conversation.id }, data: { needsHuman: true } });
-        await outbox.sendText(ctx, "Certo! Um atendente humano vai te responder por aqui em breve.");
+        await outbox.sendText(ctx, t.humanHandoffAck);
         return;
       }
 
@@ -206,10 +214,10 @@ export async function handleInteractiveReply(
       }
       await outbox.sendButtons(
         ctx,
-        `Confirmar *${service.name}* em ${formatSlotShort(startsAt, ctx.business.timezone)}?`,
+        t.confirmBooking(service.name, formatSlotLong(startsAt, ctx.business.timezone, ctx.language)),
         [
-          { id: REPLY.CONFIRM_YES, title: "Confirmar" },
-          { id: REPLY.CONFIRM_NO, title: "Cancelar" },
+          { id: REPLY.CONFIRM_YES, title: t.confirmYes },
+          { id: REPLY.CONFIRM_NO, title: t.confirmNo },
         ]
       );
       await setConversationState(conversation.id, STEP.CONFIRMING, {
@@ -221,7 +229,7 @@ export async function handleInteractiveReply(
 
     case STEP.CONFIRMING: {
       if (replyId === REPLY.CONFIRM_NO || !data.serviceId || !data.startsAt) {
-        await outbox.sendText(ctx, "Sem problemas, agendamento nao confirmado.");
+        await outbox.sendText(ctx, t.bookingNotConfirmed);
         await backToMenu(ctx, conversation.id);
         return;
       }
@@ -236,12 +244,12 @@ export async function handleInteractiveReply(
           });
           await outbox.sendText(
             ctx,
-            `Agendamento confirmado para ${formatSlotShort(created.startsAt, ctx.business.timezone)}. Te esperamos!`
+            t.bookingConfirmed(formatSlotLong(created.startsAt, ctx.business.timezone, ctx.language))
           );
           await backToMenu(ctx, conversation.id);
         } catch (err) {
           if (err instanceof BookingConflictError) {
-            await outbox.sendText(ctx, "Ih, esse horario acabou de ser reservado por outra pessoa. Vamos escolher outro?");
+            await outbox.sendText(ctx, t.slotTaken);
             const ok = await sendSlotList(ctx, data.serviceId);
             if (ok) {
               await setConversationState(conversation.id, STEP.CHOOSING_SLOT, { serviceId: data.serviceId });
@@ -267,11 +275,11 @@ export async function handleInteractiveReply(
       }
       await outbox.sendButtons(
         ctx,
-        `O que deseja fazer com ${target.service.name} em ${formatSlotShort(target.startsAt, ctx.business.timezone)}?`,
+        t.whatToDoWithBooking(target.service.name, formatSlotLong(target.startsAt, ctx.business.timezone, ctx.language)),
         [
-          { id: REPLY.ACTION_CANCEL, title: "Cancelar" },
-          { id: REPLY.ACTION_RESCHEDULE, title: "Remarcar" },
-          { id: REPLY.ACTION_KEEP, title: "Manter" },
+          { id: REPLY.ACTION_CANCEL, title: t.actionCancel },
+          { id: REPLY.ACTION_RESCHEDULE, title: t.actionReschedule },
+          { id: REPLY.ACTION_KEEP, title: t.actionKeep },
         ]
       );
       await setConversationState(conversation.id, STEP.BOOKING_ACTION, {
@@ -289,7 +297,7 @@ export async function handleInteractiveReply(
 
       if (replyId === REPLY.ACTION_CANCEL) {
         await booking.cancelBooking(ctx.business.id, data.bookingId);
-        await outbox.sendText(ctx, "Agendamento cancelado.");
+        await outbox.sendText(ctx, t.bookingCancelled);
         await backToMenu(ctx, conversation.id);
         return;
       }
@@ -306,7 +314,7 @@ export async function handleInteractiveReply(
         return;
       }
 
-      await outbox.sendText(ctx, "Ok, mantive seu agendamento como estava.");
+      await outbox.sendText(ctx, t.bookingKept);
       await backToMenu(ctx, conversation.id);
       return;
     }
@@ -325,11 +333,11 @@ export async function handleInteractiveReply(
         const updated = await booking.rescheduleBooking(ctx.business.id, data.bookingId, newStart);
         await outbox.sendText(
           ctx,
-          `Prontinho, remarcado para ${formatSlotShort(updated.startsAt, ctx.business.timezone)}.`
+          t.bookingRescheduled(formatSlotLong(updated.startsAt, ctx.business.timezone, ctx.language))
         );
       } catch (err) {
         if (err instanceof BookingConflictError) {
-          await outbox.sendText(ctx, "Esse horario acabou de ser ocupado. Vamos tentar outro?");
+          await outbox.sendText(ctx, t.rescheduleSlotTaken);
         } else {
           throw err;
         }

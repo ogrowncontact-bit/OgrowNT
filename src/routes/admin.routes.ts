@@ -2,6 +2,9 @@ import { Prisma, type Role } from "@prisma/client";
 import { Router } from "express";
 import { currentBusiness, requireMembership, requireRole } from "../auth/middleware";
 import { prisma } from "../db";
+import { DETECTABLE_LANGUAGES } from "../language/detect";
+
+const CURRENCY_CODE_PATTERN = /^[A-Z]{3}$/;
 
 // Rotas de gestao de uma empresa (servicos, horarios, reservas, conversas).
 // Montado em /api/businesses/:businessId (ver server.ts) - o :businessId vem
@@ -28,14 +31,36 @@ adminRouter.get("/", (_req, res) => {
     address: business.address,
     phone: business.phone,
     metadata: business.metadata,
+    defaultLanguage: business.defaultLanguage,
+    supportedLanguages: business.supportedLanguages,
+    currency: business.currency,
   });
 });
 
 // Edita o perfil da empresa (dados gerais + campos especificos do nicho em
-// metadata - ver src/templates/registry.ts para o que cada industry sugere).
+// metadata - ver src/templates/registry.ts - + configuracao do motor
+// multilingue: idiomas suportados/padrao e moeda).
 adminRouter.patch("/", requireRole(...WRITE_ROLES), async (req, res) => {
   const business = currentBusiness(res);
-  const { name, description, address, phone, timezone, metadata } = req.body ?? {};
+  const { name, description, address, phone, timezone, metadata, defaultLanguage, supportedLanguages, currency } =
+    req.body ?? {};
+
+  if (defaultLanguage !== undefined && !DETECTABLE_LANGUAGES.includes(defaultLanguage)) {
+    res.status(400).json({ error: `defaultLanguage invalido. Valores aceitos: ${DETECTABLE_LANGUAGES.join(", ")}` });
+    return;
+  }
+  if (supportedLanguages !== undefined) {
+    const valid = Array.isArray(supportedLanguages) && supportedLanguages.every((l) => DETECTABLE_LANGUAGES.includes(l));
+    if (!valid || supportedLanguages.length === 0) {
+      res.status(400).json({ error: `supportedLanguages deve ser um array nao vazio com valores em: ${DETECTABLE_LANGUAGES.join(", ")}` });
+      return;
+    }
+  }
+  if (currency !== undefined && !CURRENCY_CODE_PATTERN.test(currency)) {
+    res.status(400).json({ error: "currency deve ser um codigo ISO 4217 de 3 letras maiusculas (ex: BRL, USD, EUR)." });
+    return;
+  }
+
   const updated = await prisma.business.update({
     where: { id: business.id },
     data: {
@@ -45,6 +70,9 @@ adminRouter.patch("/", requireRole(...WRITE_ROLES), async (req, res) => {
       ...(phone !== undefined ? { phone: phone === null ? null : String(phone) } : {}),
       ...(timezone !== undefined ? { timezone: String(timezone) } : {}),
       ...(metadata !== undefined ? { metadata: metadata as Prisma.InputJsonValue } : {}),
+      ...(defaultLanguage !== undefined ? { defaultLanguage } : {}),
+      ...(supportedLanguages !== undefined ? { supportedLanguages } : {}),
+      ...(currency !== undefined ? { currency } : {}),
     },
   });
   res.json(updated);

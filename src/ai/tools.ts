@@ -3,7 +3,7 @@ import { KnowledgeCategory } from "@prisma/client";
 import { prisma } from "../db";
 import * as booking from "../booking/engine";
 import { BookingConflictError, NotFoundError } from "../booking/errors";
-import { formatPrice, formatSlotShort } from "../conversation/format";
+import { formatPrice, formatSlotLong } from "../conversation/format";
 import type { FlowContext } from "../conversation/types";
 
 // Ferramentas do agente de IA - espelham exatamente as capacidades do fluxo
@@ -125,7 +125,7 @@ export function createToolExecutor(ctx: FlowContext) {
               id: s.id,
               name: s.name,
               durationMinutes: s.durationMinutes,
-              price: formatPrice(s.price),
+              price: formatPrice(s.price, ctx.business.currency, ctx.language),
             }))
           );
         }
@@ -135,7 +135,7 @@ export function createToolExecutor(ctx: FlowContext) {
           return JSON.stringify(
             slots.map((s) => ({
               startsAtIso: s.start.toISOString(),
-              label: formatSlotShort(s.start, ctx.business.timezone),
+              label: formatSlotLong(s.start, ctx.business.timezone, ctx.language),
             }))
           );
         }
@@ -151,7 +151,7 @@ export function createToolExecutor(ctx: FlowContext) {
             ok: true,
             bookingId: created.id,
             startsAtIso: created.startsAt.toISOString(),
-            label: formatSlotShort(created.startsAt, ctx.business.timezone),
+            label: formatSlotLong(created.startsAt, ctx.business.timezone, ctx.language),
           });
         }
 
@@ -162,7 +162,7 @@ export function createToolExecutor(ctx: FlowContext) {
               bookingId: b.id,
               service: b.service.name,
               startsAtIso: b.startsAt.toISOString(),
-              label: formatSlotShort(b.startsAt, ctx.business.timezone),
+              label: formatSlotLong(b.startsAt, ctx.business.timezone, ctx.language),
             }))
           );
         }
@@ -182,7 +182,7 @@ export function createToolExecutor(ctx: FlowContext) {
             ok: true,
             bookingId: updated.id,
             startsAtIso: updated.startsAt.toISOString(),
-            label: formatSlotShort(updated.startsAt, ctx.business.timezone),
+            label: formatSlotLong(updated.startsAt, ctx.business.timezone, ctx.language),
           });
         }
 

@@ -3,6 +3,7 @@ import { runAiAgent } from "../ai/agent";
 import { decryptSecret } from "../crypto";
 import { findOrCreateCustomer } from "../customers";
 import { prisma } from "../db";
+import { resolveLanguage } from "../language/detect";
 import type { IncomingMessage } from "../whatsapp/webhook";
 import { STEP } from "./constants";
 import * as stateMachine from "./stateMachine";
@@ -42,10 +43,39 @@ export async function routeIncomingMessage(
     return;
   }
 
+  // Deteccao de idioma (src/language/detect.ts): so ha texto livre para
+  // analisar em mensagens de texto - respostas de botao/lista usam a
+  // preferencia ja salva do cliente (ou o padrao da empresa). Nunca fica
+  // "preso" a um idioma anterior: cada mensagem de texto e reavaliada.
+  let language = customer.preferredLanguage !== "auto" ? customer.preferredLanguage : business.defaultLanguage;
+  if (message.kind === "text") {
+    const resolved = await resolveLanguage({
+      text: message.text,
+      supportedLanguages: business.supportedLanguages,
+      preferredLanguage: customer.preferredLanguage,
+      defaultLanguage: business.defaultLanguage,
+    });
+    language = resolved.language;
+
+    if (resolved.detected && resolved.detected !== customer.preferredLanguage) {
+      await prisma.customer.update({
+        where: { id: customer.id },
+        data: { preferredLanguage: resolved.detected },
+      });
+    }
+    if (resolved.detected && resolved.detected !== conversation.detectedLanguage) {
+      await prisma.conversation.update({
+        where: { id: conversation.id },
+        data: { detectedLanguage: resolved.detected },
+      });
+    }
+  }
+
   const flowCtx: FlowContext = {
     business,
     customer,
     conversationId: conversation.id,
+    language,
     wa: {
       phoneNumberId: whatsAppAccount.phoneNumberId,
       accessToken: decryptSecret(whatsAppAccount.encryptedAccessToken),
