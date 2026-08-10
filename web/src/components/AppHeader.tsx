@@ -7,6 +7,7 @@ import type { Membership } from "@/lib/types";
 const NAV_LINKS = [
   { href: "/inbox", label: "Inbox" },
   { href: "/dashboard", label: "Dashboard" },
+  { href: "/services", label: "Serviços" },
   { href: "/automations", label: "Automações" },
   { href: "/settings", label: "WhatsApp" },
   { href: "/billing", label: "Assinatura" },
@@ -18,7 +19,7 @@ export function AppHeader({
   memberships,
   onBusinessChange,
 }: {
-  active: "inbox" | "dashboard" | "automations" | "settings" | "billing";
+  active: "inbox" | "dashboard" | "services" | "automations" | "settings" | "billing";
   businessId: string | null;
   memberships: Membership[];
   onBusinessChange: (id: string) => void;

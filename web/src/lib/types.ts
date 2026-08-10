@@ -130,6 +130,46 @@ export interface Subscription {
   plan: Plan;
 }
 
+export interface Service {
+  id: string;
+  businessId: string;
+  name: string;
+  durationMinutes: number;
+  price: string | null;
+  active: boolean;
+  requiresResourceType: string | null;
+  createdAt: string;
+}
+
+export interface BusinessHoursEntry {
+  id: string;
+  businessId: string;
+  weekday: number;
+  openTime: string;
+  closeTime: string;
+}
+
+export interface OnboardingStatus {
+  template: {
+    industry: string;
+    label: string;
+    description: string;
+    defaultServices: { name: string; durationMinutes: number }[];
+  };
+  checklist: {
+    profileComplete: boolean;
+    hasServices: boolean;
+    hasBusinessHours: boolean;
+    hasWhatsAppConnected: boolean;
+  };
+}
+
+export interface QuickStartResult {
+  createdServices: number;
+  createdHours: boolean;
+  message: string;
+}
+
 export type WhatsAppConnection =
   | { connected: false }
   | {
