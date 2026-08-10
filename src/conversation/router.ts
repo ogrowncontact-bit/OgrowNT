@@ -1,6 +1,6 @@
 import type { Business, WhatsAppAccount } from "@prisma/client";
 import { runAiAgent } from "../ai/agent";
-import { decryptSecret } from "../crypto";
+import { createWhatsAppAdapter } from "../channels/whatsapp";
 import { findOrCreateCustomer } from "../customers";
 import { prisma } from "../db";
 import { resolveLanguage } from "../language/detect";
@@ -76,10 +76,11 @@ export async function routeIncomingMessage(
     customer,
     conversationId: conversation.id,
     language,
-    wa: {
-      phoneNumberId: whatsAppAccount.phoneNumberId,
-      accessToken: decryptSecret(whatsAppAccount.encryptedAccessToken),
-    },
+    // Fase 6: so WhatsApp esta implementado (ver src/channels/). Quando o
+    // Instagram existir, este ponto escolhe o adapter certo a partir do
+    // canal de origem do webhook, sem tocar no resto do fluxo.
+    channel: createWhatsAppAdapter(whatsAppAccount),
+    recipientId: fromPhoneNumber,
   };
 
   if (conversation.step === STEP.IDLE) {

@@ -61,3 +61,20 @@ async function processWebhookPayload(payload: unknown): Promise<void> {
     }
   }
 }
+
+// Stub HONESTO (ver src/channels/instagram.ts): a integracao com Instagram
+// Direct ainda nao foi construida. Em vez de fingir um handshake de
+// verificacao que nunca vai funcionar de verdade, a rota deixa claro que o
+// canal nao esta disponivel nesta versao - nada de simular sucesso.
+const INSTAGRAM_NOT_IMPLEMENTED = {
+  error: "A integracao com Instagram ainda nao esta disponivel nesta versao.",
+};
+
+webhookRouter.get("/instagram", (_req: Request, res: Response) => {
+  res.status(501).json(INSTAGRAM_NOT_IMPLEMENTED);
+});
+
+webhookRouter.post("/instagram", (_req: Request, res: Response) => {
+  console.warn("[webhook] mensagem recebida em /webhooks/instagram, mas o canal ainda nao esta implementado.");
+  res.status(501).json(INSTAGRAM_NOT_IMPLEMENTED);
+});

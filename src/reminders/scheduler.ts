@@ -1,9 +1,8 @@
 import { addMinutes } from "date-fns";
+import { createWhatsAppAdapter } from "../channels/whatsapp";
 import { formatSlotLong } from "../conversation/format";
 import { config } from "../config";
-import { decryptSecret } from "../crypto";
 import { prisma } from "../db";
-import * as wa from "../whatsapp/client";
 
 // Varre agendamentos confirmados e dispara lembretes (WhatsApp template
 // message) nas janelas configuradas (padrao: 24h e 2h antes). ReminderLog
@@ -30,10 +29,7 @@ async function sendDueReminders(offsetMinutes: number, now: Date, bufferMinutes:
     const account = booking.business.whatsAppAccount;
     if (!account) continue; // empresa ainda nao conectou um numero de WhatsApp
 
-    const waCtx = {
-      phoneNumberId: account.phoneNumberId,
-      accessToken: decryptSecret(account.encryptedAccessToken),
-    };
+    const channel = createWhatsAppAdapter(account);
     const customerLanguage =
       booking.customer.preferredLanguage !== "auto" ? booking.customer.preferredLanguage : booking.business.defaultLanguage;
     const label = formatSlotLong(booking.startsAt, booking.business.timezone, customerLanguage);
@@ -45,8 +41,7 @@ async function sendDueReminders(offsetMinutes: number, now: Date, bufferMinutes:
     // uma proxima fase. O texto interpolado (a data/hora) ja respeita o
     // idioma do cliente.
     try {
-      await wa.sendTemplateMessage(
-        waCtx,
+      await channel.sendTemplate(
         booking.customer.phoneNumber,
         config.whatsapp.reminderTemplateName,
         config.whatsapp.reminderTemplateLang,

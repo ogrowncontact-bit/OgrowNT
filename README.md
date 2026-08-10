@@ -265,6 +265,25 @@ curl -X POST http://localhost:3000/api/businesses/<businessId>/custom-fields \
 - Toda chamada de ferramenta da IA é registrada em `ToolCallLog` (nome, parâmetros,
   sucesso) para observabilidade - sem guardar o conteúdo das mensagens.
 
+## Arquitetura de canais (`ChannelAdapter`)
+
+A camada de conversa/IA (`src/conversation/`, `src/ai/`) nunca fala diretamente com a
+API do WhatsApp - ela só conhece a interface `ChannelAdapter` (`src/channels/types.ts`):
+`sendText`, `sendList`, `sendButtons`, `sendTemplate`. `src/conversation/outbox.ts` é o
+único lugar que chama um `ChannelAdapter`; todo o resto (fluxo guiado, agente de IA,
+lembretes) passa por ele.
+
+- **`WhatsAppAdapter`** (`src/channels/whatsapp.ts`): implementação real, usada em
+  produção - reaproveita o cliente da Graph API já existente.
+- **`InstagramAdapter`** (`src/channels/instagram.ts`): **stub honesto**, não uma
+  simulação. Cada método lança `ChannelNotImplementedError` explicando que a integração
+  com Instagram Direct ainda não foi construída. `POST/GET /webhooks/instagram` também
+  respondem `501` de propósito - nada finge estar conectado.
+
+Isso prova que a arquitetura já comporta um canal novo sem tocar na lógica de
+reservas/IA - quando o Instagram Messaging for implementado de verdade (fora do escopo
+desta versão), basta trocar o stub por uma implementação real do mesmo contrato.
+
 ## Conectando um número real de WhatsApp
 
 1. Crie um app em [developers.facebook.com](https://developers.facebook.com) do tipo
@@ -308,12 +327,13 @@ código próprio - só configuração). Implementado até agora: **Fase 1 (Funda
 (Business Setup)** (template por nicho, onboarding, perfil da empresa), **Fase 3
 (Agent Core)** (identidade/voz configurável, Knowledge Base, regras de negócio),
 **Fase 4 (motor multilíngue)** (detecção automática de idioma, fluxo guiado e IA
-totalmente traduzidos, formatação de data/moeda por locale) e **Fase 5 (Tools)**
-(`Resource` com capacidade, campos de reserva customizados, observabilidade de tools).
+totalmente traduzidos, formatação de data/moeda por locale), **Fase 5 (Tools)**
+(`Resource` com capacidade, campos de reserva customizados, observabilidade de tools) e
+**Fase 6 (Channels)** (`ChannelAdapter` formalizado, WhatsApp real + Instagram como stub
+honesto preparado para a integração futura).
 
 | Fase | Conteúdo |
 | --- | --- |
-| 6. Channels | Formalizar adaptador de canal e adicionar Instagram Direct (premium) |
 | 7. Inbox | Central de atendimento (assumir conversa, notas, handoff humano na prática) |
 | 8. Dashboard | Métricas (taxa de resolução por IA, reservas, etc.) |
 | 9. Automations | Confirmação/lembrete/follow-up configuráveis |

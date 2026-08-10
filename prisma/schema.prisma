@@ -40,6 +40,15 @@ enum Role {
   STAFF
 }
 
+// Canal de mensageria da conversa. So WHATSAPP esta implementado nesta fase -
+// ver src/channels/ (ChannelAdapter). INSTAGRAM existe no schema para o dado
+// ja nascer pronto para reportar/filtrar por canal quando essa integracao
+// for construida (recurso premium futuro).
+enum ChannelType {
+  WHATSAPP
+  INSTAGRAM
+}
+
 enum AgentTone {
   FRIENDLY
   PROFESSIONAL
@@ -367,6 +376,7 @@ model Conversation {
   step         String   @default("idle")
   data         Json     @default("{}")
   needsHuman   Boolean  @default(false)
+  channel      ChannelType @default(WHATSAPP)
   // Idioma (ISO 639-1) detectado na ultima mensagem de texto do cliente.
   detectedLanguage String?
   lastMessageAt DateTime @default(now())
