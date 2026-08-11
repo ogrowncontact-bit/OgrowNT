@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { ApiError } from "@/lib/api";
+import { getBusinessProfile } from "@/lib/business";
 import { getOnboarding, importFromWebsite, runQuickStart } from "@/lib/onboarding";
 import { createService, listBusinessHours, listServices, saveBusinessHours, updateService } from "@/lib/services";
 import type { BusinessHoursEntry, OnboardingStatus, Service, WebsiteImportSuggestion } from "@/lib/types";
@@ -32,6 +33,7 @@ export function ServicesView({ businessId, token }: { businessId: string; token:
   const [services, setServices] = useState<Service[] | null>(null);
   const [hours, setHours] = useState<HourRow[] | null>(null);
   const [onboarding, setOnboarding] = useState<OnboardingStatus | null>(null);
+  const [currency, setCurrency] = useState("EUR");
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -61,15 +63,17 @@ export function ServicesView({ businessId, token }: { businessId: string; token:
     let cancelled = false;
     async function load() {
       try {
-        const [serviceList, hourList, onboardingStatus] = await Promise.all([
+        const [serviceList, hourList, onboardingStatus, profile] = await Promise.all([
           listServices(businessId, token),
           listBusinessHours(businessId, token),
           getOnboarding(businessId, token),
+          getBusinessProfile(businessId, token),
         ]);
         if (!cancelled) {
           setServices(serviceList);
           setHours(buildHourRows(hourList));
           setOnboarding(onboardingStatus);
+          setCurrency(profile.currency);
         }
       } catch {
         if (!cancelled) setError("Nao foi possivel carregar servicos e horarios.");
@@ -281,7 +285,7 @@ export function ServicesView({ businessId, token }: { businessId: string; token:
                     step={0.01}
                     value={s.price ?? ""}
                     onChange={(e) => updateSuggestion(i, { price: e.target.value ? Number(e.target.value) : null })}
-                    placeholder="R$ (opcional)"
+                    placeholder={`${currency} (opcional)`}
                     className="w-28 rounded-md border border-zinc-300 px-2 py-1 text-sm dark:border-zinc-700 dark:bg-zinc-900"
                   />
                 </li>
@@ -313,7 +317,7 @@ export function ServicesView({ businessId, token }: { businessId: string; token:
                   <div>
                     <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100">{s.name}</p>
                     <p className="text-xs text-zinc-400">
-                      {s.durationMinutes}min{s.price ? ` · R$ ${Number(s.price).toFixed(2)}` : ""}
+                      {s.durationMinutes}min{s.price ? ` · ${currency} ${Number(s.price).toFixed(2)}` : ""}
                     </p>
                   </div>
                   <button
@@ -362,7 +366,7 @@ export function ServicesView({ businessId, token }: { businessId: string; token:
             step={0.01}
             value={newPrice}
             onChange={(e) => setNewPrice(e.target.value)}
-            placeholder="R$"
+            placeholder={currency}
             className="w-28 rounded-md border border-zinc-300 px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900"
           />
         </div>
