@@ -130,6 +130,21 @@ export interface Subscription {
   plan: Plan;
 }
 
+export interface BusinessProfile {
+  id: string;
+  name: string;
+  slug: string;
+  industry: string;
+  timezone: string;
+  description: string | null;
+  address: string | null;
+  phone: string | null;
+  metadata: Record<string, unknown>;
+  defaultLanguage: string;
+  supportedLanguages: string[];
+  currency: string;
+}
+
 export interface Service {
   id: string;
   businessId: string;

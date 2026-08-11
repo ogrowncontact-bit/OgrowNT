@@ -100,8 +100,10 @@ export function BillingView({ businessId, token }: { businessId: string; token: 
             <div>
               <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100">Plano atual: {subscription.plan.name}</p>
               <p className="text-xs text-zinc-400">
-                {formatMoney(subscription.plan.priceMonthly, subscription.plan.currency)}/mes + taxa de configuracao{" "}
-                {formatMoney(subscription.plan.setupFee, subscription.plan.currency)}
+                {formatMoney(subscription.plan.priceMonthly, subscription.plan.currency)}/mes
+                {Number(subscription.plan.setupFee) > 0
+                  ? ` + taxa de configuracao ${formatMoney(subscription.plan.setupFee, subscription.plan.currency)}`
+                  : ""}
               </p>
             </div>
             <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${STATUS_COLORS[subscription.status]}`}>
@@ -114,17 +116,21 @@ export function BillingView({ businessId, token }: { businessId: string; token: 
               Faltam {daysUntil(subscription.trialEndsAt)} dia(s) do primeiro mes gratis.
             </p>
           )}
-          <p className="mt-1 text-xs text-zinc-500">
-            Taxa de configuracao: {subscription.setupFeePaid ? "paga" : "pendente"}
-          </p>
 
-          {!subscription.setupFeePaid && (
-            <button
-              onClick={handleCheckout}
-              className="mt-3 rounded-md bg-zinc-900 px-3 py-1.5 text-xs font-medium text-white dark:bg-zinc-50 dark:text-zinc-900"
-            >
-              Pagar taxa de configuracao
-            </button>
+          {Number(subscription.plan.setupFee) > 0 && (
+            <>
+              <p className="mt-1 text-xs text-zinc-500">
+                Taxa de configuracao: {subscription.setupFeePaid ? "paga" : "pendente"}
+              </p>
+              {!subscription.setupFeePaid && (
+                <button
+                  onClick={handleCheckout}
+                  className="mt-3 rounded-md bg-zinc-900 px-3 py-1.5 text-xs font-medium text-white dark:bg-zinc-50 dark:text-zinc-900"
+                >
+                  Pagar taxa de configuracao
+                </button>
+              )}
+            </>
           )}
         </div>
       )}

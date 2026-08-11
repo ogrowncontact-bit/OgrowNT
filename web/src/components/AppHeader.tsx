@@ -10,6 +10,7 @@ const NAV_LINKS = [
   { href: "/services", label: "Serviços" },
   { href: "/automations", label: "Automações" },
   { href: "/settings", label: "WhatsApp" },
+  { href: "/profile", label: "Perfil" },
   { href: "/billing", label: "Assinatura" },
 ] as const;
 
@@ -19,7 +20,7 @@ export function AppHeader({
   memberships,
   onBusinessChange,
 }: {
-  active: "inbox" | "dashboard" | "services" | "automations" | "settings" | "billing";
+  active: "inbox" | "dashboard" | "services" | "automations" | "settings" | "profile" | "billing";
   businessId: string | null;
   memberships: Membership[];
   onBusinessChange: (id: string) => void;
