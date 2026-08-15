@@ -1,10 +1,10 @@
+import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { prisma } from "@inner/db";
-import { Screen } from "@inner/ui";
+import { Screen, Button } from "@inner/ui";
 import { getAssessmentConfig } from "@/lib/assessments";
 import { readAnonymousSessionId } from "@/lib/anonymousSession";
 import { track } from "@/lib/analytics";
-import { PaywallCTA } from "@/components/PaywallCTA";
 
 const INCLUDED = [
   "Your dominant pattern",
@@ -29,6 +29,9 @@ export default async function PaywallPage({ params }: { params: Promise<{ slug: 
   const config = getAssessmentConfig(session.sourceSlug);
   if (!config) notFound();
 
+  const existingEntitlement = await prisma.entitlement.findFirst({ where: { assessmentSessionId: id } });
+  if (existingEntitlement) redirect(`/${slug}/session/${id}/report`);
+
   const price = config.pricing.individual;
 
   await track({ anonymousSessionId, eventName: "paywall_viewed", assessmentId: session.assessmentId });
@@ -37,9 +40,9 @@ export default async function PaywallPage({ params }: { params: Promise<{ slug: 
     <Screen
       align="top"
       footer={
-        <PaywallCTA
-          label={price ? `Unlock My Profile — €${(price.amountCents / 100).toFixed(2)}` : "Unlock My Profile"}
-        />
+        <Link href={`/${slug}/session/${id}/checkout`}>
+          <Button>{price ? `Unlock My Profile — €${(price.amountCents / 100).toFixed(2)}` : "Unlock My Profile"}</Button>
+        </Link>
       }
     >
       <p className="mb-3 text-xs font-medium uppercase tracking-[0.2em] text-[var(--inner-muted)]">

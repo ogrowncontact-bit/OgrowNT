@@ -10,6 +10,8 @@ out/
 .env.*.local
 .turbo/
 coverage/
+.local-reports/
+.local-emails/
 .DS_Store
 npm-debug.log*
 pnpm-debug.log*

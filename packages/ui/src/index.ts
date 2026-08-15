@@ -4,3 +4,4 @@ export { OptionCard } from "./components/OptionCard";
 export { Button } from "./components/Button";
 export { ScaleInput } from "./components/ScaleInput";
 export { OpenTextArea } from "./components/OpenTextArea";
+export { Checkbox } from "./components/Checkbox";

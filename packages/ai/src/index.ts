@@ -5,5 +5,7 @@ export { chooseFollowup } from "./questionAI";
 export type { FollowupCandidate, FollowupChoice } from "./questionAI";
 export { generateFreeInsight } from "./profileAI";
 export type { GeneratedInsight } from "./profileAI";
+export { generateReport } from "./reportAI";
+export type { ReportSectionSpec, GeneratedReportSection } from "./reportAI";
 export { enforceNonDiagnostic, sanitizeOpeners, findHardBannedTerms } from "./guardrails/nonDiagnosticFilter";
 export { detectSafetyConcern, SUPPORT_MESSAGE } from "./guardrails/safetyFlag";
