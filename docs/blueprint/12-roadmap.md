@@ -119,10 +119,50 @@ PAPER ORDER → POSITION OPEN → MONITOR → POSITION CLOSED → RESULT SAVED`.
 Ainda nada de dinheiro real: `Order.is_paper`/`Trade.is_paper` sempre `true`,
 nenhum adapter de broker/exchange real está registado.
 
-## Fase 4 — News, Regime, Patterns
+## Fase 4 — News, Regime, Patterns — **status: implementada e validada nesta sessão**
 
-News Intelligence Agent (LLM), Market Regime Engine, Pattern Engine com
-`pattern_performance`.
+News Intelligence Agent (LLM), Market Regime Engine (taxonomia completa), Pattern
+Engine com `pattern_performance`.
+
+**Critério de sucesso:**
+- [x] News ingestion determinística (`packages/data/connectors/news`, mock
+      provider claramente identificado — nunca fabrica um item de notícia)
+- [x] LLM interpretation layer real (`packages/llm`, wrapper sobre a API da
+      Anthropic): estruturalmente isolado da execução (`packages/llm` nunca
+      é importado por `packages/execution`), e todo output é validado
+      (símbolo tem de estar no universo, enums e ranges verificados) antes
+      de ser aceite — testado com 14 casos incluindo saída malformada,
+      símbolo fora do universo, enums inválidos
+- [x] Sem `ANTHROPIC_API_KEY`: degrada de forma honesta — notícias
+      continuam a ser ingeridas, interpretação fica a neutro, reportado como
+      🟡 no health check, nunca fabricado
+- [x] Pattern Engine: 8 detectores determinísticos (trend, breakout,
+      reversal, momentum, mean_reversion, volatility, anomaly, cross_asset),
+      cada um testado isoladamente com dados sintéticos
+- [x] Regime Engine completo: `classify_regime_with_news` adiciona
+      `panic`/`euphoria`/`transition` a partir de notícias reais e recentes
+      — testado com os 5 casos (bearish→panic, bullish→euphoria,
+      misto→transition, baixa confiança→transition, sem notícia→inalterado)
+- [x] `pattern`/`news` deixam de ser neutros na Opportunity Scoring Engine:
+      alinhados com o sinal sobem o score, em conflito descem — testado e
+      confirmado ao vivo (score subiu de ~67 para 72.74 com um padrão
+      momentum alinhado, `news_component` foi de 50 para 95 com uma notícia
+      bullish de alta confiança)
+- [x] `pattern_performance` atualizado pelo Trade Monitor quando uma posição
+      cujo sinal tinha um padrão associado fecha — médias incrementais
+      testadas (win rate, R médio, expectancy)
+- [x] worker: novo ciclo de notícias com cadência própria, corre antes do
+      Strategy Engine cycle para que `news_impact` esteja fresco quando a
+      classificação de regime e o scoring o consultam
+- [x] API: `/api/news`, `/api/patterns`, `/api/patterns/performance`
+- [x] dashboard mostra painel de notícias com impacto interpretado por
+      ativo (verificado ao vivo: notícia sintética → interpretação →
+      renderizada na UI)
+- [x] 51 novos testes automatizados (156/156 no total da suite)
+
+`packages/llm` nunca é importado por `packages/execution` — a separação
+estrutural "LLM ≠ Trading Engine" (`00-overview.md`) permanece válida mesmo
+com uma LLM real ligada.
 
 ## Fase 5 — Learning & Research
 

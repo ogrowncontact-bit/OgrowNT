@@ -76,6 +76,22 @@ export type Trade = {
   is_paper: boolean;
   closed_at: string;
 };
+export type NewsImpact = {
+  asset_symbol: string;
+  direction: "bullish" | "bearish" | "neutral";
+  impact: "low" | "medium" | "high";
+  confidence: number;
+  horizon_hours: number;
+  rationale: string;
+};
+export type NewsEvent = {
+  id: number;
+  source: string;
+  published_at: string;
+  headline: string;
+  category: string | null;
+  impacts: NewsImpact[];
+};
 
 async function apiFetch<T>(path: string, token?: string): Promise<T | null> {
   try {
@@ -102,6 +118,7 @@ export const getPositions = (statusFilter: "open" | "closed" = "open") =>
 export const getOpportunities = (limit = 10) => apiFetch<Opportunity[]>(`/api/opportunities?limit=${limit}`);
 export const getRegimes = () => apiFetch<Regime[]>("/api/regime");
 export const getTrades = (limit = 10) => apiFetch<Trade[]>(`/api/trades?limit=${limit}`);
+export const getNews = (limit = 10) => apiFetch<NewsEvent[]>(`/api/news?limit=${limit}`);
 
 export async function login(email: string, password: string) {
   const res = await fetch(`${API_URL}/api/auth/login`, {

@@ -2,6 +2,7 @@ import { cookies } from "next/headers";
 import {
   getAssets,
   getHealth,
+  getNews,
   getOpportunities,
   getPortfolio,
   getPositions,
@@ -24,7 +25,7 @@ export default async function DashboardPage() {
   const cookieStore = await cookies();
   const token = cookieStore.get("ogrownt_token")?.value ?? "";
 
-  const [health, status, portfolio, assets, positions, opportunities, regimes, trades] = await Promise.all([
+  const [health, status, portfolio, assets, positions, opportunities, regimes, trades, news] = await Promise.all([
     getHealth(),
     getSystemStatus(token),
     getPortfolio(),
@@ -33,6 +34,7 @@ export default async function DashboardPage() {
     getOpportunities(10),
     getRegimes(),
     getTrades(8),
+    getNews(6),
   ]);
 
   const systemOnline = health?.overall === "green";
@@ -199,6 +201,52 @@ export default async function DashboardPage() {
 
       <section className="mb-6 rounded-lg border border-base-700 bg-base-900 p-4">
         <p className="mb-3 text-[11px] uppercase tracking-wider text-ink-500">
+          News {news ? `(${news.length})` : ""}
+        </p>
+        {news && news.length > 0 ? (
+          <div className="space-y-2">
+            {news.map((n) => (
+              <div key={n.id} className="rounded border border-base-700 px-2 py-1.5 text-xs">
+                <div className="flex items-center justify-between text-ink-100">
+                  <span>{n.headline}</span>
+                  <span className="shrink-0 pl-2 text-ink-500">{n.source}</span>
+                </div>
+                {n.impacts.length > 0 ? (
+                  <div className="mt-1 flex flex-wrap gap-2">
+                    {n.impacts.map((impact, i) => (
+                      <span
+                        key={i}
+                        className={`text-[10px] uppercase tracking-wide ${
+                          impact.direction === "bullish"
+                            ? "text-signal-green"
+                            : impact.direction === "bearish"
+                              ? "text-signal-red"
+                              : "text-ink-500"
+                        }`}
+                      >
+                        {impact.asset_symbol} {impact.direction} ({impact.impact}, {Math.round(impact.confidence * 100)}%)
+                      </span>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="mt-1 text-[10px] text-ink-500">
+                    No asset impact interpreted{" "}
+                    {health?.components.find((c) => c.name === "ai_services")?.status === "yellow"
+                      ? "— AI services not configured"
+                      : "yet"}
+                    .
+                  </p>
+                )}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-xs text-ink-500">No recent news.</p>
+        )}
+      </section>
+
+      <section className="mb-6 rounded-lg border border-base-700 bg-base-900 p-4">
+        <p className="mb-3 text-[11px] uppercase tracking-wider text-ink-500">
           Recent Trades {trades ? `(${trades.length})` : ""}
         </p>
         {trades && trades.length > 0 ? (
@@ -257,13 +305,17 @@ export default async function DashboardPage() {
         <p className="mb-3 text-[11px] uppercase tracking-wider text-ink-500">System Health</p>
         <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
           {health?.components.map((c) => (
-            <div key={c.name} className="flex items-center gap-2 text-xs">
+            <div key={c.name} className="flex items-center gap-2 text-xs" title={c.detail ?? undefined}>
               <span
                 className={`h-2 w-2 rounded-full ${
-                  c.status === "green" ? "bg-signal-green" : "bg-signal-red"
+                  c.status === "green"
+                    ? "bg-signal-green"
+                    : c.status === "yellow"
+                      ? "bg-signal-yellow"
+                      : "bg-signal-red"
                 }`}
               />
-              <span className="text-ink-300">{c.name.replace("_", " ")}</span>
+              <span className="text-ink-300">{c.name.replace(/_/g, " ")}</span>
             </div>
           ))}
         </div>

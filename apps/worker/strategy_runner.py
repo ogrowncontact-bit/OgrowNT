@@ -1,10 +1,12 @@
 """Strategy Engine cycle — docs/blueprint/05-event-flow.md Decision Pipeline,
-the slice up to (not including) the Risk Engine: regime -> strategies ->
-scoring. Nothing here executes or approves anything (Phase 3).
+the slice up to (not including) the Risk Engine: regime -> patterns ->
+strategies -> scoring. Nothing here executes or approves anything except
+through the Risk Engine (apps/worker/risk_execution.py).
 """
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
 
@@ -13,15 +15,17 @@ from packages.data.connectors.market.base import Candle
 from packages.execution.adapters.base import ExecutionProvider
 from packages.execution.adapters.paper import PaperExecutionProvider
 from packages.quant.indicators.core import MIN_CANDLES_REQUIRED, compute_indicators
-from packages.quant.regime.classifier import classify_regime
+from packages.quant.patterns.detector import PatternDetection, detect_all
+from packages.quant.regime.classifier import NewsSignal, classify_regime_with_news
 from packages.quant.scoring import build_scoring_inputs, compute_score
 from packages.quant.strategies import ALL_STRATEGIES, MarketContext, Strategy
-from packages.shared.models import OHLCV, Asset, MarketRegime, OpportunityScore, Signal, StrategyRow
+from packages.shared.models import OHLCV, Asset, MarketRegime, NewsImpact, OpportunityScore, Pattern, Signal, StrategyRow
 
 logger = logging.getLogger("worker.strategy_runner")
 
 TIMEFRAME = "1m"
 HISTORY_LIMIT = 200
+NEWS_LOOKBACK_HOURS = 48  # widest possible horizon_hours we'll consider; filtered tighter per-row below
 
 
 def _load_recent_candles(db: Session, asset_id: int, timeframe: str, limit: int) -> list[Candle]:
@@ -37,6 +41,43 @@ def _load_recent_candles(db: Session, asset_id: int, timeframe: str, limit: int)
         Candle(ts=r.ts, open=r.open, high=r.high, low=r.low, close=r.close, volume=r.volume, data_quality=r.data_quality)
         for r in rows
     ]
+
+
+def _load_relevant_news(db: Session, asset_id: int) -> list[NewsSignal]:
+    """news_impact rows for this asset still inside their own horizon_hours
+    window — a row published 20h ago with a 4h horizon is stale and excluded
+    even though it's within NEWS_LOOKBACK_HOURS."""
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(hours=NEWS_LOOKBACK_HOURS)
+    rows = db.query(NewsImpact).filter(NewsImpact.asset_id == asset_id, NewsImpact.created_at >= cutoff).all()
+    return [
+        NewsSignal(direction=r.direction, impact=r.impact, confidence=r.confidence)
+        for r in rows
+        if now - r.created_at <= timedelta(hours=r.horizon_hours)
+    ]
+
+
+def _persist_patterns(db: Session, asset: Asset, ts, detections: list[PatternDetection]) -> list[tuple[PatternDetection, Pattern]]:
+    persisted = []
+    for detection in detections:
+        row = Pattern(
+            asset_id=asset.id, timeframe=TIMEFRAME, ts=ts, pattern_type=detection.pattern_type,
+            pattern_class=detection.pattern_class, direction=detection.direction,
+            strength=detection.strength, meta=detection.metadata,
+        )
+        db.add(row)
+        persisted.append((detection, row))
+    if persisted:
+        db.flush()  # assign ids for signal.pattern_id linking
+    return persisted
+
+
+def _best_aligned_pattern(direction: str, persisted: list[tuple[PatternDetection, Pattern]]) -> Pattern | None:
+    mapped = "bullish" if direction == "long" else "bearish"
+    aligned = [row for detection, row in persisted if detection.direction == mapped]
+    if not aligned:
+        return None
+    return max(aligned, key=lambda row: row.strength)
 
 
 def run_strategy_cycle(
@@ -57,7 +98,8 @@ def run_strategy_cycle(
             continue
 
         indicators = compute_indicators(candles)
-        regime_result = classify_regime(candles)
+        news_signals = _load_relevant_news(db, asset.id)
+        regime_result = classify_regime_with_news(candles, news_signals)
         regime_row = MarketRegime(
             asset_id=asset.id,
             timeframe=TIMEFRAME,
@@ -68,6 +110,9 @@ def run_strategy_cycle(
         )
         db.add(regime_row)
         db.flush()  # assign regime_row.id for the signals below
+
+        pattern_detections = detect_all(candles, indicators)
+        persisted_patterns = _persist_patterns(db, asset, candles[-1].ts, pattern_detections)
 
         ctx = MarketContext(
             asset_id=asset.id,
@@ -90,6 +135,8 @@ def run_strategy_cycle(
             if signal is None:
                 continue
 
+            aligned_pattern = _best_aligned_pattern(signal.direction, persisted_patterns)
+
             signal_row = Signal(
                 strategy_id=strategy_row.id,
                 asset_id=asset.id,
@@ -99,12 +146,16 @@ def run_strategy_cycle(
                 stop_price=signal.stop_price,
                 target_price=signal.target_price,
                 regime_id=regime_row.id,
+                pattern_id=aligned_pattern.id if aligned_pattern else None,
                 status="scored",
             )
             db.add(signal_row)
             db.flush()  # assign signal_row.id
 
-            inputs = build_scoring_inputs(ctx, strategy, analysis, signal)
+            inputs = build_scoring_inputs(
+                ctx, strategy, analysis, signal,
+                patterns=[d for d, _ in persisted_patterns], news_signals=news_signals,
+            )
             score = compute_score(inputs)
             db.add(
                 OpportunityScore(

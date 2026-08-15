@@ -1,21 +1,33 @@
 from packages.quant.regime.classifier import (
+    NEWS_REGIME_MIN_CONFIDENCE,
+    REGIME_EUPHORIA,
     REGIME_HIGH_VOLATILITY,
     REGIME_LOW_VOLATILITY,
+    REGIME_PANIC,
     REGIME_RANGING,
+    REGIME_TRANSITION,
     REGIME_TRENDING_BEAR,
     REGIME_TRENDING_BULL,
     REGIME_UNKNOWN,
+    NewsSignal,
     RegimeResult,
     classify_regime,
+    classify_regime_with_news,
 )
 
 __all__ = [
+    "NEWS_REGIME_MIN_CONFIDENCE",
+    "REGIME_EUPHORIA",
     "REGIME_HIGH_VOLATILITY",
     "REGIME_LOW_VOLATILITY",
+    "REGIME_PANIC",
     "REGIME_RANGING",
+    "REGIME_TRANSITION",
     "REGIME_TRENDING_BEAR",
     "REGIME_TRENDING_BULL",
     "REGIME_UNKNOWN",
+    "NewsSignal",
     "RegimeResult",
     "classify_regime",
+    "classify_regime_with_news",
 ]

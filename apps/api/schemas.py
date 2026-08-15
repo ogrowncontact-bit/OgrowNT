@@ -263,3 +263,45 @@ class TradeWhyOut(BaseModel):
     position: PositionOut
     opportunity: OpportunityDetailOut | None
     risk_decision: RiskDecisionOut | None
+
+
+# --- Phase 4 -----------------------------------------------------------
+
+
+class NewsImpactOut(BaseModel):
+    asset_symbol: str
+    direction: str
+    impact: str
+    confidence: float
+    horizon_hours: float
+    rationale: str
+
+
+class NewsEventOut(BaseModel):
+    id: int
+    source: str
+    published_at: datetime
+    headline: str
+    category: str | None
+    impacts: list[NewsImpactOut]
+
+
+class PatternOut(BaseModel):
+    id: int
+    asset_symbol: str
+    timeframe: str
+    ts: datetime
+    pattern_type: str
+    pattern_class: str
+    direction: str | None
+    strength: float
+
+
+class PatternPerformanceOut(BaseModel):
+    pattern_type: str
+    regime: str
+    sample_size: int
+    win_rate: float | None
+    avg_r_multiple: float | None
+    expectancy: float | None
+    updated_at: datetime

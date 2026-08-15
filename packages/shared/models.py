@@ -6,8 +6,12 @@ that uses them:
   Phase 1: auth, assets, OHLCV, paper portfolio, system state, alerts, audit log
   Phase 2: strategies, market regimes, signals, opportunity scores
   Phase 3: risk checks/decisions, positions, orders, trades, correlation matrix
-Tables for news/patterns (Phase 4) and memory/learning (Phase 5) are
-specified in the blueprint and arrive with those phases.
+  Phase 4: news events/impact, patterns, pattern performance
+Tables for memory/learning (Phase 5) are specified in the blueprint and
+arrive with that phase. macro_events (from the blueprint schema) is not yet
+implemented — Phase 4 focuses on the News Intelligence Agent, Pattern
+Engine, and the remaining Regime Engine states, per docs/blueprint/
+12-roadmap.md; a macro economic calendar is a natural but separate addition.
 """
 from datetime import datetime, timezone
 
@@ -221,11 +225,13 @@ class Signal(Base):
     stop_price: Mapped[float] = mapped_column(Float, nullable=False)
     target_price: Mapped[float | None] = mapped_column(Float)
     regime_id: Mapped[int | None] = mapped_column(ForeignKey("market_regimes.id"))
+    pattern_id: Mapped[int | None] = mapped_column(ForeignKey("patterns.id"))
     status: Mapped[str] = mapped_column(String, default="pending", nullable=False)
 
     strategy: Mapped["StrategyRow"] = relationship()
     asset: Mapped["Asset"] = relationship()
     regime: Mapped["MarketRegime | None"] = relationship()
+    pattern: Mapped["Pattern | None"] = relationship()
 
 
 class OpportunityScore(Base):
@@ -376,3 +382,100 @@ class CorrelationMatrixEntry(Base):
     asset_id_b: Mapped[int] = mapped_column(ForeignKey("assets.id"), primary_key=True)
     window_days: Mapped[int] = mapped_column(primary_key=True)
     correlation: Mapped[float] = mapped_column(Float, nullable=False)
+
+
+# --- Phase 4 (News, Regime, Patterns) -----------------------------------
+
+
+class NewsEvent(Base):
+    """A real news item from a configured source — never fabricated. See
+    docs/blueprint/04-agents-architecture.md#agent-03: ingestion is
+    deterministic (packages/data/connectors/news), interpretation (below,
+    NewsImpact) is the only LLM-touched part of this table pair.
+    """
+
+    __tablename__ = "news_events"
+    __table_args__ = (
+        CheckConstraint(
+            "category IN ('central_bank','inflation','employment','gdp','geopolitics',"
+            "'regulation','crypto','earnings','m_and_a','other')",
+            name="ck_news_events_category",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    source: Mapped[str] = mapped_column(String, nullable=False)
+    published_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    headline: Mapped[str] = mapped_column(Text, nullable=False)
+    body: Mapped[str | None] = mapped_column(Text)
+    raw_url: Mapped[str | None] = mapped_column(String)
+    category: Mapped[str | None] = mapped_column(String)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
+class NewsImpact(Base):
+    """LLM interpretation of one (news_event, asset) pair — the only table
+    in this schema an LLM writes to directly, and even then only through
+    packages/llm, never packages/execution (docs/blueprint/01-repo-structure.md
+    §Regras de dependência).
+    """
+
+    __tablename__ = "news_impact"
+    __table_args__ = (
+        CheckConstraint("impact IN ('low','medium','high')", name="ck_news_impact_impact"),
+        CheckConstraint("direction IN ('bullish','bearish','neutral')", name="ck_news_impact_direction"),
+        CheckConstraint("confidence >= 0 AND confidence <= 1", name="ck_news_impact_confidence"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    news_event_id: Mapped[int] = mapped_column(ForeignKey("news_events.id"), nullable=False)
+    asset_id: Mapped[int] = mapped_column(ForeignKey("assets.id"), nullable=False)
+    impact: Mapped[str] = mapped_column(String, nullable=False)
+    direction: Mapped[str] = mapped_column(String, nullable=False)
+    confidence: Mapped[float] = mapped_column(Float, nullable=False)
+    horizon_hours: Mapped[float] = mapped_column(Float, nullable=False)
+    rationale: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+    news_event: Mapped["NewsEvent"] = relationship()
+    asset: Mapped["Asset"] = relationship()
+
+
+class Pattern(Base):
+    __tablename__ = "patterns"
+    __table_args__ = (
+        CheckConstraint(
+            "pattern_class IN ('technical','statistical','cross_market')", name="ck_patterns_pattern_class"
+        ),
+        CheckConstraint("direction IN ('bullish','bearish','neutral')", name="ck_patterns_direction"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    asset_id: Mapped[int] = mapped_column(ForeignKey("assets.id"), nullable=False)
+    timeframe: Mapped[str] = mapped_column(String, nullable=False)
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    pattern_type: Mapped[str] = mapped_column(String, nullable=False)
+    pattern_class: Mapped[str] = mapped_column(String, nullable=False)
+    direction: Mapped[str | None] = mapped_column(String)
+    strength: Mapped[float] = mapped_column(Float, nullable=False)
+    meta: Mapped[dict] = mapped_column(JSON, default=dict)
+
+    asset: Mapped["Asset"] = relationship()
+
+
+class PatternPerformance(Base):
+    """Rolling performance of a pattern type within a regime — updated by
+    the Trade Monitor when a position whose signal was linked to a pattern
+    closes (docs/blueprint/06-memory-system.md's Pattern Memory, minus the
+    full Learning Engine writeback that arrives Phase 5).
+    """
+
+    __tablename__ = "pattern_performance"
+
+    pattern_type: Mapped[str] = mapped_column(String, primary_key=True)
+    regime: Mapped[str] = mapped_column(String, primary_key=True)
+    sample_size: Mapped[int] = mapped_column(default=0, nullable=False)
+    win_rate: Mapped[float | None] = mapped_column(Float)
+    avg_r_multiple: Mapped[float | None] = mapped_column(Float)
+    expectancy: Mapped[float | None] = mapped_column(Float)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)

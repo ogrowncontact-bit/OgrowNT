@@ -14,9 +14,10 @@ from sqlalchemy.orm import Session
 
 from packages.execution.adapters.base import ExecutionProvider
 from packages.execution.order_manager import close_position
+from packages.quant.patterns.performance import record_trade_outcome
 from packages.quant.strategies import ALL_STRATEGIES
 from packages.shared.market_data import get_latest_close
-from packages.shared.models import Asset, MarketRegime, Position, StrategyRow
+from packages.shared.models import Asset, MarketRegime, Pattern, Position, Signal, StrategyRow, Trade
 
 logger = logging.getLogger("worker.trade_monitor")
 
@@ -57,6 +58,27 @@ def _check_thesis_validity(db: Session, position: Position) -> str | None:
     return None
 
 
+def _record_pattern_performance(db: Session, position: Position, trade: Trade) -> None:
+    """Pattern Memory writeback — docs/blueprint/06-memory-system.md. Only
+    fires when the position's originating signal was actually linked to a
+    detected pattern (apps/worker/strategy_runner.py sets pattern_id only
+    when one aligned with the signal's direction)."""
+    if position.signal_id is None:
+        return
+    signal = db.get(Signal, position.signal_id)
+    if signal is None or signal.pattern_id is None or signal.regime_id is None:
+        return
+    pattern = db.get(Pattern, signal.pattern_id)
+    regime = db.get(MarketRegime, signal.regime_id)
+    if pattern is None or regime is None:
+        return
+
+    record_trade_outcome(
+        db, pattern_type=pattern.pattern_type, regime=regime.regime,
+        r_multiple=trade.r_multiple, is_win=(trade.outcome == "win"),
+    )
+
+
 def run_trade_monitor_cycle(db: Session, provider: ExecutionProvider) -> dict:
     open_positions = db.query(Position).filter(Position.status == "open").all()
     checked, closed, unavailable = 0, 0, 0
@@ -77,6 +99,7 @@ def run_trade_monitor_cycle(db: Session, provider: ExecutionProvider) -> dict:
         trade = close_position(db, provider, position, asset=asset, exit_reason=exit_reason)
         if trade is not None:
             closed += 1
+            _record_pattern_performance(db, position, trade)
             logger.info(
                 "Closed position %s (%s) reason=%s pnl=%.2f outcome=%s",
                 position.id, asset.symbol, exit_reason, trade.pnl, trade.outcome,

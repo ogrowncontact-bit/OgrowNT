@@ -26,6 +26,17 @@ class Settings(BaseSettings):
     # Strategy evaluation cadence — docs/blueprint/05-event-flow.md §Cadência (15 min).
     strategy_interval_seconds: int = 900
 
+    news_provider: str = "mock"
+    # News Intelligence Agent cadence — independent of strategy_interval_seconds.
+    news_interval_seconds: int = 900
+
+    # packages/llm — required for real News Intelligence interpretation.
+    # Left empty means "no LLM configured": the worker logs it and skips
+    # interpretation rather than faking one (docs/blueprint/00-overview.md's
+    # "no hallucinated data" rule applies to LLM output too).
+    anthropic_api_key: str = ""
+    llm_model: str = "claude-sonnet-5"
+
 
 @lru_cache
 def get_settings() -> Settings:

@@ -7,6 +7,8 @@ from sqlalchemy.orm import Session
 from apps.api.deps import get_current_admin, get_session
 from apps.api.schemas import ComponentHealth, HealthResponse, RiskLimitsUpdate, SystemStatusResponse
 from packages.data.connectors.market.factory import get_market_data_provider
+from packages.data.connectors.news.factory import get_news_provider
+from packages.llm.client import LLMClient
 from packages.risk.config import CONFIG_PATH as RISK_CONFIG_PATH
 from packages.risk.config import load_risk_limits
 from packages.shared.models import AdminUser, AuditLog, SystemState
@@ -43,11 +45,32 @@ def health(db: Session = Depends(get_session)) -> HealthResponse:
     except Exception as exc:  # noqa: BLE001
         components.append(ComponentHealth(name="risk_engine", status="red", detail=str(exc)))
 
-    # Components that arrive in later phases (news, AI services, learning
-    # engine — docs/blueprint/09-dashboard-spec.md#6) are intentionally
-    # omitted here rather than faked as green: they don't exist yet.
+    try:
+        news_provider = get_news_provider()
+        connected = news_provider.is_connected()
+        components.append(
+            ComponentHealth(name="news_feed", status="green" if connected else "red", detail=f"provider={news_provider.name}")
+        )
+    except Exception as exc:  # noqa: BLE001
+        components.append(ComponentHealth(name="news_feed", status="red", detail=str(exc)))
 
-    overall = "green" if all(c.status == "green" for c in components) else "degraded"
+    # LLM interpretation is a real, optional capability — "not configured" is
+    # a valid dev-mode state (paper trading works fine without it, scoring
+    # just keeps the "news" component neutral), so it's yellow, not red, and
+    # doesn't flip the overall status to degraded on its own.
+    llm_available = LLMClient().is_available()
+    components.append(
+        ComponentHealth(
+            name="ai_services",
+            status="green" if llm_available else "yellow",
+            detail=None if llm_available else "ANTHROPIC_API_KEY not set — news ingested but not interpreted",
+        )
+    )
+
+    # Learning engine (Phase 5) is intentionally omitted here rather than
+    # faked as green: it doesn't exist yet.
+
+    overall = "degraded" if any(c.status == "red" for c in components) else "green"
     return HealthResponse(overall=overall, components=components)
 
 

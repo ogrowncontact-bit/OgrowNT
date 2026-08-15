@@ -1,13 +1,17 @@
 """Worker entrypoint — the 24/7 loop.
 
-Runs two independent cadences (docs/blueprint/05-event-flow.md §Cadência):
+Runs three independent cadences (docs/blueprint/05-event-flow.md §Cadência):
 - Every SCAN_INTERVAL_SECONDS: Market Data Agent (scan), Trade Monitor
   (stop/target/thesis checks on open positions), and a safety-belt refresh —
   all need to be responsive to price moves between strategy cycles.
+- Every NEWS_INTERVAL_SECONDS: News Intelligence Agent — ingest, then (only
+  if ANTHROPIC_API_KEY is configured) interpret into news_impact. Runs
+  before the Strategy cycle below so fresh news_impact rows are available
+  when regime classification and scoring read them.
 - Every STRATEGY_INTERVAL_SECONDS: history backfill for new assets, the
-  Strategy Engine cycle (regime -> strategies -> scoring), and — for any
-  signal scoring "possible" or better — the Risk Engine and, if approved,
-  the Execution Engine (paper only).
+  Strategy Engine cycle (regime -> patterns -> strategies -> scoring), and —
+  for any signal scoring "possible" or better — the Risk Engine and, if
+  approved, the Execution Engine (paper only).
 
 Nothing here ever reads a real broker/exchange key or sends a live order —
 see docs/blueprint/12-roadmap.md, live trading is explicitly out of scope
@@ -19,11 +23,14 @@ import signal
 import time
 
 from apps.worker.history import backfill_active_assets
+from apps.worker.news_agent import run_news_cycle
 from apps.worker.scanner import run_scan_cycle
 from apps.worker.strategy_runner import run_strategy_cycle
 from apps.worker.trade_monitor import run_trade_monitor_cycle
 from packages.data.connectors.market.factory import get_market_data_provider
+from packages.data.connectors.news.factory import get_news_provider
 from packages.execution.adapters.paper import PaperExecutionProvider
+from packages.llm.client import LLMClient
 from packages.risk.monitor import update_safety_belt
 from packages.shared.db import SessionLocal
 from packages.shared.logging import configure_logging
@@ -43,12 +50,19 @@ def _handle_shutdown(signum, frame) -> None:  # noqa: ANN001 - signal handler si
 def main() -> None:
     settings = get_settings()
     provider = get_market_data_provider()
+    news_provider = get_news_provider()
+    llm_client = LLMClient()
     logger.info(
-        "Worker starting — provider=%s scan_interval=%ss strategy_interval=%ss",
-        provider.name,
-        settings.scan_interval_seconds,
-        settings.strategy_interval_seconds,
+        "Worker starting — market_data=%s news=%s llm_configured=%s "
+        "scan_interval=%ss news_interval=%ss strategy_interval=%ss",
+        provider.name, news_provider.name, llm_client.is_available(),
+        settings.scan_interval_seconds, settings.news_interval_seconds, settings.strategy_interval_seconds,
     )
+    if not llm_client.is_available():
+        logger.warning(
+            "ANTHROPIC_API_KEY not set — news will be ingested but not interpreted "
+            "(news_impact stays empty, pattern/news scoring inputs stay neutral)"
+        )
 
     signal.signal(signal.SIGTERM, _handle_shutdown)
     signal.signal(signal.SIGINT, _handle_shutdown)
@@ -61,6 +75,7 @@ def main() -> None:
     finally:
         db.close()
 
+    last_news_run = 0.0
     last_strategy_run = 0.0
 
     while _running:
@@ -73,6 +88,10 @@ def main() -> None:
             exec_provider = PaperExecutionProvider(db)
             run_trade_monitor_cycle(db, exec_provider)
             update_safety_belt(db)
+
+            if cycle_start - last_news_run >= settings.news_interval_seconds:
+                run_news_cycle(db, news_provider, llm_client)
+                last_news_run = cycle_start
 
             if cycle_start - last_strategy_run >= settings.strategy_interval_seconds:
                 backfill_active_assets(db, provider)

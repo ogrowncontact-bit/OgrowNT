@@ -4,44 +4,56 @@
 **paper trading only** — no real orders are ever sent. See the full engineering
 specification in [`docs/blueprint/`](docs/blueprint/00-overview.md).
 
-## Status: Phase 3 (Risk & Execution)
+## Status: Phase 4 (News, Regime, Patterns)
 
 Per [`docs/blueprint/12-roadmap.md`](docs/blueprint/12-roadmap.md):
 
 - **Phase 1 (Brain):** project, database, authentication, dashboard, a market-data
   abstraction (mock provider for now), the paper portfolio, a basic scanner, logging.
-- **Phase 2 (Intelligence):** technical indicators, a rule-based Regime Engine
-  (5 of 9 regimes — the rest need Phase 4's News Intelligence Agent), 4 pluggable
-  strategies (Trend Following, Momentum, Breakout, Mean Reversion), and a
-  deterministic Opportunity Scoring Engine.
+- **Phase 2 (Intelligence):** technical indicators, a rule-based Regime Engine,
+  4 pluggable strategies (Trend Following, Momentum, Breakout, Mean Reversion), and
+  a deterministic Opportunity Scoring Engine.
 - **Phase 3 (Risk & Execution):** Portfolio Engine, Risk Engine (position sizing,
   real Pearson correlation guard, Safety Belts, a 10-step decision pipeline with
   veto power), a `PaperExecutionProvider` (simulated spread/slippage/fees), and a
   Trade Monitor that closes positions on stop/target hits or an invalidated
-  thesis. The worker now runs the full `SIGNAL → RISK → PAPER ORDER → POSITION →
-  MONITOR → CLOSE` loop on its own — verified live, not just in tests.
+  thesis. The worker runs the full `SIGNAL → RISK → PAPER ORDER → POSITION →
+  MONITOR → CLOSE` loop on its own.
+- **Phase 4 (News, Regime, Patterns):** a News Intelligence Agent (real LLM
+  interpretation via `packages/llm`, degrading honestly — never fabricating — when
+  no `ANTHROPIC_API_KEY` is set), a Pattern Engine (8 deterministic detectors:
+  trend, breakout, reversal, momentum, mean reversion, volatility, anomaly,
+  cross-asset) with its own win-rate tracking, and the full Regime taxonomy
+  (`panic`/`euphoria`/`transition` now derived from real news, not guessed). The
+  Opportunity Scoring Engine's `pattern` and `news` inputs are real signals now,
+  not neutral placeholders.
 
-News/patterns and learning arrive in later phases — **every order is `is_paper =
-true`; no broker/exchange adapter is registered; nothing in this repo can send a
-live order or read a real broker/exchange key.**
+Learning/research (Phase 5) arrives later — **every order is `is_paper = true`; no
+broker/exchange adapter is registered; nothing in this repo can send a live order
+or read a real broker/exchange key.**
 
 ## Architecture at a glance
 
 ```text
 apps/
   api/         FastAPI backend (auth, system health, assets, market data, portfolio,
-               strategies, opportunities/signals, regime, risk, positions/orders/trades)
+               strategies, opportunities/signals, regime, risk, positions/orders/trades,
+               news, patterns)
   worker/      24/7 loop: Market Data Agent (scan), Trade Monitor + safety-belt
-               refresh (every scan), Strategy Engine cycle (history backfill,
-               regime, strategies, scoring, Risk Engine, paper execution)
+               refresh (every scan), News Intelligence Agent (own cadence),
+               Strategy Engine cycle (history backfill, regime, patterns,
+               strategies, scoring, Risk Engine, paper execution)
   dashboard/   Next.js dashboard (single admin user)
 packages/
   shared/      DB models, settings, logging, OHLCV lookup — shared across apps/packages
-  data/        Market data provider interface + mock provider (incl. historical backfill)
-  quant/       indicators, regime classifier, pluggable strategies, scoring engine
+  data/        Market data + news provider interfaces, mock providers for both
+  quant/       indicators, regime classifier, pattern detectors, pluggable
+               strategies, scoring engine
   portfolio/   equity/cash/exposure/drawdown computation, append-only snapshot ledger
   risk/        position sizing, correlation guard, safety belts, the veto-power decision pipeline
   execution/   ExecutionProvider interface, PaperExecutionProvider, order manager
+  llm/         Anthropic API client + News Intelligence interpretation — never
+               imported by packages/execution (structural "LLM ≠ Trading Engine")
 infra/
   docker/      docker-compose + Dockerfiles
   migrations/  Alembic
@@ -59,6 +71,9 @@ docs/blueprint/  full technical spec (architecture, DB schema, API, agents,
 
 ```bash
 cp .env.example .env   # edit ADMIN_EMAIL / ADMIN_PASSWORD / JWT_SECRET
+                        # optionally set ANTHROPIC_API_KEY to enable real
+                        # news interpretation — leave empty and it still
+                        # works, just without that one capability
 docker compose -f infra/docker/docker-compose.yml up --build
 ```
 
