@@ -37,12 +37,42 @@ data (com mock provider explícito), paper portfolio, scanner básico, logging.
       desenvolvimento sandbox. Recomendado como primeiro passo de verificação antes
       de avançar para a Fase 2.
 
-## Fase 2 — Intelligence
+## Fase 2 — Intelligence — **status: implementada e validada nesta sessão**
 
 Technical Analyst, Strategy Engine (interface plugável + `TrendFollowing`,
-`Momentum`, `Breakout`, `MeanReversion`), Signals, Opportunity Scoring Engine.
-**Objetivo funcional:** o sistema encontra e mostra algo como "BTC/USD — Score 82 —
-Momentum — Trending — R/R 2.4 — PAPER TRADE CANDIDATE" (sem ainda executar).
+`Momentum`, `Breakout`, `MeanReversion`), Regime Engine (subset de 5 regimes —
+os restantes exigem o News Intelligence Agent da Fase 4), Signals, Opportunity
+Scoring Engine. **Objetivo funcional:** o sistema encontra e mostra algo como
+"BTC/USD — Score 82 — Momentum — Trending — R/R 2.4 — PAPER TRADE CANDIDATE"
+(sem ainda executar).
+
+**Critério de sucesso:**
+- [x] indicadores técnicos (SMA/EMA/RSI/ATR/ROC/volatilidade/trend strength)
+      com testes unitários (`packages/quant/indicators`)
+- [x] Regime Engine classifica `trending_bull/bear`, `ranging`,
+      `high/low_volatility` a partir de dados reais — testado com séries
+      sintéticas de tendência/lateralização
+- [x] 4 estratégias plugáveis, cada uma com `best_regimes`/`worst_regimes`
+      declarados e testadas isoladamente (ex.: mean reversion corretamente
+      contraria a tendência, sendo penalizada pelo `regime_fit`)
+- [x] Opportunity Scoring Engine determinístico, pesos centralizados em
+      `config/scoring_weights.yaml`, com testes de fronteira dos tiers
+- [x] pipeline completo corrido ponta-a-ponta contra Postgres real: 22 ativos
+      → 23 sinais → scores → 6 oportunidades em tier `watch` (nenhuma ainda
+      em `possible`+, porque 4 dos 8 componentes do score ficam num default
+      neutro honesto até `pattern`/`news`/`historical_edge`/
+      `strategy_performance` existirem nas Fases 4-5 — ver
+      `packages/quant/scoring/inputs.py`)
+- [x] API: `/api/strategies`, `/api/strategies/{id}/performance`,
+      `/api/opportunities`, `/api/opportunities/{id}`, `/api/signals`,
+      `/api/regime` — testados via `TestClient`
+- [x] dashboard mostra "Top Opportunities" e regime por ativo com dados reais
+      (verificado via curl contra API+dashboard reais, não só build)
+- [x] 34 novos testes automatizados (52/52 no total da suite)
+- [x] documentação atualizada (este roadmap)
+
+Nada disto executa uma ordem — o Execution Engine só chega na Fase 3. Todas
+as "oportunidades" mostradas são candidatas de leitura, nunca uma posição.
 
 ## Fase 3 — Risk & Execution
 

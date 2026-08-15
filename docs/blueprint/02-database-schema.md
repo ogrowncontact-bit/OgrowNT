@@ -107,8 +107,8 @@ CREATE TABLE market_regimes (
     timeframe       TEXT NOT NULL,
     ts              TIMESTAMPTZ NOT NULL,
     regime          TEXT NOT NULL CHECK (regime IN
-                        ('trending','ranging','high_vol','low_vol','bull','bear',
-                         'panic','euphoria','transition')),
+                        ('trending_bull','trending_bear','ranging','high_volatility',
+                         'low_volatility','panic','euphoria','transition','unknown')),
     confidence      NUMERIC NOT NULL CHECK (confidence BETWEEN 0 AND 1),
     features        JSONB NOT NULL                  -- inputs que geraram a classificação
 );
@@ -199,11 +199,11 @@ CREATE TABLE opportunity_scores (
     id                  BIGSERIAL PRIMARY KEY,
     signal_id           BIGINT NOT NULL REFERENCES signals(id),
     technical           NUMERIC NOT NULL,
+    pattern             NUMERIC NOT NULL,
     regime_fit          NUMERIC NOT NULL,
-    news                NUMERIC NOT NULL,
-    momentum            NUMERIC NOT NULL,
-    historical_pattern  NUMERIC NOT NULL,
+    historical_edge     NUMERIC NOT NULL,
     liquidity           NUMERIC NOT NULL,
+    news                NUMERIC NOT NULL,
     risk_reward         NUMERIC NOT NULL,
     strategy_performance NUMERIC NOT NULL,
     volatility_penalty  NUMERIC NOT NULL DEFAULT 0,

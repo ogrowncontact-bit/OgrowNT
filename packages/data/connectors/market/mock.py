@@ -58,6 +58,44 @@ class MockMarketDataProvider:
             data_quality="high",
         )
 
+    def get_recent_candles(self, symbol: str, timeframe: str, limit: int) -> list[Candle]:
+        """A chained random walk over the last `limit` minutes, deterministic
+        per (symbol, timeframe) so tests are reproducible. Bounded to 500
+        bars regardless of `limit` so backfill cost never grows with how
+        long the app has been running (unlike chaining from a fixed epoch).
+
+        Note: this walk is independent from get_latest_candle's per-minute
+        formula above, so the last backfilled candle and the next live tick
+        won't perfectly line up — a cosmetic mock-only quirk, not something a
+        real historical-bars endpoint would have.
+        """
+        limit = max(1, min(limit, 500))
+        rng = random.Random(f"{symbol}:{timeframe}:backfill")
+        price = self._base_price(symbol)
+        now_bucket = int(datetime.now(timezone.utc).timestamp() // 60)
+        start_bucket = now_bucket - limit + 1
+
+        candles = []
+        for bucket in range(start_bucket, now_bucket + 1):
+            drift = rng.uniform(-0.004, 0.004)
+            price = max(0.0001, price * (1 + drift))
+            high = round(price * (1 + abs(rng.uniform(0, 0.002))), 6)
+            low = round(price * (1 - abs(rng.uniform(0, 0.002))), 6)
+            open_ = round(low + (high - low) * rng.random(), 6)
+            volume = round(rng.uniform(1, 1000), 2)
+            candles.append(
+                Candle(
+                    ts=datetime.fromtimestamp(bucket * 60, tz=timezone.utc),
+                    open=open_,
+                    high=high,
+                    low=low,
+                    close=round(price, 6),
+                    volume=volume,
+                    data_quality="high",
+                )
+            )
+        return candles
+
     @staticmethod
     def _base_price(symbol: str) -> float:
         digest = hashlib.sha256(symbol.encode()).hexdigest()

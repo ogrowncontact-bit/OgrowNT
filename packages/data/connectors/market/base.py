@@ -44,3 +44,12 @@ class MarketDataProvider(Protocol):
         DATA_UNAVAILABLE) instead of guessing a price.
         """
         ...
+
+    def get_recent_candles(self, symbol: str, timeframe: str, limit: int) -> list[Candle]:
+        """Return up to `limit` candles, chronological ascending (oldest
+        first). Used to backfill enough history for indicators/strategies to
+        run (packages/quant/indicators requires MIN_CANDLES_REQUIRED bars).
+        Real providers implement this against their historical-bars/klines
+        endpoint; may return fewer than `limit` if less history exists.
+        """
+        ...

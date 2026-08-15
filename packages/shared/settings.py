@@ -23,6 +23,8 @@ class Settings(BaseSettings):
 
     market_data_provider: str = "mock"
     scan_interval_seconds: int = 60
+    # Strategy evaluation cadence — docs/blueprint/05-event-flow.md §Cadência (15 min).
+    strategy_interval_seconds: int = 900
 
 
 @lru_cache

@@ -1,8 +1,9 @@
-"""Seed script — Phase 1.
+"""Seed script — Phase 1 + Phase 2.
 
 Creates the admin user (from ADMIN_EMAIL/ADMIN_PASSWORD), the initial MVP
-asset universe (20-50 assets per docs/blueprint/00-overview.md), and the
-starting paper portfolio snapshot (EUR 10,000, no positions).
+asset universe (20-50 assets per docs/blueprint/00-overview.md), the starting
+paper portfolio snapshot (EUR 10,000, no positions), and registers the Phase 2
+strategy universe (packages/quant/strategies) in the `strategies` table.
 
 Idempotent: safe to re-run, existing rows are left untouched.
 
@@ -13,9 +14,10 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from apps.api.security import hash_password
+from packages.quant.strategies import ALL_STRATEGIES
 from packages.shared.db import SessionLocal
 from packages.shared.logging import configure_logging
-from packages.shared.models import AdminUser, Asset, PortfolioSnapshot, SystemState
+from packages.shared.models import AdminUser, Asset, PortfolioSnapshot, StrategyRow, SystemState
 from packages.shared.settings import get_settings
 
 logger = configure_logging("seed")
@@ -102,6 +104,25 @@ def seed_portfolio(db) -> None:
     logger.info("Seeded initial paper portfolio: EUR %.2f", capital)
 
 
+def seed_strategies(db) -> None:
+    existing_codes = {s.code for s in db.query(StrategyRow.code).all()}
+    created = 0
+    for strategy in ALL_STRATEGIES:
+        if strategy.code in existing_codes:
+            continue
+        db.add(
+            StrategyRow(
+                code=strategy.code,
+                name=strategy.name,
+                family=strategy.family,
+                version=strategy.version,
+                lifecycle_stage="idea",
+            )
+        )
+        created += 1
+    logger.info("Seeded %d new strategies (%d already present)", created, len(existing_codes))
+
+
 def main() -> None:
     db = SessionLocal()
     try:
@@ -109,6 +130,7 @@ def main() -> None:
         seed_assets(db)
         seed_system_state(db)
         seed_portfolio(db)
+        seed_strategies(db)
         db.commit()
         logger.info("Seed complete")
     finally:

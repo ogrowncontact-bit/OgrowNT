@@ -1,7 +1,17 @@
 import { cookies } from "next/headers";
-import { getAssets, getHealth, getPortfolio, getPositions, getSystemStatus } from "@/lib/api";
+import {
+  getAssets,
+  getHealth,
+  getOpportunities,
+  getPortfolio,
+  getPositions,
+  getRegimes,
+  getSystemStatus,
+} from "@/lib/api";
 import { StatCard } from "@/components/StatCard";
 import { RiskBadge } from "@/components/RiskBadge";
+import { RegimeBadge } from "@/components/RegimeBadge";
+import { TierBadge } from "@/components/TierBadge";
 import { LogoutButton } from "@/components/LogoutButton";
 
 export const dynamic = "force-dynamic";
@@ -13,20 +23,22 @@ export default async function DashboardPage() {
   const cookieStore = await cookies();
   const token = cookieStore.get("ogrownt_token")?.value ?? "";
 
-  const [health, status, portfolio, assets, positions] = await Promise.all([
+  const [health, status, portfolio, assets, positions, opportunities, regimes] = await Promise.all([
     getHealth(),
     getSystemStatus(token),
     getPortfolio(),
     getAssets(),
     getPositions(),
+    getOpportunities(10),
+    getRegimes(),
   ]);
 
   const systemOnline = health?.overall === "green";
-  const pnl = portfolio ? portfolio.equity - portfolio.cash + 0 : 0; // no positions yet in Phase 1
   const dailyPnl = portfolio?.daily_pnl ?? 0;
+  const regimeBySymbol = new Map((regimes ?? []).map((r) => [r.asset_symbol, r]));
 
   return (
-    <main className="mx-auto min-h-screen max-w-5xl px-6 py-8">
+    <main className="mx-auto min-h-screen max-w-6xl px-6 py-8">
       <header className="mb-8 flex items-center justify-between">
         <div>
           <h1 className="text-sm font-semibold uppercase tracking-widest text-ink-100">
@@ -70,6 +82,57 @@ export default async function DashboardPage() {
         </p>
       </section>
 
+      <section className="mb-6 rounded-lg border border-base-700 bg-base-900 p-4">
+        <p className="mb-3 text-[11px] uppercase tracking-wider text-ink-500">
+          Top Opportunities {opportunities ? `(${opportunities.length})` : ""}
+        </p>
+        {opportunities && opportunities.length > 0 ? (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead>
+                <tr className="text-ink-500">
+                  <th className="pb-2 pr-3 font-normal">Asset</th>
+                  <th className="pb-2 pr-3 font-normal">Strategy</th>
+                  <th className="pb-2 pr-3 font-normal">Dir</th>
+                  <th className="pb-2 pr-3 font-normal">Regime</th>
+                  <th className="pb-2 pr-3 font-normal">R:R</th>
+                  <th className="pb-2 pr-3 font-normal">Score</th>
+                  <th className="pb-2 font-normal">Tier</th>
+                </tr>
+              </thead>
+              <tbody>
+                {opportunities.map((o) => (
+                  <tr key={o.signal_id} className="border-t border-base-700/60 hover:bg-base-800">
+                    <td className="py-1.5 pr-3 text-ink-100">{o.asset_symbol}</td>
+                    <td className="py-1.5 pr-3 text-ink-300">{o.strategy_name}</td>
+                    <td
+                      className={`py-1.5 pr-3 font-medium uppercase ${
+                        o.direction === "long" ? "text-signal-green" : "text-signal-red"
+                      }`}
+                    >
+                      {o.direction}
+                    </td>
+                    <td className="py-1.5 pr-3">
+                      <RegimeBadge regime={o.regime} />
+                    </td>
+                    <td className="py-1.5 pr-3 text-ink-300">{o.risk_reward.toFixed(2)}</td>
+                    <td className="py-1.5 pr-3 text-ink-100">{o.final_score.toFixed(1)}</td>
+                    <td className="py-1.5">
+                      <TierBadge tier={o.tier} />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <p className="text-xs text-ink-500">
+            No opportunities above the &quot;watch&quot; threshold right now — the system is
+            observing, not forcing a trade (docs/blueprint/00-overview.md).
+          </p>
+        )}
+      </section>
+
       <section className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-2">
         <div className="rounded-lg border border-base-700 bg-base-900 p-4">
           <p className="mb-3 text-[11px] uppercase tracking-wider text-ink-500">
@@ -77,15 +140,18 @@ export default async function DashboardPage() {
           </p>
           <div className="max-h-64 space-y-1 overflow-y-auto pr-1">
             {assets && assets.length > 0 ? (
-              assets.map((a) => (
-                <div
-                  key={a.id}
-                  className="flex items-center justify-between rounded px-2 py-1.5 text-xs hover:bg-base-800"
-                >
-                  <span className="text-ink-100">{a.symbol}</span>
-                  <span className="text-ink-500">{a.asset_class}</span>
-                </div>
-              ))
+              assets.map((a) => {
+                const regime = regimeBySymbol.get(a.symbol);
+                return (
+                  <div
+                    key={a.id}
+                    className="flex items-center justify-between rounded px-2 py-1.5 text-xs hover:bg-base-800"
+                  >
+                    <span className="text-ink-100">{a.symbol}</span>
+                    {regime ? <RegimeBadge regime={regime.regime} /> : <span className="text-ink-500">{a.asset_class}</span>}
+                  </div>
+                );
+              })
             ) : (
               <p className="text-xs text-ink-500">DATA_UNAVAILABLE</p>
             )}
@@ -101,13 +167,11 @@ export default async function DashboardPage() {
               ))}
             </ul>
           ) : (
-            <p className="text-xs text-ink-500">None</p>
+            <p className="text-xs text-ink-500">
+              None — Execution Engine arrives in Phase 3. Opportunities above are candidates
+              only, nothing is executed yet.
+            </p>
           )}
-
-          <p className="mb-3 mt-6 text-[11px] uppercase tracking-wider text-ink-500">Opportunities</p>
-          <p className="text-xs text-ink-500">
-            None yet — Strategy &amp; Scoring Engine arrive in Phase 2.
-          </p>
         </div>
       </section>
 

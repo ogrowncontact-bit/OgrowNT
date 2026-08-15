@@ -1,11 +1,13 @@
-"""SQLAlchemy models — Phase 1 subset of docs/blueprint/02-database-schema.md.
+"""SQLAlchemy models — incremental subset of docs/blueprint/02-database-schema.md.
 
-Only the tables needed to satisfy the Phase 1 acceptance criteria are defined
-here (auth, assets, OHLCV, paper portfolio, system state, alerts, audit log).
-Tables for later phases (news, patterns, regimes, strategies, signals, risk
-decisions, positions/orders/trades, memory, learning) are specified in the
-blueprint and will be added, table by table, as each phase is implemented —
-not stubbed out in advance.
+Tables are added phase by phase, matching what's actually implemented and
+running (docs/blueprint/12-roadmap.md), not stubbed out ahead of the code
+that uses them:
+  Phase 1: auth, assets, OHLCV, paper portfolio, system state, alerts, audit log
+  Phase 2: strategies, market regimes, signals, opportunity scores
+Tables for news/patterns (Phase 4), risk decisions/positions/orders/trades
+(Phase 3), and memory/learning (Phase 5) are specified in the blueprint and
+arrive with those phases.
 """
 from datetime import datetime, timezone
 
@@ -18,6 +20,7 @@ from sqlalchemy import (
     JSON,
     String,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -140,3 +143,118 @@ class AuditLog(Base):
     entity_type: Mapped[str | None] = mapped_column(String)
     entity_id: Mapped[int | None] = mapped_column()
     detail: Mapped[dict] = mapped_column(JSON, default=dict)
+
+
+# --- Phase 2 (Intelligence) ---------------------------------------------
+
+
+class StrategyRow(Base):
+    """A registered strategy — see docs/blueprint/04-agents-architecture.md#agent-07.
+
+    Named StrategyRow (not Strategy) to avoid clashing with the pluggable
+    strategy classes in packages/quant/strategies — this is the DB record
+    about a strategy, not the strategy's logic.
+    """
+
+    __tablename__ = "strategies"
+    __table_args__ = (
+        CheckConstraint(
+            "lifecycle_stage IN ('idea','backtest','out_of_sample','paper',"
+            "'small_capital','production','quarantine','retired')",
+            name="ck_strategies_lifecycle_stage",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    code: Mapped[str] = mapped_column(String, unique=True, nullable=False)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    family: Mapped[str] = mapped_column(String, nullable=False)
+    version: Mapped[str] = mapped_column(String, nullable=False, default="1.0")
+    lifecycle_stage: Mapped[str] = mapped_column(String, default="idea", nullable=False)
+    params: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
+
+
+class MarketRegime(Base):
+    """See docs/blueprint/04-agents-architecture.md#agent-06 and
+    docs/blueprint/02-database-schema.md#market_regimes. Phase 2 only ever
+    writes trending_bull/trending_bear/ranging/high_volatility/low_volatility
+    (packages/quant/regime/classifier.py) — panic/euphoria/transition need
+    the Phase 4 News Intelligence Agent to be distinguishable.
+    """
+
+    __tablename__ = "market_regimes"
+    __table_args__ = (
+        CheckConstraint(
+            "regime IN ('trending_bull','trending_bear','ranging','high_volatility',"
+            "'low_volatility','panic','euphoria','transition','unknown')",
+            name="ck_market_regimes_regime",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    asset_id: Mapped[int | None] = mapped_column(ForeignKey("assets.id"))
+    timeframe: Mapped[str] = mapped_column(String, nullable=False)
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    regime: Mapped[str] = mapped_column(String, nullable=False)
+    confidence: Mapped[float] = mapped_column(Float, nullable=False)
+    features: Mapped[dict] = mapped_column(JSON, default=dict)
+
+
+class Signal(Base):
+    __tablename__ = "signals"
+    __table_args__ = (
+        CheckConstraint("direction IN ('long','short')", name="ck_signals_direction"),
+        CheckConstraint(
+            "status IN ('pending','scored','risk_rejected','approved','executed','expired')",
+            name="ck_signals_status",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    strategy_id: Mapped[int] = mapped_column(ForeignKey("strategies.id"), nullable=False)
+    asset_id: Mapped[int] = mapped_column(ForeignKey("assets.id"), nullable=False)
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    direction: Mapped[str] = mapped_column(String, nullable=False)
+    entry_price: Mapped[float] = mapped_column(Float, nullable=False)
+    stop_price: Mapped[float] = mapped_column(Float, nullable=False)
+    target_price: Mapped[float | None] = mapped_column(Float)
+    regime_id: Mapped[int | None] = mapped_column(ForeignKey("market_regimes.id"))
+    status: Mapped[str] = mapped_column(String, default="pending", nullable=False)
+
+    strategy: Mapped["StrategyRow"] = relationship()
+    asset: Mapped["Asset"] = relationship()
+    regime: Mapped["MarketRegime | None"] = relationship()
+
+
+class OpportunityScore(Base):
+    __tablename__ = "opportunity_scores"
+    __table_args__ = (
+        UniqueConstraint("signal_id", name="uq_opportunity_scores_signal_id"),
+        CheckConstraint(
+            "tier IN ('ignore','watch','possible','high_quality','exceptional')",
+            name="ck_opportunity_scores_tier",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    signal_id: Mapped[int] = mapped_column(ForeignKey("signals.id"), nullable=False)
+    technical: Mapped[float] = mapped_column(Float, nullable=False)
+    pattern: Mapped[float] = mapped_column(Float, nullable=False)
+    regime_fit: Mapped[float] = mapped_column(Float, nullable=False)
+    historical_edge: Mapped[float] = mapped_column(Float, nullable=False)
+    liquidity: Mapped[float] = mapped_column(Float, nullable=False)
+    news: Mapped[float] = mapped_column(Float, nullable=False)
+    risk_reward: Mapped[float] = mapped_column(Float, nullable=False)
+    strategy_performance: Mapped[float] = mapped_column(Float, nullable=False)
+    volatility_penalty: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    correlation_penalty: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    execution_cost_penalty: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    drawdown_penalty: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    final_score: Mapped[float] = mapped_column(Float, nullable=False)
+    tier: Mapped[str] = mapped_column(String, nullable=False)
+    notes: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+    signal: Mapped["Signal"] = relationship()
