@@ -1,0 +1,7 @@
+import type { NextConfig } from "next";
+
+const nextConfig: NextConfig = {
+  transpilePackages: ["@inner/ui", "@inner/assessment-engine", "@inner/content", "@inner/db"],
+};
+
+export default nextConfig;

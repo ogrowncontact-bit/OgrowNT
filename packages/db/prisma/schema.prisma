@@ -1,0 +1,562 @@
+// INNER data model — implements docs/ARCHITECTURE.md §2.
+// Deliberately split into Postgres schemas (not just tables) so identity /
+// assessment content / a user's actual answers / money / marketing consent
+// are structurally separated — access control and GDPR deletion operate
+// per-schema, not by convention.
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["multiSchema"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  schemas  = ["identity", "catalog", "runtime", "commerce", "marketing", "analytics", "admin"]
+}
+
+// ============================================================================
+// identity — who someone is. No password. Anonymous by default.
+// ============================================================================
+
+model AnonymousSession {
+  id              String   @id @default(cuid())
+  createdAt       DateTime @default(now())
+  lastSeenAt      DateTime @updatedAt
+  firstLandingSlug String
+  utmSource       String?
+  utmMedium       String?
+  utmCampaign     String?
+  utmContent      String?
+  utmTerm         String?
+  referrer        String?
+  ipHash          String?
+  uaHash          String?
+
+  userId          String?
+  user            User?    @relation(fields: [userId], references: [id])
+
+  assessmentSessions AssessmentSession[]
+
+  @@schema("identity")
+}
+
+model User {
+  id                String   @id @default(cuid())
+  email             String   @unique
+  emailVerifiedAt   DateTime?
+  stripeCustomerId  String?
+  createdAt         DateTime @default(now())
+
+  anonymousSessions AnonymousSession[]
+  marketingConsents MarketingConsent[]
+  emailEvents       EmailEvent[]
+  unsubscribes      Unsubscribe[]
+  orders            Order[]
+  entitlements      Entitlement[]
+  deletionRequests  DeletionRequest[]
+
+  @@schema("identity")
+}
+
+enum DeletionStatus {
+  requested
+  completed
+
+  @@schema("identity")
+}
+
+model DeletionRequest {
+  id          String         @id @default(cuid())
+  userId      String
+  user        User           @relation(fields: [userId], references: [id])
+  requestedAt DateTime       @default(now())
+  status      DeletionStatus @default(requested)
+  completedAt DateTime?
+
+  @@schema("identity")
+}
+
+// ============================================================================
+// catalog — admin-authored, versioned assessment content. This is the layer
+// that lets a new experience be created without a code change.
+// ============================================================================
+
+enum AssessmentStatus {
+  draft
+  published
+  archived
+
+  @@schema("catalog")
+}
+
+model Assessment {
+  id               String            @id @default(cuid())
+  slug             String            @unique
+  name             String
+  category         String
+  description      String
+  hook             String
+  targetAudience   String
+  status           AssessmentStatus  @default(draft)
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  versions         AssessmentVersion[]
+  prices           Price[]
+  recommendedFrom  RecommendationRule[] @relation("RecommendationFrom")
+  recommendedTo    RecommendationRule[] @relation("RecommendationTo")
+  assessmentSessions AssessmentSession[]
+
+  @@schema("catalog")
+}
+
+model AssessmentVersion {
+  id              String     @id @default(cuid())
+  assessmentId    String
+  assessment      Assessment @relation(fields: [assessmentId], references: [id])
+  versionNumber   Int
+  minQuestions    Int
+  recommendedQuestions Int
+  maxQuestions    Int
+  aiInfluenceCap  Float      @default(0.15)
+  publishedAt     DateTime?
+  createdBy       String?
+  createdAt       DateTime   @default(now())
+
+  dimensions      AssessmentDimension[]
+  questions       Question[]
+  adaptiveRules   AdaptiveRule[]
+  profiles        Profile[]
+  reportTemplate  ReportTemplate?
+  assessmentSessions AssessmentSession[]
+
+  @@unique([assessmentId, versionNumber])
+  @@schema("catalog")
+}
+
+model Dimension {
+  id          String   @id @default(cuid())
+  key         String   @unique
+  label       String
+  description String
+
+  assessmentDimensions AssessmentDimension[]
+
+  @@schema("catalog")
+}
+
+model AssessmentDimension {
+  id                  String            @id @default(cuid())
+  assessmentVersionId String
+  assessmentVersion   AssessmentVersion @relation(fields: [assessmentVersionId], references: [id])
+  dimensionId         String
+  dimension           Dimension         @relation(fields: [dimensionId], references: [id])
+  weight              Float             @default(1.0)
+
+  @@unique([assessmentVersionId, dimensionId])
+  @@schema("catalog")
+}
+
+enum QuestionType {
+  single_select
+  multi_select
+  scale
+  open_text
+
+  @@schema("catalog")
+}
+
+model Question {
+  id                  String            @id @default(cuid())
+  assessmentVersionId String
+  assessmentVersion   AssessmentVersion @relation(fields: [assessmentVersionId], references: [id])
+  key                 String
+  type                QuestionType
+  isCore              Boolean           @default(true)
+  prompt              String
+  orderHint           Int
+  metadata            Json?
+
+  options             QuestionOption[]
+
+  @@unique([assessmentVersionId, key])
+  @@schema("catalog")
+}
+
+model QuestionOption {
+  id                    String   @id @default(cuid())
+  questionId            String
+  question              Question @relation(fields: [questionId], references: [id])
+  key                   String
+  label                 String
+  dimensionContributions Json    // { [dimensionKey]: weight }
+  orderHint             Int
+
+  @@unique([questionId, key])
+  @@schema("catalog")
+}
+
+model AdaptiveRule {
+  id                  String            @id @default(cuid())
+  assessmentVersionId String
+  assessmentVersion   AssessmentVersion @relation(fields: [assessmentVersionId], references: [id])
+  key                 String
+  trigger             Json              // { dimensionKey, questionKey?, condition }
+  action              Json              // { type: 'ask_followup'|'increase_confidence'|'skip', ... }
+  priority            Int               @default(0)
+
+  @@unique([assessmentVersionId, key])
+  @@schema("catalog")
+}
+
+model Profile {
+  id                    String            @id @default(cuid())
+  assessmentVersionId   String
+  assessmentVersion     AssessmentVersion @relation(fields: [assessmentVersionId], references: [id])
+  key                   String
+  name                  String
+  descriptionTemplate   String
+  matchingRule          Json              // dimension threshold/range rules
+
+  @@unique([assessmentVersionId, key])
+  @@schema("catalog")
+}
+
+model ReportTemplate {
+  id                  String            @id @default(cuid())
+  assessmentVersionId String            @unique
+  assessmentVersion   AssessmentVersion @relation(fields: [assessmentVersionId], references: [id])
+  sections            Json              // ordered [{ key, title, promptRef }]
+
+  @@schema("catalog")
+}
+
+model RecommendationRule {
+  id               String     @id @default(cuid())
+  fromAssessmentId String
+  fromAssessment   Assessment @relation("RecommendationFrom", fields: [fromAssessmentId], references: [id])
+  toAssessmentId   String
+  toAssessment     Assessment @relation("RecommendationTo", fields: [toAssessmentId], references: [id])
+  condition        Json
+  weight           Float      @default(1.0)
+
+  @@schema("catalog")
+}
+
+enum ProductType {
+  individual
+  deep
+  bundle
+  couple
+  master
+
+  @@schema("catalog")
+}
+
+model Price {
+  id            String      @id @default(cuid())
+  assessmentId  String
+  assessment    Assessment  @relation(fields: [assessmentId], references: [id])
+  productType   ProductType
+  amountCents   Int
+  currency      String      @default("EUR")
+  active        Boolean     @default(true)
+  effectiveFrom DateTime    @default(now())
+
+  orders        Order[]
+
+  @@schema("catalog")
+}
+
+// ============================================================================
+// runtime — a real user's actual pass through an assessment. Sensitive.
+// ============================================================================
+
+enum SessionStatus {
+  in_progress
+  completed
+  abandoned
+
+  @@schema("runtime")
+}
+
+model AssessmentSession {
+  id                  String            @id @default(cuid())
+  anonymousSessionId  String
+  anonymousSession    AnonymousSession  @relation(fields: [anonymousSessionId], references: [id])
+  assessmentId        String
+  assessment          Assessment        @relation(fields: [assessmentId], references: [id])
+  assessmentVersionId String
+  assessmentVersion   AssessmentVersion @relation(fields: [assessmentVersionId], references: [id])
+  status              SessionStatus     @default(in_progress)
+  startedAt           DateTime          @default(now())
+  completedAt         DateTime?
+  questionCount       Int               @default(0)
+  sourceSlug          String
+
+  responses           Response[]
+  openResponses       OpenResponse[]
+  aiFollowups         AiFollowup[]
+  dimensionScores     DimensionScore[]
+  profileResult       ProfileResult?
+  orders              Order[]
+  reports             Report[]
+  entitlements        Entitlement[]
+
+  @@schema("runtime")
+}
+
+model Response {
+  id                  String            @id @default(cuid())
+  assessmentSessionId String
+  assessmentSession   AssessmentSession @relation(fields: [assessmentSessionId], references: [id])
+  questionId          String            // references catalog Question.key, not its id — runtime stays loosely coupled to catalog
+  selectedOptionIds   Json?             // string[], for single/multi select
+  scaleValue          Int?              // for scale questions
+  answeredAt          DateTime          @default(now())
+  responseTimeMs      Int?
+
+  @@schema("runtime")
+}
+
+model OpenResponse {
+  id                  String            @id @default(cuid())
+  assessmentSessionId String
+  assessmentSession   AssessmentSession @relation(fields: [assessmentSessionId], references: [id])
+  questionId          String
+  rawTextEncrypted    String            // encrypted at the application layer before write
+  aiTags              Json?
+  aiSentiment         String?
+  safetyFlag          Boolean           @default(false)
+  createdAt           DateTime          @default(now())
+
+  @@schema("runtime")
+}
+
+model AiFollowup {
+  id                    String            @id @default(cuid())
+  assessmentSessionId   String
+  assessmentSession     AssessmentSession @relation(fields: [assessmentSessionId], references: [id])
+  triggeredByQuestionId String
+  generatedText         String
+  generatedOptions      Json?
+  reasonCode            String
+  createdAt             DateTime          @default(now())
+
+  @@schema("runtime")
+}
+
+model DimensionScore {
+  id                  String            @id @default(cuid())
+  assessmentSessionId String
+  assessmentSession   AssessmentSession @relation(fields: [assessmentSessionId], references: [id])
+  dimensionKey        String
+  rawScore            Float
+  normalizedScore     Float
+  confidence          Float
+
+  @@unique([assessmentSessionId, dimensionKey])
+  @@schema("runtime")
+}
+
+model ProfileResult {
+  id                  String            @id @default(cuid())
+  assessmentSessionId String            @unique
+  assessmentSession   AssessmentSession @relation(fields: [assessmentSessionId], references: [id])
+  primaryProfileKey   String
+  secondaryProfileKeys Json             // string[]
+  aiSemanticNotes     Json?
+  computedAt          DateTime          @default(now())
+
+  @@schema("runtime")
+}
+
+// ============================================================================
+// commerce — money. Kept separate so purchase history never has to be joined
+// through raw assessment answers to be useful.
+// ============================================================================
+
+enum OrderStatus {
+  pending
+  paid
+  refunded
+  failed
+
+  @@schema("commerce")
+}
+
+model Order {
+  id                  String            @id @default(cuid())
+  userId              String
+  user                User              @relation(fields: [userId], references: [id])
+  assessmentSessionId String
+  assessmentSession   AssessmentSession @relation(fields: [assessmentSessionId], references: [id])
+  priceId             String
+  price               Price             @relation(fields: [priceId], references: [id])
+  amountCents         Int
+  currency            String
+  status              OrderStatus       @default(pending)
+  provider             String
+  providerRef          String?
+  createdAt            DateTime         @default(now())
+  paidAt                DateTime?
+
+  entitlement         Entitlement?
+  reports              Report[]
+  refunds              Refund[]
+
+  @@schema("commerce")
+}
+
+model Entitlement {
+  id                  String            @id @default(cuid())
+  userId              String
+  user                User              @relation(fields: [userId], references: [id])
+  assessmentSessionId String
+  assessmentSession   AssessmentSession @relation(fields: [assessmentSessionId], references: [id])
+  orderId             String            @unique
+  order               Order             @relation(fields: [orderId], references: [id])
+  reportId            String?           @unique
+  report              Report?           @relation(fields: [reportId], references: [id])
+  grantedAt           DateTime          @default(now())
+  expiresAt           DateTime?
+
+  @@schema("commerce")
+}
+
+model Report {
+  id                  String            @id @default(cuid())
+  assessmentSessionId String
+  assessmentSession   AssessmentSession @relation(fields: [assessmentSessionId], references: [id])
+  orderId             String
+  order               Order             @relation(fields: [orderId], references: [id])
+  templateVersion     Int
+  content             Json              // assembled section-by-section report, source of truth
+  pdfObjectKey         String?
+  generatedAt          DateTime         @default(now())
+  deliveredAt          DateTime?
+
+  entitlement          Entitlement?
+
+  @@schema("commerce")
+}
+
+model Refund {
+  id          String   @id @default(cuid())
+  orderId     String
+  order       Order    @relation(fields: [orderId], references: [id])
+  amountCents Int
+  reason      String?
+  createdAt   DateTime @default(now())
+
+  @@schema("commerce")
+}
+
+// ============================================================================
+// marketing — explicit, versioned, revocable consent. Never inferred.
+// ============================================================================
+
+model MarketingConsent {
+  id               String   @id @default(cuid())
+  userId           String
+  user             User     @relation(fields: [userId], references: [id])
+  consent          Boolean
+  consentTimestamp DateTime @default(now())
+  consentVersion   String
+  consentSource    String
+  campaign         String?
+  assessmentId     String?
+
+  @@schema("marketing")
+}
+
+model EmailEvent {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+  type        String   // report_delivery | recommendation | re_engagement
+  templateKey String
+  sentAt      DateTime @default(now())
+  openedAt    DateTime?
+  clickedAt   DateTime?
+
+  @@schema("marketing")
+}
+
+enum UnsubscribeScope {
+  all
+  recommendations
+
+  @@schema("marketing")
+}
+
+model Unsubscribe {
+  id               String           @id @default(cuid())
+  userId           String
+  user             User             @relation(fields: [userId], references: [id])
+  scope            UnsubscribeScope
+  unsubscribedAt   DateTime         @default(now())
+
+  @@schema("marketing")
+}
+
+// ============================================================================
+// analytics — append-only funnel events. Structurally cannot carry raw
+// answer text: there is no column for it.
+// ============================================================================
+
+model Event {
+  id                 String   @id @default(cuid())
+  occurredAt         DateTime @default(now())
+  anonymousSessionId String
+  userId             String?
+  eventName          String
+  assessmentId       String?
+  properties         Json?
+  utmSource          String?
+  utmMedium          String?
+  utmCampaign        String?
+  utmContent         String?
+  utmTerm            String?
+
+  @@index([eventName, occurredAt])
+  @@index([anonymousSessionId])
+  @@schema("analytics")
+}
+
+// ============================================================================
+// admin — internal operators only.
+// ============================================================================
+
+enum AdminRole {
+  owner
+  editor
+  viewer
+
+  @@schema("admin")
+}
+
+model AdminUser {
+  id        String    @id @default(cuid())
+  email     String    @unique
+  role      AdminRole
+  createdAt DateTime  @default(now())
+
+  auditLogs AuditLog[]
+
+  @@schema("admin")
+}
+
+model AuditLog {
+  id           String    @id @default(cuid())
+  adminUserId  String
+  adminUser    AdminUser @relation(fields: [adminUserId], references: [id])
+  action       String
+  entityType   String
+  entityId     String
+  diff         Json?
+  createdAt    DateTime  @default(now())
+
+  @@schema("admin")
+}

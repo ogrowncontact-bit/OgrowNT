@@ -1,0 +1,21 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import "../../../packages/ui/src/tokens.css";
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  font-family: var(--inner-font-body);
+}
+
+h1,
+h2,
+h3,
+.font-display {
+  font-family: var(--inner-font-display);
+}

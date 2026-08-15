@@ -1,0 +1,25 @@
+/* INNER design tokens — premium editorial, not SaaS-dashboard, not quiz-app.
+   Warm paper background, near-black ink, a single restrained accent.
+   See docs/ARCHITECTURE.md §9. */
+
+:root {
+  --inner-ink: #1c1a17;
+  --inner-ink-soft: #4a453d;
+  --inner-muted: #78705f;
+  --inner-paper: #faf6ef;
+  --inner-paper-dim: #f1eadd;
+  --inner-card: #ffffff;
+  --inner-line: #e6dcc8;
+  --inner-accent: #6f342a;
+  --inner-accent-soft: #c98f73;
+  --inner-accent-contrast: #fff7ef;
+
+  --inner-font-display: Georgia, "Iowan Old Style", "Palatino Linotype", ui-serif, serif;
+  --inner-font-body: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, system-ui, sans-serif;
+
+  --inner-radius-lg: 20px;
+  --inner-radius-md: 14px;
+  --inner-radius-sm: 10px;
+
+  --inner-shadow-card: 0 1px 2px rgba(28, 26, 23, 0.04), 0 8px 24px rgba(28, 26, 23, 0.06);
+}
