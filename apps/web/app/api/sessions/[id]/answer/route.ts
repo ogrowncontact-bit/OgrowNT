@@ -1,12 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@inner/db";
 import { computeResult, nextQuestion, submitAnswer } from "@inner/assessment-engine";
+import { chooseFollowup, generateFreeInsight, interpretOpenAnswer, SUPPORT_MESSAGE } from "@inner/ai";
 import { getAssessmentConfig } from "@/lib/assessments";
 import { readAnonymousSessionId } from "@/lib/anonymousSession";
 import { reconstructSessionState } from "@/lib/sessionState";
 import { encryptText } from "@/lib/security/encryption";
 import { toClientQuestion } from "@/lib/clientQuestion";
 import { track } from "@/lib/analytics";
+import type { OpenResponseAiMeta } from "@/lib/openResponseAiMeta";
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -38,13 +40,54 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const scaleValue = body?.scaleValue as number | undefined;
   const openText = body?.openText as string | undefined;
 
+  let aiDimensionNudges: Record<string, number> | undefined;
+  let aiChosenFollowupKey: string | undefined;
+  let supportResources: string | undefined;
+
   if (expected.type === "open_text") {
-    if (!openText?.trim()) return NextResponse.json({ error: "openText is required" }, { status: 400 });
+    const trimmed = openText?.trim();
+    if (!trimmed) return NextResponse.json({ error: "openText is required" }, { status: 400 });
+
+    const analysis = await interpretOpenAnswer({
+      questionPrompt: expected.prompt,
+      answerText: trimmed,
+      allowedDimensions: config.dimensions.map((d) => d.key),
+    });
+
+    // Question AI only gets to choose among candidates this question actually
+    // declares, and only ones not already asked in this session (§4/§5).
+    const unusedCandidates = (expected.dynamicFollowupCandidates ?? [])
+      .filter((key) => !state.askedQuestionKeys.includes(key))
+      .map((key) => {
+        const q = config.questionBank.adaptivePool.find((q) => q.key === key);
+        return q ? { key: q.key, prompt: q.prompt } : null;
+      })
+      .filter((c): c is { key: string; prompt: string } => c !== null);
+
+    if (unusedCandidates.length > 0) {
+      const choice = await chooseFollowup({ answerText: trimmed, tags: analysis.tags, candidates: unusedCandidates });
+      aiChosenFollowupKey = choice.chosenKey ?? undefined;
+    }
+
+    aiDimensionNudges = analysis.dimensionNudges;
+    if (analysis.safetyFlag) supportResources = SUPPORT_MESSAGE;
+
+    const meta: OpenResponseAiMeta = {
+      tags: analysis.tags,
+      sentiment: analysis.sentiment,
+      dimensionNudges: analysis.dimensionNudges,
+      chosenFollowupKey: aiChosenFollowupKey,
+      aiGenerated: analysis.aiGenerated,
+    };
+
     await prisma.openResponse.create({
       data: {
         assessmentSessionId: id,
         questionId: questionKey,
-        rawTextEncrypted: encryptText(openText.trim()),
+        rawTextEncrypted: encryptText(trimmed),
+        aiTags: meta as any,
+        aiSentiment: analysis.sentiment,
+        safetyFlag: analysis.safetyFlag,
       },
     });
   } else {
@@ -60,7 +103,14 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
   await prisma.assessmentSession.update({ where: { id }, data: { questionCount: { increment: 1 } } });
 
-  const result = submitAnswer(config, state, { questionKey, selectedOptionKeys, scaleValue, openText });
+  const result = submitAnswer(config, state, {
+    questionKey,
+    selectedOptionKeys,
+    scaleValue,
+    openText,
+    aiDimensionNudges,
+    aiChosenFollowupKey,
+  });
 
   await track({
     anonymousSessionId,
@@ -71,6 +121,18 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
   if (result.isComplete) {
     const { profileResult, dimensionScores } = computeResult(config, result.state);
+
+    // Profile AI only narrates the profile the deterministic matcher already
+    // picked (§6) — collected tags come from this session's own open answers.
+    const openResponses = await prisma.openResponse.findMany({ where: { assessmentSessionId: id } });
+    const openAnswerTags = openResponses.flatMap((r) => (r.aiTags as OpenResponseAiMeta | null)?.tags ?? []);
+
+    const generatedInsight = await generateFreeInsight({
+      primaryProfileName: profileResult.primary.name,
+      primaryProfileDescription: profileResult.primary.descriptionTemplate,
+      dimensionScores: Object.fromEntries(Object.entries(dimensionScores).map(([k, v]) => [k, v.normalized])),
+      openAnswerTags,
+    });
 
     await prisma.$transaction([
       ...Object.entries(dimensionScores).map(([dimensionKey, score]) =>
@@ -91,11 +153,13 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         update: {
           primaryProfileKey: profileResult.primary.key,
           secondaryProfileKeys: profileResult.secondary.map((p) => p.key),
+          aiSemanticNotes: generatedInsight ? { insight: generatedInsight.insight, aiGenerated: true } : undefined,
         },
         create: {
           assessmentSessionId: id,
           primaryProfileKey: profileResult.primary.key,
           secondaryProfileKeys: profileResult.secondary.map((p) => p.key),
+          aiSemanticNotes: generatedInsight ? { insight: generatedInsight.insight, aiGenerated: true } : undefined,
         },
       }),
       prisma.assessmentSession.update({ where: { id }, data: { status: "completed", completedAt: new Date() } }),
@@ -108,5 +172,6 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     nextQuestion: result.nextQuestion ? toClientQuestion(result.nextQuestion) : null,
     isComplete: result.isComplete,
     progress: result.progress,
+    supportResources,
   });
 }

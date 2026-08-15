@@ -10,6 +10,7 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@inner/ai": "workspace:*",
     "@inner/assessment-engine": "workspace:*",
     "@inner/content": "workspace:*",
     "@inner/db": "workspace:*",

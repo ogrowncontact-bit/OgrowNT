@@ -68,18 +68,38 @@ export function recomputeDimensionScores(
         accumulators[dimKey].count += 1;
       }
     }
-    // open_text contributions are applied separately by Response AI (packages/ai, Phase 2),
-    // bounded by scoringModel.aiInfluenceCap — deliberately not handled here so the
-    // deterministic layer never depends on AI availability.
+    // open_text answers don't contribute here directly — their AI-derived
+    // nudges are collected below and blended in under a hard cap.
   }
+
+  const nudgeSums: Record<DimensionKey, number> = {};
+  const nudgeCounts: Record<DimensionKey, number> = {};
+  for (const answer of answers) {
+    if (!answer.aiDimensionNudges) continue;
+    for (const [dimKey, nudge] of Object.entries(answer.aiDimensionNudges)) {
+      if (nudge === undefined || !accumulators[dimKey]) continue;
+      nudgeSums[dimKey] = (nudgeSums[dimKey] ?? 0) + Math.max(-1, Math.min(1, nudge));
+      nudgeCounts[dimKey] = (nudgeCounts[dimKey] ?? 0) + 1;
+    }
+  }
+
+  const aiInfluenceCap = config.scoringModel.aiInfluenceCap; // e.g. 0.15 = semantic signal may shift a score by at most 15 points
 
   const result: Record<DimensionKey, DimensionState> = {};
   for (const d of config.dimensions) {
     const acc = accumulators[d.key];
     const average = acc.count > 0 ? acc.sum / acc.count : 0;
+    const structuredNormalized = normalize(average);
+
+    const nudgeAverage = nudgeCounts[d.key] ? nudgeSums[d.key] / nudgeCounts[d.key] : 0;
+    const aiShift = nudgeAverage * aiInfluenceCap * 100; // nudgeAverage in -1..1, so max shift = aiInfluenceCap*100 points
+    const blendedNormalized = Math.max(0, Math.min(100, structuredNormalized + aiShift));
+
     result[d.key] = {
       raw: acc.sum,
-      normalized: normalize(average),
+      // AI nudges shade the score but never count toward confidence — confidence
+      // reflects structured-answer volume only, per docs/ARCHITECTURE.md §6.
+      normalized: blendedNormalized,
       confidence: confidenceFor(acc.count),
     };
   }

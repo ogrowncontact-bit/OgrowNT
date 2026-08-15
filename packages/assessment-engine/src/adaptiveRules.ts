@@ -13,6 +13,10 @@ function ruleMatches(
     return !!optionKey && !!lastAnswer.selectedOptionKeys?.includes(optionKey);
   }
 
+  if (op === "has_ai_choice") {
+    return !!lastAnswer.aiChosenFollowupKey;
+  }
+
   if (!dimensionKey) return false;
   const score = dimensionScores[dimensionKey]?.normalized;
   if (score === undefined) return false;
@@ -58,6 +62,14 @@ export function decideNextStep(
       if (rule.action.type === "ask_followup" && rule.action.followupQuestionKey) {
         if (!askedSet.has(rule.action.followupQuestionKey)) {
           return { type: "ask_followup", questionKey: rule.action.followupQuestionKey };
+        }
+      }
+      if (rule.action.type === "ask_ai_chosen_followup" && lastAnswer.aiChosenFollowupKey) {
+        // The candidate itself was already validated (against the question's
+        // dynamicFollowupCandidates) by the caller before this was recorded —
+        // the engine just has to honor it, same de-dup rule as any other slot.
+        if (!askedSet.has(lastAnswer.aiChosenFollowupKey)) {
+          return { type: "ask_followup", questionKey: lastAnswer.aiChosenFollowupKey };
         }
       }
       // 'increase_confidence' and 'skip' actions affect scoring/flow bookkeeping

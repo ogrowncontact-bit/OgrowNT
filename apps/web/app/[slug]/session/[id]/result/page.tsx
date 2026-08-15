@@ -28,6 +28,12 @@ export default async function ResultPage({ params }: { params: Promise<{ slug: s
   const secondaryCount = (profileResult.secondaryProfileKeys as string[]).length;
   const lockedInsightCount = secondaryCount + config.premiumReportStructure.length - 1;
 
+  // Profile AI's narration of the already-decided profile, when available (Phase 2) —
+  // falls back to the assessment's static template copy otherwise. AI is never the
+  // only source of this screen's content. See docs/ARCHITECTURE.md §6.
+  const aiNotes = profileResult.aiSemanticNotes as { insight?: string; aiGenerated?: boolean } | null;
+  const insightText = aiNotes?.insight || config.freeResultTemplate.insightIntro;
+
   await track({ anonymousSessionId, eventName: "free_result_viewed", assessmentId: session.assessmentId });
 
   return (
@@ -46,9 +52,7 @@ export default async function ResultPage({ params }: { params: Promise<{ slug: s
       <p className="mt-5 text-[17px] leading-relaxed text-[var(--inner-ink-soft)]">{primary.descriptionTemplate}</p>
 
       <div className="mt-8 rounded-[var(--inner-radius-lg)] border border-[var(--inner-line)] bg-[var(--inner-card)] p-5">
-        <p className="text-[15px] leading-relaxed text-[var(--inner-ink-soft)]">
-          {config.freeResultTemplate.insightIntro}
-        </p>
+        <p className="text-[15px] leading-relaxed text-[var(--inner-ink-soft)]">{insightText}</p>
         <p className="mt-4 flex items-center gap-2 text-sm font-medium text-[var(--inner-accent)]">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true" className="shrink-0">
             <rect x="5" y="11" width="14" height="10" rx="2" stroke="currentColor" strokeWidth="2" />

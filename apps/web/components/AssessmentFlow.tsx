@@ -28,6 +28,7 @@ export function AssessmentFlow({ slug, assessmentSessionId, initialQuestion, ini
   const [openText, setOpenText] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [supportMessage, setSupportMessage] = useState<string | null>(null);
 
   function toggleOption(key: string) {
     if (question.type === "multi_select") {
@@ -62,6 +63,8 @@ export function AssessmentFlow({ slug, assessmentSessionId, initialQuestion, ini
       });
       if (!res.ok) throw new Error("Couldn't save that answer — please try again.");
       const data = await res.json();
+
+      setSupportMessage(data.supportResources ?? null);
 
       if (data.isComplete) {
         router.push(`/${slug}/session/${assessmentSessionId}/result`);
@@ -107,6 +110,12 @@ export function AssessmentFlow({ slug, assessmentSessionId, initialQuestion, ini
           exit={{ opacity: 0, x: -16 }}
           transition={{ duration: 0.18, ease: "easeOut" }}
         >
+          {supportMessage && (
+            <div className="mb-6 rounded-[var(--inner-radius-md)] border border-[var(--inner-accent-soft)] bg-[var(--inner-card)] p-4">
+              <p className="text-[14px] leading-relaxed text-[var(--inner-ink-soft)]">{supportMessage}</p>
+            </div>
+          )}
+
           <h1 className="font-display text-[26px] leading-snug text-[var(--inner-ink)]">{question.prompt}</h1>
 
           <div className="mt-8 space-y-3">

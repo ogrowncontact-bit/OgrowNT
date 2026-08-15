@@ -29,9 +29,15 @@ export interface Question {
   /** For scale questions: contribution per unit, applied against the 1..scaleMax answer. */
   scaleMax?: number;
   scaleDimension?: DimensionKey;
+  /**
+   * open_text only: adaptivePool question keys Question AI may choose a
+   * follow-up from after this answer (Phase 2, §4/§5). AI selects among
+   * these — it can never invent a question outside this list.
+   */
+  dynamicFollowupCandidates?: string[];
 }
 
-export type AdaptiveConditionOp = "gte" | "lte" | "between" | "answered_option";
+export type AdaptiveConditionOp = "gte" | "lte" | "between" | "answered_option" | "has_ai_choice";
 
 export interface AdaptiveTrigger {
   /** Which just-answered question this rule considers. */
@@ -42,7 +48,7 @@ export interface AdaptiveTrigger {
   optionKey?: string; // for answered_option
 }
 
-export type AdaptiveActionType = "ask_followup" | "increase_confidence" | "skip";
+export type AdaptiveActionType = "ask_followup" | "increase_confidence" | "skip" | "ask_ai_chosen_followup";
 
 export interface AdaptiveAction {
   type: AdaptiveActionType;
@@ -134,6 +140,13 @@ export interface RecordedAnswer {
   scaleValue?: number;
   openText?: string;
   answeredAt: string;
+  /**
+   * Baked in by the caller (apps/web) *before* this answer is recorded —
+   * the engine treats it as data, not as something it calls AI to produce.
+   * That's what keeps replay/reconstruction deterministic (docs/ARCHITECTURE.md §4).
+   */
+  aiDimensionNudges?: Partial<Record<DimensionKey, number>>; // each -1..1
+  aiChosenFollowupKey?: string;
 }
 
 export interface DimensionState {

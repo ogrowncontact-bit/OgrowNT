@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { startSession, nextQuestion, submitAnswer, computeResult } from "./engine";
+import { recomputeDimensionScores } from "./scoring";
 import type { AssessmentConfig } from "./types";
 
 const config: AssessmentConfig = {
@@ -12,8 +13,8 @@ const config: AssessmentConfig = {
   status: "published",
   version: 1,
   minQuestions: 1,
-  recommendedQuestions: 2,
-  maxQuestions: 3,
+  recommendedQuestions: 4,
+  maxQuestions: 6,
   dimensions: [
     { key: "connection", weight: 1 },
     { key: "independence", weight: 1 },
@@ -41,6 +42,13 @@ const config: AssessmentConfig = {
           { key: "b", label: "B", dimensionContributions: { independence: 2 } },
         ],
       },
+      {
+        key: "q3_open",
+        type: "open_text",
+        isCore: true,
+        prompt: "Tell us more?",
+        dynamicFollowupCandidates: ["ai_followup"],
+      },
     ],
     adaptivePool: [
       {
@@ -48,6 +56,13 @@ const config: AssessmentConfig = {
         type: "single_select",
         isCore: false,
         prompt: "Followup?",
+        options: [{ key: "a", label: "A", dimensionContributions: { connection: 1 } }],
+      },
+      {
+        key: "ai_followup",
+        type: "single_select",
+        isCore: false,
+        prompt: "AI-chosen followup?",
         options: [{ key: "a", label: "A", dimensionContributions: { connection: 1 } }],
       },
     ],
@@ -58,6 +73,12 @@ const config: AssessmentConfig = {
       trigger: { questionKey: "q1", op: "answered_option", optionKey: "a" },
       action: { type: "ask_followup", followupQuestionKey: "followup" },
       priority: 10,
+    },
+    {
+      key: "ai_dynamic_followup",
+      trigger: { questionKey: "q3_open", op: "has_ai_choice" },
+      action: { type: "ask_ai_chosen_followup" },
+      priority: 1,
     },
   ],
   profiles: [
@@ -123,5 +144,81 @@ describe("assessment engine", () => {
     state = result.state;
     const { profileResult } = computeResult(config, state);
     expect(profileResult.primary.key).toBe("connector");
+  });
+
+  it("honors an AI-chosen follow-up baked into a recorded open-text answer", () => {
+    let state = startSession(config);
+    let result = submitAnswer(config, state, { questionKey: "q1", selectedOptionKeys: ["b"] });
+    state = result.state;
+    result = submitAnswer(config, state, { questionKey: "q2", selectedOptionKeys: ["b"] });
+    state = result.state;
+    // The caller (apps/web) resolves Question AI's choice *before* calling submitAnswer —
+    // the engine just has to honor whatever was baked into the recorded answer.
+    result = submitAnswer(config, state, {
+      questionKey: "q3_open",
+      openText: "some reflective answer",
+      aiChosenFollowupKey: "ai_followup",
+    });
+    expect(result.nextQuestion?.key).toBe("ai_followup");
+    expect(result.isComplete).toBe(false);
+  });
+
+  it("ignores an AI-chosen follow-up that was already asked (no infinite loop)", () => {
+    let state = startSession(config);
+    let result = submitAnswer(config, state, { questionKey: "q1", selectedOptionKeys: ["b"] });
+    state = result.state;
+    result = submitAnswer(config, state, { questionKey: "q2", selectedOptionKeys: ["b"] });
+    state = result.state;
+    result = submitAnswer(config, state, { questionKey: "ai_followup", selectedOptionKeys: ["a"] });
+    state = result.state;
+    // q3_open is still the next unanswered core question; even if something (bug, replay)
+    // tried to point back at ai_followup, the engine's de-dup would ignore it.
+    result = submitAnswer(config, state, {
+      questionKey: "q3_open",
+      openText: "some reflective answer",
+      aiChosenFollowupKey: "ai_followup", // already asked above
+    });
+    expect(result.nextQuestion?.key).not.toBe("ai_followup");
+  });
+});
+
+describe("AI dimension nudges (scoring)", () => {
+  const allQuestions = [...config.questionBank.core, ...config.questionBank.adaptivePool];
+
+  it("shifts a score by at most aiInfluenceCap when no structured signal exists", () => {
+    const scores = recomputeDimensionScores(config, allQuestions, [
+      {
+        questionKey: "q3_open",
+        openText: "test",
+        aiDimensionNudges: { connection: 1 }, // maximal nudge
+        answeredAt: new Date().toISOString(),
+      },
+    ]);
+    // baseline 50 (no structured contribution) + 1 * aiInfluenceCap(0.15) * 100 = 65
+    expect(scores.connection.normalized).toBeCloseTo(65, 5);
+  });
+
+  it("never lets a nudge count toward confidence", () => {
+    const scores = recomputeDimensionScores(config, allQuestions, [
+      {
+        questionKey: "q3_open",
+        openText: "test",
+        aiDimensionNudges: { connection: 1 },
+        answeredAt: new Date().toISOString(),
+      },
+    ]);
+    expect(scores.connection.confidence).toBe(0);
+  });
+
+  it("clamps out-of-range nudges defensively", () => {
+    const scores = recomputeDimensionScores(config, allQuestions, [
+      {
+        questionKey: "q3_open",
+        openText: "test",
+        aiDimensionNudges: { connection: 999 }, // a misbehaving model shouldn't blow past the cap
+        answeredAt: new Date().toISOString(),
+      },
+    ]);
+    expect(scores.connection.normalized).toBeCloseTo(65, 5);
   });
 });

@@ -1,6 +1,7 @@
 import { prisma } from "@inner/db";
 import { startSession, submitAnswer, type AssessmentConfig, type SessionState } from "@inner/assessment-engine";
 import { decryptText } from "./security/encryption";
+import type { OpenResponseAiMeta } from "./openResponseAiMeta";
 
 interface StoredAnswer {
   questionKey: string;
@@ -8,6 +9,8 @@ interface StoredAnswer {
   scaleValue?: number;
   openText?: string;
   answeredAt: Date;
+  aiDimensionNudges?: Record<string, number>;
+  aiChosenFollowupKey?: string;
 }
 
 /**
@@ -33,11 +36,16 @@ export async function reconstructSessionState(
       scaleValue: r.scaleValue ?? undefined,
       answeredAt: r.answeredAt,
     })),
-    ...openResponses.map((r) => ({
-      questionKey: r.questionId,
-      openText: decryptText(r.rawTextEncrypted),
-      answeredAt: r.createdAt,
-    })),
+    ...openResponses.map((r) => {
+      const meta = (r.aiTags as OpenResponseAiMeta | null) ?? null;
+      return {
+        questionKey: r.questionId,
+        openText: decryptText(r.rawTextEncrypted),
+        aiDimensionNudges: meta?.dimensionNudges,
+        aiChosenFollowupKey: meta?.chosenFollowupKey,
+        answeredAt: r.createdAt,
+      };
+    }),
   ].sort((a, b) => a.answeredAt.getTime() - b.answeredAt.getTime());
 
   let state = startSession(config);

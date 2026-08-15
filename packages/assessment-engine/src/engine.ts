@@ -35,6 +35,8 @@ export interface AnswerInput {
   selectedOptionKeys?: string[];
   scaleValue?: number;
   openText?: string;
+  aiDimensionNudges?: RecordedAnswer["aiDimensionNudges"];
+  aiChosenFollowupKey?: string;
 }
 
 export interface AnswerResult {

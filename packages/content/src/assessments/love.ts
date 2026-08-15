@@ -111,6 +111,8 @@ export const loveAssessment: AssessmentConfig = {
         type: "open_text",
         isCore: true,
         prompt: "Tell us about a time you felt close to someone, but the thought of pulling away still crossed your mind. What was happening?",
+        // Question AI may pick at most one of these — never a question outside this list (§4/§5).
+        dynamicFollowupCandidates: ["what_would_help", "what_pattern_notice"],
       },
       {
         key: "new_relationship_pace",
@@ -184,6 +186,34 @@ export const loveAssessment: AssessmentConfig = {
           { key: "not_sure_trust", label: "I'm not sure I'd fully trust again", dimensionContributions: { trust: -2 } },
         ],
       },
+      {
+        // Candidate for Question AI, chosen when the open-text answer reads as
+        // more "I want to fix this" than "this keeps happening to me."
+        key: "what_would_help",
+        type: "single_select",
+        isCore: false,
+        prompt: "What do you think would help you stay close instead of pulling away?",
+        options: [
+          { key: "clear_reassurance", label: "Clear, low-pressure reassurance", dimensionContributions: { security: 2, validation: 1 } },
+          { key: "naming_it", label: "Being able to name what I'm feeling out loud", dimensionContributions: { vulnerability: 2 } },
+          { key: "slower_pace", label: "Simply moving at a slower pace", dimensionContributions: { independence: 1, security: 1 } },
+          { key: "not_sure_help", label: "I'm honestly not sure", dimensionContributions: {} },
+        ],
+      },
+      {
+        // Candidate for Question AI, chosen when the open-text answer reads as
+        // describing a repeated pattern rather than a one-off moment.
+        key: "what_pattern_notice",
+        type: "single_select",
+        isCore: false,
+        prompt: "Looking back, is this a pattern you recognize in other relationships too?",
+        options: [
+          { key: "yes_often", label: "Yes, it comes up often", dimensionContributions: { independence: 1, security: -1 } },
+          { key: "yes_sometimes", label: "Sometimes, depending on the person", dimensionContributions: {} },
+          { key: "no_specific", label: "No, this felt specific to that situation", dimensionContributions: { security: 1 } },
+          { key: "never_noticed", label: "I've never really looked for a pattern", dimensionContributions: {} },
+        ],
+      },
     ],
   },
 
@@ -193,6 +223,14 @@ export const loveAssessment: AssessmentConfig = {
       trigger: { questionKey: "closeness_reaction", op: "answered_option", optionKey: "depends" },
       action: { type: "ask_followup", followupQuestionKey: "protect_what" },
       priority: 10,
+    },
+    {
+      // Question AI resolves this dynamically per-session (packages/ai) and bakes its
+      // choice into the recorded answer before this rule ever runs — see §4/§5.
+      key: "open_text_dynamic_followup",
+      trigger: { questionKey: "closeness_dependency", op: "has_ai_choice" },
+      action: { type: "ask_ai_chosen_followup" },
+      priority: 1,
     },
     {
       key: "uncertain_closeness_reaction",
