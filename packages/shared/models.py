@@ -7,11 +7,10 @@ that uses them:
   Phase 2: strategies, market regimes, signals, opportunity scores
   Phase 3: risk checks/decisions, positions, orders, trades, correlation matrix
   Phase 4: news events/impact, patterns, pattern performance
-Tables for memory/learning (Phase 5) are specified in the blueprint and
-arrive with that phase. macro_events (from the blueprint schema) is not yet
-implemented — Phase 4 focuses on the News Intelligence Agent, Pattern
-Engine, and the remaining Regime Engine states, per docs/blueprint/
-12-roadmap.md; a macro economic calendar is a natural but separate addition.
+  Phase 5: strategy performance/health, trade journal, learned rules, market memory
+macro_events (from the blueprint schema) is not yet implemented — out of
+scope for every phase planned so far; a macro economic calendar is a
+natural but separate future addition.
 """
 from datetime import datetime, timezone
 
@@ -479,3 +478,112 @@ class PatternPerformance(Base):
     avg_r_multiple: Mapped[float | None] = mapped_column(Float)
     expectancy: Mapped[float | None] = mapped_column(Float)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
+
+
+# --- Phase 5 (Learning & Research) ---------------------------------------
+
+
+class StrategyPerformance(Base):
+    """Rolling-window strategy stats, recomputed by the Learning Agent's DET
+    half on every trade close (docs/blueprint/04-agents-architecture.md
+    #agent-13, docs/blueprint/02-database-schema.md §5). `health_score` is
+    an implementation addition beyond the blueprint's SQL sketch: the doc
+    only says "strategy health score" is recalculated alongside this row,
+    without naming where it lives — storing it here (same DET computation,
+    same cadence) avoids a redundant table.
+    """
+
+    __tablename__ = "strategy_performance"
+
+    strategy_id: Mapped[int] = mapped_column(ForeignKey("strategies.id"), primary_key=True)
+    as_of: Mapped[datetime] = mapped_column(DateTime(timezone=True), primary_key=True, default=_utcnow)
+    window_trades: Mapped[int] = mapped_column(nullable=False)
+    total_trades: Mapped[int] = mapped_column(nullable=False)
+    win_rate: Mapped[float | None] = mapped_column(Float)
+    profit_factor: Mapped[float | None] = mapped_column(Float)
+    avg_win: Mapped[float | None] = mapped_column(Float)
+    avg_loss: Mapped[float | None] = mapped_column(Float)
+    sharpe: Mapped[float | None] = mapped_column(Float)
+    max_drawdown: Mapped[float | None] = mapped_column(Float)
+    expectancy: Mapped[float | None] = mapped_column(Float)
+    best_regime: Mapped[str | None] = mapped_column(String)
+    worst_regime: Mapped[str | None] = mapped_column(String)
+    health_score: Mapped[float | None] = mapped_column(Float)
+
+    strategy: Mapped["StrategyRow"] = relationship()
+
+
+class TradeJournal(Base):
+    """Expected-vs-actual outcome record for every closed trade — Failure
+    Memory reads this filtered to actual_outcome != 'win'
+    (docs/blueprint/06-memory-system.md). `hypothesis`/`root_cause` are
+    filled by the Learning Agent's LLM half only when the two diverge, and
+    stay null (never fabricated) when no LLM is configured.
+    """
+
+    __tablename__ = "trade_journal"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    trade_id: Mapped[int] = mapped_column(ForeignKey("trades.id"), unique=True, nullable=False)
+    expected_outcome: Mapped[str] = mapped_column(String, nullable=False)
+    actual_outcome: Mapped[str] = mapped_column(String, nullable=False)
+    hypothesis: Mapped[str | None] = mapped_column(Text)
+    root_cause: Mapped[str | None] = mapped_column(Text)
+    action_taken: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+    trade: Mapped["Trade"] = relationship()
+
+
+class LearnedRule(Base):
+    """Research Memory: a candidate rule proposed by the Research Agent's
+    LLM half, only reaching `status='validated'` through a DET statistical
+    check (sample size + significance) — never applied automatically to
+    strategy behavior, only surfaced for the "what did the system learn"
+    view (docs/blueprint/04-agents-architecture.md#agent-14).
+    """
+
+    __tablename__ = "learned_rules"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('candidate','validated','rejected','retired')", name="ck_learned_rules_status"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    scope: Mapped[str] = mapped_column(String, nullable=False)
+    condition: Mapped[dict] = mapped_column(JSON, nullable=False)
+    conclusion: Mapped[str] = mapped_column(Text, nullable=False)
+    confidence: Mapped[float] = mapped_column(Float, nullable=False)
+    sample_size: Mapped[int] = mapped_column(nullable=False)
+    status: Mapped[str] = mapped_column(String, default="candidate", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    validated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class MarketMemory(Base):
+    """"Have I seen a market context like this before, and what happened?"
+    (docs/blueprint/06-memory-system.md). The blueprint schema calls for a
+    pgvector `embedding VECTOR(1536)` column with cosine-distance search;
+    this Postgres deployment doesn't have the pgvector extension installed
+    (verified: not even in pg_available_extensions), and there's no
+    embedding model wired in yet. Rather than fabricate vectors or fake a
+    similarity search, `embedding` is deferred entirely — the same explicit
+    "not real yet" pattern as OHLCV's hypertable promotion — and
+    `packages/quant/learning/memory.py` does structured similarity
+    (regime + pattern + direction match) over `context` instead.
+    TODO(real-embeddings): add the pgvector extension + a real embedding
+    model and swap in cosine-distance search once available.
+    """
+
+    __tablename__ = "market_memory"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    asset_id: Mapped[int | None] = mapped_column(ForeignKey("assets.id"))
+    context: Mapped[dict] = mapped_column(JSON, nullable=False)
+    signal_id: Mapped[int | None] = mapped_column(ForeignKey("signals.id"))
+    outcome: Mapped[str | None] = mapped_column(String)
+
+    asset: Mapped["Asset | None"] = relationship()
+    signal: Mapped["Signal | None"] = relationship()

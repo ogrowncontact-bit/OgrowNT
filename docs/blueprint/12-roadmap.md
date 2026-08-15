@@ -164,13 +164,83 @@ Engine com `pattern_performance`.
 estrutural "LLM ≠ Trading Engine" (`00-overview.md`) permanece válida mesmo
 com uma LLM real ligada.
 
-## Fase 5 — Learning & Research
+## Fase 5 — Learning & Research — **status: implementada e validada nesta sessão**
 
 Learning Agent, Market/Pattern/Strategy/Failure/Research Memory, Strategy Health
 Score, Strategy Quarantine, Research Agent. **Objetivo funcional:** o sistema
 responde a "que estratégias tiveram melhor desempenho?", "que padrões falharam?",
 "que regime domina agora?", "que estratégias devem ser reduzidas?", "o que o
 sistema aprendeu recentemente?".
+
+**Critério de sucesso:**
+- [x] Strategy Memory: `strategy_performance` recalculado (DET, janela das
+      últimas 200 trades, não média incremental — profit factor, Sharpe e
+      max drawdown exigem a série real) a cada trade fechado
+      (`packages/quant/learning/strategy_stats.py`); Strategy Health Score
+      0-100 (expectancy 40% + win rate 15% + profit factor 25% + drawdown
+      20%, pesos centralizados) fica `None` (não fabricado) abaixo de 5
+      trades na amostra
+- [x] Strategy Quarantine: demoção automática e determinística
+      (`lifecycle_stage='quarantine'`) quando o health score cai abaixo de
+      35 com amostra suficiente — mesmo princípio conservador do Kill
+      Switch (Fase 3): só reduz risco, nunca aumenta; o enforcement real é
+      `apps/worker/strategy_runner.py` que salta estratégias em
+      quarantine/retired antes de gerar sinal (testado ao vivo: 5 perdas
+      seguidas da mesma estratégia via `run_trade_monitor_cycle` →
+      quarantine automática → zero novos sinais dessa estratégia no ciclo
+      seguinte). Restauro é sempre uma ação admin explícita
+      (`POST /api/strategies/{id}/restore`), nunca automático
+- [x] Failure/Trade Journal Memory: `trade_journal` grava expected vs.
+      actual em cada trade fechado; quando divergem (perda), o Learning
+      Agent (LLM) gera hipótese+root_cause grounded apenas no contexto
+      dado — testado com 6 casos incluindo degradação honesta sem API key
+      configurada (`hypothesis`/`root_cause` ficam `None`, nunca inventados)
+- [x] Research Agent: candidatos `learned_rules` (LLM, `status='candidate'`)
+      só para padrões/estratégias com amostra ≥8 e expectancy ≤ -0.1R;
+      validação DET independente (z-test de uma amostra sobre o
+      R-multiple real re-consultado da base, não sobre o número que a LLM
+      disse) com amostra mínima de 20 — nunca promove `validated` com base
+      na confiança declarada pela LLM (`packages/quant/learning/research.py`)
+- [x] Market Memory: contexto (regime, padrão, direção, notícias, score)
+      gravado por sinal (`market_memory`), outcome preenchido no fecho do
+      trade. `pgvector` não está disponível neste Postgres (verificado:
+      nem em `pg_available_extensions`) — em vez de fabricar embeddings,
+      `embedding` fica explicitamente adiado (mesmo padrão do hypertable
+      do `ohlcv` na Fase 1) e a similaridade usa correspondência
+      estruturada (regime+padrão+direção) sobre `context`
+      (`packages/quant/learning/memory.py`)
+- [x] `historical_edge` e `strategy_performance` deixam de ser neutros na
+      Opportunity Scoring Engine: `historical_edge` combina a expectancy
+      histórica do padrão (Pattern Memory) com a da própria estratégia
+      (Strategy Memory) no regime atual; `strategy_performance` usa o
+      Health Score diretamente — testado e confirmado ao vivo (injetando
+      um `StrategyPerformance` sintético: `strategy_performance` component
+      88.0, `historical_edge` 68.75, exatamente conforme a fórmula;
+      removido depois de validado, para não poluir os dados reais)
+- [x] worker: o Learning Agent corre a cada trade fechado (não numa
+      cadência própria — `strategy_performance`/quarantine/journal/market
+      memory outcome vivem dentro do `Trade Monitor`, que já corre a cada
+      ciclo de scan); o Research Agent tem cadência própria
+      (`RESEARCH_INTERVAL_SECONDS`, default 3600s) por analisar dados que
+      só mudam ao ritmo de trades fechados
+- [x] API: `/api/learning/strategy-performance`, `/api/learning/trade-journal`,
+      `/api/learning/memory`, `/api/learning/memory/similar`,
+      `/api/research/rules`, `POST /api/strategies/{id}/restore`
+      (admin-only); `/api/strategies/{id}/performance` deixa de devolver um
+      placeholder e passa a ler `strategy_performance` real
+- [x] dashboard mostra Strategy Health (health score, win rate, expectancy,
+      lifecycle badge), Learned Rules (status candidate/validated/rejected)
+      e Trade Journal (hipóteses) — verificado ao vivo via build de
+      produção do Next.js + login real + curl da página renderizada
+- [x] 63 novos testes automatizados (219/219 no total da suite, confirmado
+      em duas corridas consecutivas)
+
+`packages/llm` continua nunca importado por `packages/execution` — mesmo com
+o Research Agent e o Learning Agent a gerar hipóteses/regras via LLM, nada
+disso escreve em `positions`/`orders`/`strategies.lifecycle_stage` sem passar
+por validação DET (quarantine automática é DET puro; `learned_rules`
+validated nunca é aplicado automaticamente a comportamento nenhum — fica
+disponível para leitura/auditoria, não para ação).
 
 ## Fase 6 — Backtesting
 

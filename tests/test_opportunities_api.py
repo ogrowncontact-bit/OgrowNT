@@ -50,7 +50,7 @@ def test_strategy_performance_is_honestly_empty(client, db_session):
     body = resp.json()
     assert body["total_trades"] == 0
     assert body["win_rate"] is None
-    assert "Execution Engine" in body["note"]
+    assert "No trades closed yet" in body["note"]
 
 
 def test_strategy_performance_404_for_unknown(client):

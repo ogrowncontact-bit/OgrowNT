@@ -305,3 +305,61 @@ class PatternPerformanceOut(BaseModel):
     avg_r_multiple: float | None
     expectancy: float | None
     updated_at: datetime
+
+
+# --- Phase 5 -----------------------------------------------------------
+
+
+class StrategyLearningOut(BaseModel):
+    strategy_id: int
+    strategy_code: str
+    lifecycle_stage: str
+    as_of: datetime | None
+    window_trades: int
+    total_trades: int
+    win_rate: float | None
+    profit_factor: float | None
+    avg_win: float | None
+    avg_loss: float | None
+    sharpe: float | None
+    max_drawdown: float | None
+    expectancy: float | None
+    best_regime: str | None
+    worst_regime: str | None
+    health_score: float | None
+
+
+class TradeJournalOut(BaseModel):
+    trade_id: int
+    asset_symbol: str
+    strategy_code: str
+    expected_outcome: str
+    actual_outcome: str
+    hypothesis: str | None
+    root_cause: str | None
+    created_at: datetime
+
+
+class LearnedRuleOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    scope: str
+    condition: dict
+    conclusion: str
+    confidence: float
+    sample_size: int
+    status: str
+    created_at: datetime
+    validated_at: datetime | None
+
+
+class MarketMemoryOut(BaseModel):
+    id: int
+    ts: datetime
+    asset_symbol: str | None
+    context: dict
+    outcome: str | None
+
+
+class StrategyRestoreRequest(BaseModel):
+    to_stage: str = "paper"

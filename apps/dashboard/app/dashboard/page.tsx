@@ -2,18 +2,22 @@ import { cookies } from "next/headers";
 import {
   getAssets,
   getHealth,
+  getLearnedRules,
   getNews,
   getOpportunities,
   getPortfolio,
   getPositions,
   getRegimes,
+  getStrategyLearning,
   getSystemStatus,
+  getTradeJournal,
   getTrades,
 } from "@/lib/api";
 import { StatCard } from "@/components/StatCard";
 import { RiskBadge } from "@/components/RiskBadge";
 import { RegimeBadge } from "@/components/RegimeBadge";
 import { TierBadge } from "@/components/TierBadge";
+import { LifecycleBadge } from "@/components/LifecycleBadge";
 import { LogoutButton } from "@/components/LogoutButton";
 
 export const dynamic = "force-dynamic";
@@ -25,17 +29,21 @@ export default async function DashboardPage() {
   const cookieStore = await cookies();
   const token = cookieStore.get("ogrownt_token")?.value ?? "";
 
-  const [health, status, portfolio, assets, positions, opportunities, regimes, trades, news] = await Promise.all([
-    getHealth(),
-    getSystemStatus(token),
-    getPortfolio(),
-    getAssets(),
-    getPositions("open"),
-    getOpportunities(10),
-    getRegimes(),
-    getTrades(8),
-    getNews(6),
-  ]);
+  const [health, status, portfolio, assets, positions, opportunities, regimes, trades, news, strategyLearning, tradeJournal, learnedRules] =
+    await Promise.all([
+      getHealth(),
+      getSystemStatus(token),
+      getPortfolio(),
+      getAssets(),
+      getPositions("open"),
+      getOpportunities(10),
+      getRegimes(),
+      getTrades(8),
+      getNews(6),
+      getStrategyLearning(),
+      getTradeJournal(6),
+      getLearnedRules(6),
+    ]);
 
   const systemOnline = health?.overall === "green";
   const dailyPnl = portfolio?.daily_pnl ?? 0;
@@ -298,6 +306,121 @@ export default async function DashboardPage() {
           </div>
         ) : (
           <p className="text-xs text-ink-500">No closed trades yet.</p>
+        )}
+      </section>
+
+      <section className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-2">
+        <div className="rounded-lg border border-base-700 bg-base-900 p-4">
+          <p className="mb-3 text-[11px] uppercase tracking-wider text-ink-500">
+            Strategy Health {strategyLearning ? `(${strategyLearning.length})` : ""}
+          </p>
+          {strategyLearning && strategyLearning.length > 0 ? (
+            <div className="space-y-2">
+              {strategyLearning.map((s) => (
+                <div key={s.strategy_id} className="rounded border border-base-700 px-2 py-1.5 text-xs">
+                  <div className="flex items-center justify-between">
+                    <span className="text-ink-100">{s.strategy_code}</span>
+                    <div className="flex items-center gap-2">
+                      <LifecycleBadge stage={s.lifecycle_stage} />
+                      <span
+                        className={
+                          s.health_score === null
+                            ? "text-ink-500"
+                            : s.health_score >= 60
+                              ? "text-signal-green"
+                              : s.health_score >= 35
+                                ? "text-signal-yellow"
+                                : "text-signal-red"
+                        }
+                      >
+                        {s.health_score !== null ? s.health_score.toFixed(1) : "—"}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="mt-1 flex justify-between text-ink-500">
+                    <span>{s.total_trades} trades closed</span>
+                    <span>
+                      win rate {s.win_rate !== null ? `${Math.round(s.win_rate * 100)}%` : "—"} · expectancy{" "}
+                      {s.expectancy !== null ? s.expectancy.toFixed(2) + "R" : "—"}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-xs text-ink-500">No strategies registered.</p>
+          )}
+        </div>
+
+        <div className="rounded-lg border border-base-700 bg-base-900 p-4">
+          <p className="mb-3 text-[11px] uppercase tracking-wider text-ink-500">
+            Learned Rules {learnedRules ? `(${learnedRules.length})` : ""}
+          </p>
+          {learnedRules && learnedRules.length > 0 ? (
+            <div className="space-y-2">
+              {learnedRules.map((r) => (
+                <div key={r.id} className="rounded border border-base-700 px-2 py-1.5 text-xs">
+                  <div className="flex items-center justify-between text-ink-100">
+                    <span>{r.scope}</span>
+                    <span
+                      className={`text-[10px] uppercase tracking-wide ${
+                        r.status === "validated"
+                          ? "text-signal-green"
+                          : r.status === "rejected"
+                            ? "text-signal-red"
+                            : "text-signal-yellow"
+                      }`}
+                    >
+                      {r.status}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-ink-500">{r.conclusion}</p>
+                  <p className="mt-1 text-[10px] text-ink-500">
+                    confidence {Math.round(r.confidence * 100)}% · sample {r.sample_size}
+                  </p>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-xs text-ink-500">
+              No candidate rules yet — the Research Agent proposes these once a pattern or
+              strategy has enough closed trades to look underperforming (docs/blueprint/
+              04-agents-architecture.md#agent-14).
+            </p>
+          )}
+        </div>
+      </section>
+
+      <section className="mb-6 rounded-lg border border-base-700 bg-base-900 p-4">
+        <p className="mb-3 text-[11px] uppercase tracking-wider text-ink-500">
+          Trade Journal {tradeJournal ? `(${tradeJournal.length})` : ""}
+        </p>
+        {tradeJournal && tradeJournal.length > 0 ? (
+          <div className="space-y-2">
+            {tradeJournal.map((j) => (
+              <div key={j.trade_id} className="rounded border border-base-700 px-2 py-1.5 text-xs">
+                <div className="flex items-center justify-between text-ink-100">
+                  <span>
+                    {j.asset_symbol} · {j.strategy_code}
+                  </span>
+                  <span className={j.actual_outcome === "win" ? "text-signal-green" : "text-signal-red"}>
+                    expected {j.expected_outcome} → actual {j.actual_outcome}
+                  </span>
+                </div>
+                {j.hypothesis ? (
+                  <p className="mt-1 text-ink-500">
+                    {j.hypothesis} <span className="text-[10px]">({j.root_cause})</span>
+                  </p>
+                ) : (
+                  <p className="mt-1 text-[10px] text-ink-500">
+                    {j.actual_outcome === "win" ? "Matched expectation — no hypothesis needed." : "No hypothesis — AI services not configured."}
+                  </p>
+                )}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-xs text-ink-500">No journal entries yet — none closed.</p>
         )}
       </section>
 

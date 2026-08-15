@@ -92,6 +92,45 @@ export type NewsEvent = {
   category: string | null;
   impacts: NewsImpact[];
 };
+export type StrategyLearning = {
+  strategy_id: number;
+  strategy_code: string;
+  lifecycle_stage: string;
+  as_of: string | null;
+  window_trades: number;
+  total_trades: number;
+  win_rate: number | null;
+  profit_factor: number | null;
+  avg_win: number | null;
+  avg_loss: number | null;
+  sharpe: number | null;
+  max_drawdown: number | null;
+  expectancy: number | null;
+  best_regime: string | null;
+  worst_regime: string | null;
+  health_score: number | null;
+};
+export type TradeJournalEntry = {
+  trade_id: number;
+  asset_symbol: string;
+  strategy_code: string;
+  expected_outcome: string;
+  actual_outcome: string;
+  hypothesis: string | null;
+  root_cause: string | null;
+  created_at: string;
+};
+export type LearnedRule = {
+  id: number;
+  scope: string;
+  condition: Record<string, unknown>;
+  conclusion: string;
+  confidence: number;
+  sample_size: number;
+  status: "candidate" | "validated" | "rejected" | "retired";
+  created_at: string;
+  validated_at: string | null;
+};
 
 async function apiFetch<T>(path: string, token?: string): Promise<T | null> {
   try {
@@ -119,6 +158,9 @@ export const getOpportunities = (limit = 10) => apiFetch<Opportunity[]>(`/api/op
 export const getRegimes = () => apiFetch<Regime[]>("/api/regime");
 export const getTrades = (limit = 10) => apiFetch<Trade[]>(`/api/trades?limit=${limit}`);
 export const getNews = (limit = 10) => apiFetch<NewsEvent[]>(`/api/news?limit=${limit}`);
+export const getStrategyLearning = () => apiFetch<StrategyLearning[]>("/api/learning/strategy-performance");
+export const getTradeJournal = (limit = 10) => apiFetch<TradeJournalEntry[]>(`/api/learning/trade-journal?limit=${limit}`);
+export const getLearnedRules = (limit = 10) => apiFetch<LearnedRule[]>(`/api/research/rules?limit=${limit}`);
 
 export async function login(email: string, password: string) {
   const res = await fetch(`${API_URL}/api/auth/login`, {

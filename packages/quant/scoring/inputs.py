@@ -1,17 +1,25 @@
 """Builds ScoringInputs from a strategy's read of the market — the bridge
-between the Strategy/Pattern/News Engines and the Opportunity Scoring
-Engine (docs/blueprint/07-scoring-engine.md).
+between the Strategy/Pattern/News/Learning Engines and the Opportunity
+Scoring Engine (docs/blueprint/07-scoring-engine.md).
 
-Two inputs the full formula calls for still don't exist as real signals:
-Learning/Strategy Memory (historical edge, strategy performance) is Phase
-5, Portfolio/Risk Engine's own penalties are computed by packages/risk
-itself, not here. Per docs/blueprint/00-overview.md's "no hallucinated
-data" rule, those stay an explicit neutral 50, never a fabricated number.
+One input the full formula calls for still doesn't exist as a real signal:
+Portfolio/Risk Engine's own penalties are computed by packages/risk itself,
+not here. Per docs/blueprint/00-overview.md's "no hallucinated data" rule,
+that stays an explicit neutral 50/0, never a fabricated number.
 
-`pattern` and `news` were the same neutral 50 through Phase 2/3 — as of
-Phase 4 they use real Pattern Engine detections and real (or, without an
-LLM configured, absent) news_impact reads, scored by whether they agree or
-conflict with the signal's direction.
+`pattern` and `news` were neutral 50 through Phase 2/3 — as of Phase 4 they
+use real Pattern Engine detections and real (or, without an LLM configured,
+absent) news_impact reads. `historical_edge` and `strategy_performance`
+were neutral 50 through Phase 4 — as of Phase 5 they use real Pattern/
+Strategy Memory (docs/blueprint/06-memory-system.md): `historical_edge` is
+"expectancy histórica em condições semelhantes" per 07-scoring-engine.md's
+component table (Pattern Memory + Strategy Memory), `strategy_performance`
+is the strategy's own recent Health Score
+(packages/quant/learning/strategy_stats.py). Both still degrade honestly to
+neutral 50 when there isn't yet enough sample to trust — the caller
+(apps/worker/strategy_runner.py) is the one deciding "do we have this data
+at all" via its own minimum-sample gates; this module only turns an
+already-vetted expectancy/score into a 0-100 component.
 """
 from __future__ import annotations
 
@@ -20,7 +28,6 @@ from packages.quant.regime.classifier import REGIME_HIGH_VOLATILITY, NewsSignal
 from packages.quant.scoring.engine import ScoringInputs
 from packages.quant.strategies.base import AnalysisResult, MarketContext, Strategy, StrategySignal
 
-PHASE5_NEUTRAL_DEFAULTS = ("historical_edge", "strategy_performance")
 TARGET_RISK_REWARD_FOR_FULL_SCORE = 3.0
 _IMPACT_WEIGHT = {"low": 0.3, "medium": 0.6, "high": 1.0}
 
@@ -82,6 +89,16 @@ def _news_score(signal_direction: str, news_signals: list[NewsSignal]) -> tuple[
     }
 
 
+def _expectancy_to_score(expectancy: float | None) -> float:
+    """Same linear map packages/quant/learning/strategy_stats.py uses for
+    its health score's expectancy component — an R-multiple expectancy of 0
+    is neutral (50), +/-2R saturates the score. None (no sample yet trusted
+    by the caller) is the honest neutral default, not a guess."""
+    if expectancy is None:
+        return 50.0
+    return round(max(0.0, min(100.0, 50.0 + expectancy * 25.0)), 2)
+
+
 def build_scoring_inputs(
     ctx: MarketContext,
     strategy: Strategy,
@@ -89,6 +106,9 @@ def build_scoring_inputs(
     signal: StrategySignal,
     patterns: list[PatternDetection] | None = None,
     news_signals: list[NewsSignal] | None = None,
+    pattern_expectancy: float | None = None,
+    strategy_expectancy: float | None = None,
+    strategy_health_score: float | None = None,
 ) -> ScoringInputs:
     technical = round(analysis.strength * 100, 2)
     regime_fit = round(strategy.regime_fit(ctx.regime.regime) * 100, 2)
@@ -97,18 +117,28 @@ def build_scoring_inputs(
     pattern_score, pattern_note = _pattern_score(signal.direction, patterns or [])
     news_score, news_note = _news_score(signal.direction, news_signals or [])
 
+    pattern_edge_score = _expectancy_to_score(pattern_expectancy)
+    strategy_edge_score = _expectancy_to_score(strategy_expectancy)
+    historical_edge = round((pattern_edge_score + strategy_edge_score) / 2, 2)
+    strategy_performance_score = round(strategy_health_score, 2) if strategy_health_score is not None else 50.0
+
     return ScoringInputs(
         technical=technical,
         pattern=pattern_score,
         regime_fit=regime_fit,
-        historical_edge=50.0,
+        historical_edge=historical_edge,
         liquidity=liquidity,
         news=news_score,
         risk_reward=risk_reward_score,
-        strategy_performance=50.0,
+        strategy_performance=strategy_performance_score,
         volatility_penalty=_volatility_penalty_fraction(ctx),
         correlation_penalty=0.0,
         execution_cost_penalty=0.0,
         drawdown_penalty=0.0,
-        notes={"phase5_neutral_defaults": PHASE5_NEUTRAL_DEFAULTS, "pattern": pattern_note, "news": news_note},
+        notes={
+            "pattern": pattern_note,
+            "news": news_note,
+            "historical_edge": {"pattern_expectancy": pattern_expectancy, "strategy_expectancy": strategy_expectancy},
+            "strategy_performance": {"health_score": strategy_health_score},
+        },
     )

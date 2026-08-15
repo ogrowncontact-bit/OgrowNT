@@ -30,6 +30,13 @@ class Settings(BaseSettings):
     # News Intelligence Agent cadence — independent of strategy_interval_seconds.
     news_interval_seconds: int = 900
 
+    # Research Agent cadence (packages/quant/learning/research.py) — scans
+    # pattern_performance/strategy_performance for underperformers and
+    # proposes+validates learned_rules. Deliberately much longer than the
+    # other cadences: it reasons over data that only changes as slowly as
+    # trades close, not per scan/news tick.
+    research_interval_seconds: int = 3600
+
     # packages/llm — required for real News Intelligence interpretation.
     # Left empty means "no LLM configured": the worker logs it and skips
     # interpretation rather than faking one (docs/blueprint/00-overview.md's

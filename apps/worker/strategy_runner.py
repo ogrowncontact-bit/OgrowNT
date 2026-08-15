@@ -15,17 +15,34 @@ from packages.data.connectors.market.base import Candle
 from packages.execution.adapters.base import ExecutionProvider
 from packages.execution.adapters.paper import PaperExecutionProvider
 from packages.quant.indicators.core import MIN_CANDLES_REQUIRED, compute_indicators
+from packages.quant.learning.strategy_stats import MIN_TRADES_FOR_HEALTH_SCORE
 from packages.quant.patterns.detector import PatternDetection, detect_all
 from packages.quant.regime.classifier import NewsSignal, classify_regime_with_news
 from packages.quant.scoring import build_scoring_inputs, compute_score
 from packages.quant.strategies import ALL_STRATEGIES, MarketContext, Strategy
-from packages.shared.models import OHLCV, Asset, MarketRegime, NewsImpact, OpportunityScore, Pattern, Signal, StrategyRow
+from packages.shared.models import (
+    OHLCV,
+    Asset,
+    MarketMemory,
+    MarketRegime,
+    NewsImpact,
+    OpportunityScore,
+    Pattern,
+    PatternPerformance,
+    Signal,
+    StrategyPerformance,
+    StrategyRow,
+)
 
 logger = logging.getLogger("worker.strategy_runner")
 
 TIMEFRAME = "1m"
 HISTORY_LIMIT = 200
 NEWS_LOOKBACK_HOURS = 48  # widest possible horizon_hours we'll consider; filtered tighter per-row below
+# Below this sample size, a pattern's historical expectancy in a given
+# regime is too noisy to feed the score — same "don't manufacture a
+# confident number from a thin sample" rule as strategy health scoring.
+MIN_PATTERN_SAMPLE_FOR_HISTORICAL_EDGE = 5
 
 
 def _load_recent_candles(db: Session, asset_id: int, timeframe: str, limit: int) -> list[Candle]:
@@ -80,6 +97,35 @@ def _best_aligned_pattern(direction: str, persisted: list[tuple[PatternDetection
     return max(aligned, key=lambda row: row.strength)
 
 
+def _pattern_expectancy(db: Session, pattern_type: str | None, regime: str) -> float | None:
+    """Pattern Memory read for the Scoring Engine's historical_edge —
+    packages/quant/patterns/performance.py writes this row on every trade
+    close; only trusted here once the sample is large enough to mean
+    something."""
+    if pattern_type is None:
+        return None
+    perf = db.get(PatternPerformance, (pattern_type, regime))
+    if perf is None or perf.sample_size < MIN_PATTERN_SAMPLE_FOR_HISTORICAL_EDGE:
+        return None
+    return perf.expectancy
+
+
+def _strategy_learning_context(db: Session, strategy_id: int) -> tuple[float | None, float | None]:
+    """Strategy Memory read for historical_edge + strategy_performance —
+    the latest packages/quant/learning/strategy_stats.py snapshot for this
+    strategy. Returns (expectancy, health_score), both None until enough
+    trades have closed to trust either."""
+    perf = (
+        db.query(StrategyPerformance)
+        .filter(StrategyPerformance.strategy_id == strategy_id)
+        .order_by(StrategyPerformance.as_of.desc())
+        .first()
+    )
+    if perf is None or perf.window_trades < MIN_TRADES_FOR_HEALTH_SCORE:
+        return None, None
+    return perf.expectancy, perf.health_score
+
+
 def run_strategy_cycle(
     db: Session, strategies: list[Strategy] | None = None, provider: ExecutionProvider | None = None
 ) -> dict:
@@ -129,6 +175,8 @@ def run_strategy_cycle(
             if strategy_row is None:
                 logger.warning("Strategy %s not registered in DB — run scripts/seed.py", strategy.code)
                 continue
+            if strategy_row.lifecycle_stage in ("quarantine", "retired"):
+                continue
 
             analysis = strategy.analyze(ctx)
             signal = strategy.generate_signal(ctx)
@@ -152,9 +200,16 @@ def run_strategy_cycle(
             db.add(signal_row)
             db.flush()  # assign signal_row.id
 
+            pattern_expectancy = _pattern_expectancy(
+                db, aligned_pattern.pattern_type if aligned_pattern else None, regime_result.regime
+            )
+            strategy_expectancy, strategy_health_score = _strategy_learning_context(db, strategy_row.id)
+
             inputs = build_scoring_inputs(
                 ctx, strategy, analysis, signal,
                 patterns=[d for d, _ in persisted_patterns], news_signals=news_signals,
+                pattern_expectancy=pattern_expectancy, strategy_expectancy=strategy_expectancy,
+                strategy_health_score=strategy_health_score,
             )
             score = compute_score(inputs)
             db.add(
@@ -175,6 +230,22 @@ def run_strategy_cycle(
                     final_score=score.final_score,
                     tier=score.tier,
                     notes=inputs.notes,
+                )
+            )
+            db.add(
+                MarketMemory(
+                    ts=candles[-1].ts,
+                    asset_id=asset.id,
+                    signal_id=signal_row.id,
+                    context={
+                        "regime": regime_result.regime,
+                        "regime_confidence": regime_result.confidence,
+                        "pattern_type": aligned_pattern.pattern_type if aligned_pattern else None,
+                        "direction": signal.direction,
+                        "news_count": len(news_signals),
+                        "score": score.final_score,
+                        "tier": score.tier,
+                    },
                 )
             )
             signals_created += 1

@@ -93,3 +93,58 @@ def test_low_impact_news_moves_score_less_than_high_impact():
     low_inputs = build_scoring_inputs(ctx, strategy, analysis, signal, patterns=[], news_signals=[low])
     high_inputs = build_scoring_inputs(ctx, strategy, analysis, signal, patterns=[], news_signals=[high])
     assert low_inputs.news < high_inputs.news
+
+
+def test_historical_edge_neutral_when_no_learning_data():
+    ctx = _ctx()
+    strategy, analysis, signal = _signal_and_analysis(ctx)
+    inputs = build_scoring_inputs(ctx, strategy, analysis, signal, patterns=[], news_signals=[])
+    assert inputs.historical_edge == 50.0
+    assert inputs.notes["historical_edge"] == {"pattern_expectancy": None, "strategy_expectancy": None}
+
+
+def test_historical_edge_rises_with_positive_expectancy():
+    ctx = _ctx()
+    strategy, analysis, signal = _signal_and_analysis(ctx)
+    inputs = build_scoring_inputs(
+        ctx, strategy, analysis, signal, patterns=[], news_signals=[],
+        pattern_expectancy=2.0, strategy_expectancy=2.0,
+    )
+    assert inputs.historical_edge == 100.0  # both halves saturate at +2R
+
+
+def test_historical_edge_falls_with_negative_expectancy():
+    ctx = _ctx()
+    strategy, analysis, signal = _signal_and_analysis(ctx)
+    inputs = build_scoring_inputs(
+        ctx, strategy, analysis, signal, patterns=[], news_signals=[],
+        pattern_expectancy=-2.0, strategy_expectancy=-2.0,
+    )
+    assert inputs.historical_edge == 0.0
+
+
+def test_historical_edge_blends_pattern_and_strategy_halves():
+    ctx = _ctx()
+    strategy, analysis, signal = _signal_and_analysis(ctx)
+    inputs = build_scoring_inputs(
+        ctx, strategy, analysis, signal, patterns=[], news_signals=[],
+        pattern_expectancy=2.0, strategy_expectancy=None,  # only one half has data
+    )
+    assert inputs.historical_edge == 75.0  # (100 + 50) / 2
+
+
+def test_strategy_performance_neutral_without_health_score():
+    ctx = _ctx()
+    strategy, analysis, signal = _signal_and_analysis(ctx)
+    inputs = build_scoring_inputs(ctx, strategy, analysis, signal, patterns=[], news_signals=[])
+    assert inputs.strategy_performance == 50.0
+
+
+def test_strategy_performance_uses_health_score_directly():
+    ctx = _ctx()
+    strategy, analysis, signal = _signal_and_analysis(ctx)
+    inputs = build_scoring_inputs(
+        ctx, strategy, analysis, signal, patterns=[], news_signals=[], strategy_health_score=82.5,
+    )
+    assert inputs.strategy_performance == 82.5
+    assert inputs.notes["strategy_performance"] == {"health_score": 82.5}

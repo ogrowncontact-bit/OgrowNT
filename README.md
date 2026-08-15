@@ -4,7 +4,7 @@
 **paper trading only** — no real orders are ever sent. See the full engineering
 specification in [`docs/blueprint/`](docs/blueprint/00-overview.md).
 
-## Status: Phase 4 (News, Regime, Patterns)
+## Status: Phase 5 (Learning & Research)
 
 Per [`docs/blueprint/12-roadmap.md`](docs/blueprint/12-roadmap.md):
 
@@ -27,8 +27,23 @@ Per [`docs/blueprint/12-roadmap.md`](docs/blueprint/12-roadmap.md):
   (`panic`/`euphoria`/`transition` now derived from real news, not guessed). The
   Opportunity Scoring Engine's `pattern` and `news` inputs are real signals now,
   not neutral placeholders.
+- **Phase 5 (Learning & Research):** a Learning Agent that recomputes each
+  strategy's rolling performance and a deterministic 0-100 Health Score on every
+  trade close, and automatically quarantines an underperforming live strategy out
+  of new signal generation (restoring one is always a deliberate admin action, never
+  automatic). A Trade/Failure Journal records expected-vs-actual outcomes, with an
+  LLM hypothesis (never fabricated without a configured LLM) when they diverge. A
+  Research Agent proposes candidate `learned_rules` for underperforming
+  patterns/strategies, validated — or rejected — only by a separate, independent
+  statistical check against freshly-queried trade data, never by the LLM's own
+  stated confidence. Market Memory captures the context behind every signal and its
+  eventual outcome; without the `pgvector` extension available in this Postgres
+  deployment, similarity search is real structured matching rather than fabricated
+  embeddings. The Scoring Engine's `historical_edge` and `strategy_performance`
+  inputs are real Pattern/Strategy Memory reads now, the last two components that
+  were still neutral placeholders.
 
-Learning/research (Phase 5) arrives later — **every order is `is_paper = true`; no
+Backtesting (Phase 6) arrives later — **every order is `is_paper = true`; no
 broker/exchange adapter is registered; nothing in this repo can send a live order
 or read a real broker/exchange key.**
 
@@ -38,22 +53,25 @@ or read a real broker/exchange key.**
 apps/
   api/         FastAPI backend (auth, system health, assets, market data, portfolio,
                strategies, opportunities/signals, regime, risk, positions/orders/trades,
-               news, patterns)
+               news, patterns, learning, research)
   worker/      24/7 loop: Market Data Agent (scan), Trade Monitor + safety-belt
-               refresh (every scan), News Intelligence Agent (own cadence),
-               Strategy Engine cycle (history backfill, regime, patterns,
-               strategies, scoring, Risk Engine, paper execution)
+               refresh + Learning Agent (per trade close, every scan), News
+               Intelligence Agent (own cadence), Strategy Engine cycle (history
+               backfill, regime, patterns, strategies, scoring, Risk Engine, paper
+               execution), Research Agent (own, longer cadence)
   dashboard/   Next.js dashboard (single admin user)
 packages/
   shared/      DB models, settings, logging, OHLCV lookup — shared across apps/packages
   data/        Market data + news provider interfaces, mock providers for both
   quant/       indicators, regime classifier, pattern detectors, pluggable
-               strategies, scoring engine
+               strategies, scoring engine, learning (strategy stats/health score,
+               quarantine, research/rule validation, market memory)
   portfolio/   equity/cash/exposure/drawdown computation, append-only snapshot ledger
   risk/        position sizing, correlation guard, safety belts, the veto-power decision pipeline
   execution/   ExecutionProvider interface, PaperExecutionProvider, order manager
-  llm/         Anthropic API client + News Intelligence interpretation — never
-               imported by packages/execution (structural "LLM ≠ Trading Engine")
+  llm/         Anthropic API client + News Intelligence/Learning/Research
+               interpretation — never imported by packages/execution (structural
+               "LLM ≠ Trading Engine")
 infra/
   docker/      docker-compose + Dockerfiles
   migrations/  Alembic
