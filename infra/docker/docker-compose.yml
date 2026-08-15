@@ -1,0 +1,80 @@
+# OgrowNT — Phase 1 stack. Run from anywhere with:
+#   docker compose -f infra/docker/docker-compose.yml up --build
+#
+# Requires a .env file at the repo root (copy .env.example -> .env first).
+# DATABASE_URL is intentionally overridden per-service below to point at the
+# `postgres` service name instead of whatever host is in .env, since that
+# file is also used for running the app outside Docker (localhost).
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ogrownt
+      POSTGRES_PASSWORD: ogrownt
+      POSTGRES_DB: ogrownt
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ogrownt"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # One-shot: applies Alembic migrations and seeds the admin user, asset
+  # universe and initial paper portfolio. api/worker wait for this to finish.
+  migrate:
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile.api
+    command: sh -c "alembic upgrade head && python -m scripts.seed"
+    env_file:
+      - ../../.env
+    environment:
+      DATABASE_URL: postgresql+psycopg://ogrownt:ogrownt@postgres:5432/ogrownt
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile.api
+    command: uvicorn apps.api.main:app --host 0.0.0.0 --port 8000
+    ports:
+      - "8000:8000"
+    env_file:
+      - ../../.env
+    environment:
+      DATABASE_URL: postgresql+psycopg://ogrownt:ogrownt@postgres:5432/ogrownt
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  worker:
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile.worker
+    env_file:
+      - ../../.env
+    environment:
+      DATABASE_URL: postgresql+psycopg://ogrownt:ogrownt@postgres:5432/ogrownt
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  dashboard:
+    build:
+      context: ../../apps/dashboard
+      dockerfile: ../../infra/docker/Dockerfile.dashboard
+    ports:
+      - "3000:3000"
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+    depends_on:
+      - api
+
+volumes:
+  pgdata:

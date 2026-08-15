@@ -1,0 +1,13 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html,
+body {
+  background-color: theme("colors.base.950");
+  color: theme("colors.ink.100");
+}
+
+* {
+  border-color: theme("colors.base.700");
+}

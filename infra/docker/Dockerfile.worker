@@ -1,0 +1,15 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends libpq5 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY pyproject.toml ./
+COPY apps ./apps
+COPY packages ./packages
+COPY config ./config
+
+RUN pip install --no-cache-dir -e .
+
+CMD ["python", "-m", "apps.worker.main"]

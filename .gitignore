@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+.pytest_cache/
+
+# Env
+.env
+
+# Node / Next.js
+node_modules/
+apps/dashboard/.next/
+apps/dashboard/out/
+apps/dashboard/next-env.d.ts
+npm-debug.log*
+
+# OS
+.DS_Store

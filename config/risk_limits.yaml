@@ -1,0 +1,31 @@
+# Risk Engine configuration — see docs/blueprint/08-risk-engine.md
+# All limits are read at runtime; changing this file does not require a code change.
+# In Phase 1 this file is not yet consumed (no Risk Engine / Strategy Engine
+# running yet — those arrive in Fase 2/3), it exists so the schema and the
+# blueprint stay in sync from day one.
+
+capital:
+  initial_paper_capital: 10000 # EUR
+
+per_trade:
+  max_risk_pct: 1.0
+  min_risk_reward: 1.5
+
+portfolio:
+  max_exposure_pct: 60
+  max_single_asset_pct: 15
+  max_correlated_cluster_pct: 25
+  correlation_threshold: 0.7
+
+loss_limits:
+  max_daily_loss_pct: 3
+  max_weekly_loss_pct: 6
+  max_strategy_drawdown_pct: 10
+  max_portfolio_drawdown_pct: 15
+
+liquidity:
+  max_spread_bps: 50
+  min_orderbook_depth_multiple: 3
+
+data_quality:
+  max_staleness_seconds: 120

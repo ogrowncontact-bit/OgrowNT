@@ -1,0 +1,25 @@
+# Opportunity Scoring Engine configuration — see docs/blueprint/07-scoring-engine.md
+# Not yet consumed in Phase 1 (Strategy/Scoring Engine arrives in Fase 2). Present
+# from day one so the config surface matches the blueprint.
+
+weights:
+  technical: 0.15
+  pattern: 0.15
+  regime: 0.15
+  historical_edge: 0.15
+  liquidity: 0.10
+  news: 0.10
+  risk_reward: 0.15
+  strategy_performance: 0.05
+
+penalties:
+  volatility_max: 15
+  correlation_max: 15
+  execution_cost_max: 10
+  drawdown_max: 10
+
+thresholds:
+  ignore: 60
+  watch: 70
+  possible: 80
+  high_quality: 90
