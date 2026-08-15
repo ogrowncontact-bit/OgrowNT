@@ -39,9 +39,3 @@ def get_portfolio_history(limit: int = 500, db: Session = Depends(get_session)) 
     )
 
 
-@router.get("/api/positions")
-def list_positions() -> list:
-    # The `positions` table and Execution Engine arrive in Fase 3
-    # (docs/blueprint/12-roadmap.md) — until then no position can exist,
-    # so this intentionally always returns an empty list rather than a mock.
-    return []

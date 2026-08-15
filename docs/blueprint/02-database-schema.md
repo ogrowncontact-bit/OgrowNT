@@ -264,7 +264,9 @@ CREATE TABLE positions (
     closed_at       TIMESTAMPTZ,
     status          TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','closed')),
     realized_pnl    NUMERIC,
-    unrealized_pnl  NUMERIC
+    unrealized_pnl  NUMERIC,
+    exit_price      NUMERIC,
+    exit_reason     TEXT              -- 'stop_hit' | 'target_hit' | 'thesis_invalidated' | 'manual'
 );
 
 CREATE TABLE correlation_matrix (

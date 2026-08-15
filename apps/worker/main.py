@@ -1,13 +1,17 @@
 """Worker entrypoint — the 24/7 loop.
 
 Runs two independent cadences (docs/blueprint/05-event-flow.md §Cadência):
-- Market Data Agent (scan) every SCAN_INTERVAL_SECONDS — Phase 1.
-- Strategy Engine cycle every STRATEGY_INTERVAL_SECONDS — Phase 2: regime
-  classification, the 4 strategies, and Opportunity Scoring, with a one-off
-  history backfill per asset so new assets don't have to wait
-  MIN_CANDLES_REQUIRED real minutes before strategies can run.
+- Every SCAN_INTERVAL_SECONDS: Market Data Agent (scan), Trade Monitor
+  (stop/target/thesis checks on open positions), and a safety-belt refresh —
+  all need to be responsive to price moves between strategy cycles.
+- Every STRATEGY_INTERVAL_SECONDS: history backfill for new assets, the
+  Strategy Engine cycle (regime -> strategies -> scoring), and — for any
+  signal scoring "possible" or better — the Risk Engine and, if approved,
+  the Execution Engine (paper only).
 
-The full Decision Pipeline (+ Risk Engine, Execution) is added in Phase 3.
+Nothing here ever reads a real broker/exchange key or sends a live order —
+see docs/blueprint/12-roadmap.md, live trading is explicitly out of scope
+until a strategy is validated out-of-sample (Fase 6+).
 """
 from __future__ import annotations
 
@@ -17,7 +21,10 @@ import time
 from apps.worker.history import backfill_active_assets
 from apps.worker.scanner import run_scan_cycle
 from apps.worker.strategy_runner import run_strategy_cycle
+from apps.worker.trade_monitor import run_trade_monitor_cycle
 from packages.data.connectors.market.factory import get_market_data_provider
+from packages.execution.adapters.paper import PaperExecutionProvider
+from packages.risk.monitor import update_safety_belt
 from packages.shared.db import SessionLocal
 from packages.shared.logging import configure_logging
 from packages.shared.settings import get_settings
@@ -62,9 +69,14 @@ def main() -> None:
         try:
             run_scan_cycle(db, provider)
 
+            # Paper execution provider — never a real broker/exchange adapter.
+            exec_provider = PaperExecutionProvider(db)
+            run_trade_monitor_cycle(db, exec_provider)
+            update_safety_belt(db)
+
             if cycle_start - last_strategy_run >= settings.strategy_interval_seconds:
                 backfill_active_assets(db, provider)
-                run_strategy_cycle(db)
+                run_strategy_cycle(db, provider=exec_provider)
                 last_strategy_run = cycle_start
         except Exception:  # noqa: BLE001 - never let one bad cycle kill the loop
             logger.exception("Worker cycle failed")

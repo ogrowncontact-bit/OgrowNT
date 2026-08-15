@@ -4,7 +4,7 @@
 **paper trading only** — no real orders are ever sent. See the full engineering
 specification in [`docs/blueprint/`](docs/blueprint/00-overview.md).
 
-## Status: Phase 2 (Intelligence)
+## Status: Phase 3 (Risk & Execution)
 
 Per [`docs/blueprint/12-roadmap.md`](docs/blueprint/12-roadmap.md):
 
@@ -13,31 +13,41 @@ Per [`docs/blueprint/12-roadmap.md`](docs/blueprint/12-roadmap.md):
 - **Phase 2 (Intelligence):** technical indicators, a rule-based Regime Engine
   (5 of 9 regimes — the rest need Phase 4's News Intelligence Agent), 4 pluggable
   strategies (Trend Following, Momentum, Breakout, Mean Reversion), and a
-  deterministic Opportunity Scoring Engine. The worker now finds and scores
-  candidate opportunities every cycle; the dashboard shows them.
+  deterministic Opportunity Scoring Engine.
+- **Phase 3 (Risk & Execution):** Portfolio Engine, Risk Engine (position sizing,
+  real Pearson correlation guard, Safety Belts, a 10-step decision pipeline with
+  veto power), a `PaperExecutionProvider` (simulated spread/slippage/fees), and a
+  Trade Monitor that closes positions on stop/target hits or an invalidated
+  thesis. The worker now runs the full `SIGNAL → RISK → PAPER ORDER → POSITION →
+  MONITOR → CLOSE` loop on its own — verified live, not just in tests.
 
-Risk engine, execution, news/patterns and learning arrive in later phases —
-**nothing in this repo sends a live order, executes a paper trade, or reads a real
-broker/exchange key yet.** Every "opportunity" shown is a read-only candidate.
+News/patterns and learning arrive in later phases — **every order is `is_paper =
+true`; no broker/exchange adapter is registered; nothing in this repo can send a
+live order or read a real broker/exchange key.**
 
 ## Architecture at a glance
 
 ```text
 apps/
   api/         FastAPI backend (auth, system health, assets, market data, portfolio,
-               strategies, opportunities/signals, regime)
-  worker/      24/7 loop: Market Data Agent (scan) + Strategy Engine cycle
-               (history backfill, regime, strategies, scoring)
+               strategies, opportunities/signals, regime, risk, positions/orders/trades)
+  worker/      24/7 loop: Market Data Agent (scan), Trade Monitor + safety-belt
+               refresh (every scan), Strategy Engine cycle (history backfill,
+               regime, strategies, scoring, Risk Engine, paper execution)
   dashboard/   Next.js dashboard (single admin user)
 packages/
-  shared/      DB models, settings, logging — shared by api + worker
+  shared/      DB models, settings, logging, OHLCV lookup — shared across apps/packages
   data/        Market data provider interface + mock provider (incl. historical backfill)
   quant/       indicators, regime classifier, pluggable strategies, scoring engine
+  portfolio/   equity/cash/exposure/drawdown computation, append-only snapshot ledger
+  risk/        position sizing, correlation guard, safety belts, the veto-power decision pipeline
+  execution/   ExecutionProvider interface, PaperExecutionProvider, order manager
 infra/
   docker/      docker-compose + Dockerfiles
   migrations/  Alembic
 scripts/       seed.py — admin user, asset universe, paper portfolio, strategy registry
-config/        risk_limits.yaml (Phase 3+), scoring_weights.yaml (Phase 2)
+config/        risk_limits.yaml, scoring_weights.yaml — both live-editable (risk
+               limits via PATCH /api/system/risk-limits)
 docs/blueprint/  full technical spec (architecture, DB schema, API, agents,
                  event flow, memory, scoring, risk engine, dashboard spec,
                  backtesting, LLM prompts, roadmap)

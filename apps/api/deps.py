@@ -17,7 +17,7 @@ def get_session(db: Session = Depends(get_db)) -> Generator[Session, None, None]
 
 def get_current_admin(
     credentials: HTTPAuthorizationCredentials | None = Depends(_bearer_scheme),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_session),
 ) -> AdminUser:
     if credentials is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")

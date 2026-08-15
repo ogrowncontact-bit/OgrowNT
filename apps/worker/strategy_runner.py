@@ -8,7 +8,10 @@ import logging
 
 from sqlalchemy.orm import Session
 
+from apps.worker.risk_execution import maybe_execute
 from packages.data.connectors.market.base import Candle
+from packages.execution.adapters.base import ExecutionProvider
+from packages.execution.adapters.paper import PaperExecutionProvider
 from packages.quant.indicators.core import MIN_CANDLES_REQUIRED, compute_indicators
 from packages.quant.regime.classifier import classify_regime
 from packages.quant.scoring import build_scoring_inputs, compute_score
@@ -36,12 +39,16 @@ def _load_recent_candles(db: Session, asset_id: int, timeframe: str, limit: int)
     ]
 
 
-def run_strategy_cycle(db: Session, strategies: list[Strategy] | None = None) -> dict:
+def run_strategy_cycle(
+    db: Session, strategies: list[Strategy] | None = None, provider: ExecutionProvider | None = None
+) -> dict:
     strategies = strategies or ALL_STRATEGIES
+    provider = provider or PaperExecutionProvider(db)
     strategy_rows = {row.code: row for row in db.query(StrategyRow).all()}
 
     assets = db.query(Asset).filter(Asset.is_active.is_(True)).all()
     evaluated, signals_created, insufficient_data = 0, 0, 0
+    risk_rejected, executed = 0, 0
 
     for asset in assets:
         candles = _load_recent_candles(db, asset.id, TIMEFRAME, HISTORY_LIMIT)
@@ -130,7 +137,22 @@ def run_strategy_cycle(db: Session, strategies: list[Strategy] | None = None) ->
                 regime_result.regime,
             )
 
+            outcome = maybe_execute(
+                db, provider, ctx=ctx, asset=asset, strategy=strategy, analysis=analysis,
+                signal=signal, signal_row=signal_row, score=score,
+            )
+            if outcome == "executed":
+                executed += 1
+            elif outcome == "risk_rejected":
+                risk_rejected += 1
+
     db.commit()
-    summary = {"evaluated": evaluated, "signals_created": signals_created, "insufficient_data": insufficient_data}
+    summary = {
+        "evaluated": evaluated,
+        "signals_created": signals_created,
+        "insufficient_data": insufficient_data,
+        "risk_rejected": risk_rejected,
+        "executed": executed,
+    }
     logger.info("Strategy cycle complete: %s", summary)
     return summary

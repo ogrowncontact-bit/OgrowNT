@@ -74,11 +74,50 @@ Scoring Engine. **Objetivo funcional:** o sistema encontra e mostra algo como
 Nada disto executa uma ordem — o Execution Engine só chega na Fase 3. Todas
 as "oportunidades" mostradas são candidatas de leitura, nunca uma posição.
 
-## Fase 3 — Risk & Execution
+## Fase 3 — Risk & Execution — **status: implementada e validada nesta sessão**
 
 Risk Engine completo (Safety Belts, Correlation Guard, Position Sizing), Portfolio
 Engine, `PaperExecutionProvider`. **Objetivo funcional:** `SIGNAL → RISK APPROVED →
 PAPER ORDER → POSITION OPEN → MONITOR → POSITION CLOSED → RESULT SAVED`.
+
+**Critério de sucesso:**
+- [x] Portfolio Engine: `packages/portfolio` computa equity/cash/exposure/
+      drawdown/P&L diário e semanal a partir de posições abertas + preços
+      reais, `portfolio_snapshots` como ledger append-only
+- [x] Position Sizing: sempre o menor entre risk-budget, portfolio headroom,
+      correlation headroom e single-asset cap — nunca tamanho fixo
+- [x] Correlation Guard: correlação de Pearson real sobre retornos de OHLCV
+      (não assumida), bloqueia quando um cluster correlacionado excede o
+      limite configurado
+- [x] Safety Belts (`normal/caution/defensive/emergency/kill_switch`) 
+      avaliados a partir de drawdown/perdas reais, com política de tamanho
+      e piso de tier por nível; Kill Switch automático a 1.5× o limiar de
+      `EMERGENCY`, deliberadamente conservador
+- [x] Risk Engine: pipeline de 10 passos completo (kill switch → safety
+      belt → data quality → risk/reward → exposição → concentração →
+      correlação → liquidez → perdas diária/semanal → sizing), cada passo
+      gravado em `risk_checks`/`risk_decisions` para auditoria — **nunca**
+      pode ser contornado por outro módulo
+- [x] `PaperExecutionProvider`: simula spread, slippage (cresce com o
+      tamanho da ordem vs. volume) e fees; nunca liga a um broker real
+- [x] Trade Monitor: fecha posições em stop hit, target hit, ou tese
+      invalidada (mudança de regime para o pior regime da estratégia) —
+      testado deterministicamente, não à espera de um random walk ao vivo
+- [x] worker: ciclo de risco+execução corre organicamente dentro do
+      Strategy Engine cycle — validado ao vivo contra Postgres real: um
+      sinal GOOGL/breakout atingiu score 72.17 (tier `possible`), foi
+      aprovado pelo Risk Engine e executado, sem qualquer atalho de teste
+- [x] API: `/api/risk`, `/api/positions` (agora real), `/api/orders`,
+      `/api/trades`, `/api/trades/{id}/why`, `PATCH /api/system/risk-limits`
+- [x] dashboard mostra posições reais e trades recentes (verificado ao vivo)
+- [x] 53 novos testes automatizados (105/105 no total da suite), incluindo
+      isolamento real por teste (savepoint + rollback) depois de a suite
+      partilhada ter começado a mascarar bugs — corrigido pelo caminho um
+      bug real de wiring (`get_current_admin` não passava pela dependência
+      de sessão testável)
+
+Ainda nada de dinheiro real: `Order.is_paper`/`Trade.is_paper` sempre `true`,
+nenhum adapter de broker/exchange real está registado.
 
 ## Fase 4 — News, Regime, Patterns
 

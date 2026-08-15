@@ -47,6 +47,35 @@ export type Regime = {
   confidence: number;
   features: Record<string, unknown>;
 };
+export type Position = {
+  id: number;
+  asset_symbol: string;
+  strategy_code: string;
+  direction: "long" | "short";
+  entry_price: number;
+  current_stop: number;
+  target_price: number | null;
+  size: number;
+  opened_at: string;
+  closed_at: string | null;
+  status: "open" | "closed";
+  unrealized_pnl: number | null;
+  realized_pnl: number | null;
+  exit_price: number | null;
+  exit_reason: string | null;
+};
+export type Trade = {
+  id: number;
+  position_id: number;
+  asset_symbol: string;
+  strategy_code: string;
+  direction: "long" | "short";
+  pnl: number;
+  r_multiple: number | null;
+  outcome: "win" | "loss" | "breakeven";
+  is_paper: boolean;
+  closed_at: string;
+};
 
 async function apiFetch<T>(path: string, token?: string): Promise<T | null> {
   try {
@@ -68,9 +97,11 @@ export const getHealth = () => apiFetch<HealthResponse>("/api/system/health");
 export const getSystemStatus = (token: string) => apiFetch<SystemStatus>("/api/system/status", token);
 export const getPortfolio = () => apiFetch<Portfolio>("/api/portfolio");
 export const getAssets = () => apiFetch<Asset[]>("/api/assets");
-export const getPositions = () => apiFetch<unknown[]>("/api/positions");
+export const getPositions = (statusFilter: "open" | "closed" = "open") =>
+  apiFetch<Position[]>(`/api/positions?status_filter=${statusFilter}`);
 export const getOpportunities = (limit = 10) => apiFetch<Opportunity[]>(`/api/opportunities?limit=${limit}`);
 export const getRegimes = () => apiFetch<Regime[]>("/api/regime");
+export const getTrades = (limit = 10) => apiFetch<Trade[]>(`/api/trades?limit=${limit}`);
 
 export async function login(email: string, password: string) {
   const res = await fetch(`${API_URL}/api/auth/login`, {

@@ -7,6 +7,7 @@ import {
   getPositions,
   getRegimes,
   getSystemStatus,
+  getTrades,
 } from "@/lib/api";
 import { StatCard } from "@/components/StatCard";
 import { RiskBadge } from "@/components/RiskBadge";
@@ -23,14 +24,15 @@ export default async function DashboardPage() {
   const cookieStore = await cookies();
   const token = cookieStore.get("ogrownt_token")?.value ?? "";
 
-  const [health, status, portfolio, assets, positions, opportunities, regimes] = await Promise.all([
+  const [health, status, portfolio, assets, positions, opportunities, regimes, trades] = await Promise.all([
     getHealth(),
     getSystemStatus(token),
     getPortfolio(),
     getAssets(),
-    getPositions(),
+    getPositions("open"),
     getOpportunities(10),
     getRegimes(),
+    getTrades(8),
   ]);
 
   const systemOnline = health?.overall === "green";
@@ -159,20 +161,96 @@ export default async function DashboardPage() {
         </div>
 
         <div className="rounded-lg border border-base-700 bg-base-900 p-4">
-          <p className="mb-3 text-[11px] uppercase tracking-wider text-ink-500">Active Positions</p>
+          <p className="mb-3 text-[11px] uppercase tracking-wider text-ink-500">
+            Active Positions {positions ? `(${positions.length})` : ""}
+          </p>
           {positions && positions.length > 0 ? (
-            <ul className="text-xs text-ink-100">
-              {positions.map((_, i) => (
-                <li key={i}>position #{i}</li>
+            <div className="space-y-2">
+              {positions.map((p) => (
+                <div key={p.id} className="rounded border border-base-700 px-2 py-1.5 text-xs">
+                  <div className="flex items-center justify-between">
+                    <span className="text-ink-100">
+                      {p.asset_symbol}{" "}
+                      <span className={p.direction === "long" ? "text-signal-green" : "text-signal-red"}>
+                        {p.direction.toUpperCase()}
+                      </span>
+                    </span>
+                    <span className={(p.unrealized_pnl ?? 0) >= 0 ? "text-signal-green" : "text-signal-red"}>
+                      {p.unrealized_pnl !== null ? eur(p.unrealized_pnl) : "—"}
+                    </span>
+                  </div>
+                  <div className="mt-1 flex justify-between text-ink-500">
+                    <span>{p.strategy_code}</span>
+                    <span>
+                      entry {p.entry_price.toFixed(4)} · stop {p.current_stop.toFixed(4)}
+                    </span>
+                  </div>
+                </div>
               ))}
-            </ul>
+            </div>
           ) : (
             <p className="text-xs text-ink-500">
-              None — Execution Engine arrives in Phase 3. Opportunities above are candidates
-              only, nothing is executed yet.
+              None right now — no signal has cleared the Risk Engine this cycle. That&apos;s the
+              correct outcome when there&apos;s no clear edge (docs/blueprint/00-overview.md).
             </p>
           )}
         </div>
+      </section>
+
+      <section className="mb-6 rounded-lg border border-base-700 bg-base-900 p-4">
+        <p className="mb-3 text-[11px] uppercase tracking-wider text-ink-500">
+          Recent Trades {trades ? `(${trades.length})` : ""}
+        </p>
+        {trades && trades.length > 0 ? (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead>
+                <tr className="text-ink-500">
+                  <th className="pb-2 pr-3 font-normal">Asset</th>
+                  <th className="pb-2 pr-3 font-normal">Strategy</th>
+                  <th className="pb-2 pr-3 font-normal">Dir</th>
+                  <th className="pb-2 pr-3 font-normal">P&amp;L</th>
+                  <th className="pb-2 pr-3 font-normal">R</th>
+                  <th className="pb-2 font-normal">Outcome</th>
+                </tr>
+              </thead>
+              <tbody>
+                {trades.map((t) => (
+                  <tr key={t.id} className="border-t border-base-700/60 hover:bg-base-800">
+                    <td className="py-1.5 pr-3 text-ink-100">{t.asset_symbol}</td>
+                    <td className="py-1.5 pr-3 text-ink-300">{t.strategy_code}</td>
+                    <td
+                      className={`py-1.5 pr-3 font-medium uppercase ${
+                        t.direction === "long" ? "text-signal-green" : "text-signal-red"
+                      }`}
+                    >
+                      {t.direction}
+                    </td>
+                    <td className={`py-1.5 pr-3 ${t.pnl >= 0 ? "text-signal-green" : "text-signal-red"}`}>
+                      {eur(t.pnl)}
+                    </td>
+                    <td className="py-1.5 pr-3 text-ink-300">{t.r_multiple !== null ? t.r_multiple.toFixed(2) : "—"}</td>
+                    <td className="py-1.5">
+                      <span
+                        className={
+                          t.outcome === "win"
+                            ? "text-signal-green"
+                            : t.outcome === "loss"
+                              ? "text-signal-red"
+                              : "text-ink-300"
+                        }
+                      >
+                        {t.outcome}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <p className="text-xs text-ink-500">No closed trades yet.</p>
+        )}
       </section>
 
       <section className="rounded-lg border border-base-700 bg-base-900 p-4">

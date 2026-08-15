@@ -5,9 +5,9 @@ running (docs/blueprint/12-roadmap.md), not stubbed out ahead of the code
 that uses them:
   Phase 1: auth, assets, OHLCV, paper portfolio, system state, alerts, audit log
   Phase 2: strategies, market regimes, signals, opportunity scores
-Tables for news/patterns (Phase 4), risk decisions/positions/orders/trades
-(Phase 3), and memory/learning (Phase 5) are specified in the blueprint and
-arrive with those phases.
+  Phase 3: risk checks/decisions, positions, orders, trades, correlation matrix
+Tables for news/patterns (Phase 4) and memory/learning (Phase 5) are
+specified in the blueprint and arrive with those phases.
 """
 from datetime import datetime, timezone
 
@@ -258,3 +258,121 @@ class OpportunityScore(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
     signal: Mapped["Signal"] = relationship()
+
+
+# --- Phase 3 (Risk & Execution) -----------------------------------------
+
+
+class RiskCheck(Base):
+    """One row per check in the Risk Engine's Decision Pipeline
+    (docs/blueprint/08-risk-engine.md) for a given signal — the audit trail
+    behind the "Why?" panel's risk side.
+    """
+
+    __tablename__ = "risk_checks"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    signal_id: Mapped[int] = mapped_column(ForeignKey("signals.id"), nullable=False)
+    check_name: Mapped[str] = mapped_column(String, nullable=False)
+    passed: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    detail: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
+class RiskDecision(Base):
+    __tablename__ = "risk_decisions"
+    __table_args__ = (UniqueConstraint("signal_id", name="uq_risk_decisions_signal_id"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    signal_id: Mapped[int] = mapped_column(ForeignKey("signals.id"), nullable=False)
+    approved: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    approved_size: Mapped[float | None] = mapped_column(Float)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    safety_belt_level: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+    signal: Mapped["Signal"] = relationship()
+
+
+class Position(Base):
+    __tablename__ = "positions"
+    __table_args__ = (
+        CheckConstraint("direction IN ('long','short')", name="ck_positions_direction"),
+        CheckConstraint("status IN ('open','closed')", name="ck_positions_status"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    asset_id: Mapped[int] = mapped_column(ForeignKey("assets.id"), nullable=False)
+    strategy_id: Mapped[int] = mapped_column(ForeignKey("strategies.id"), nullable=False)
+    signal_id: Mapped[int | None] = mapped_column(ForeignKey("signals.id"))
+    direction: Mapped[str] = mapped_column(String, nullable=False)
+    entry_price: Mapped[float] = mapped_column(Float, nullable=False)
+    current_stop: Mapped[float] = mapped_column(Float, nullable=False)
+    target_price: Mapped[float | None] = mapped_column(Float)
+    size: Mapped[float] = mapped_column(Float, nullable=False)
+    opened_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    status: Mapped[str] = mapped_column(String, default="open", nullable=False)
+    realized_pnl: Mapped[float | None] = mapped_column(Float)
+    unrealized_pnl: Mapped[float | None] = mapped_column(Float)
+    exit_price: Mapped[float | None] = mapped_column(Float)
+    exit_reason: Mapped[str | None] = mapped_column(String)
+
+    asset: Mapped["Asset"] = relationship()
+    strategy: Mapped["StrategyRow"] = relationship()
+    signal: Mapped["Signal | None"] = relationship()
+
+
+class Order(Base):
+    __tablename__ = "orders"
+    __table_args__ = (
+        CheckConstraint("order_type IN ('market','limit','stop')", name="ck_orders_order_type"),
+        CheckConstraint("side IN ('buy','sell')", name="ck_orders_side"),
+        CheckConstraint(
+            "status IN ('new','submitted','filled','partially_filled','cancelled','rejected')",
+            name="ck_orders_status",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    position_id: Mapped[int | None] = mapped_column(ForeignKey("positions.id"))
+    signal_id: Mapped[int | None] = mapped_column(ForeignKey("signals.id"))
+    broker_order_id: Mapped[str | None] = mapped_column(String)
+    order_type: Mapped[str] = mapped_column(String, nullable=False)
+    side: Mapped[str] = mapped_column(String, nullable=False)
+    qty: Mapped[float] = mapped_column(Float, nullable=False)
+    limit_price: Mapped[float | None] = mapped_column(Float)
+    status: Mapped[str] = mapped_column(String, default="new", nullable=False)
+    submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    filled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    filled_price: Mapped[float | None] = mapped_column(Float)
+    fees: Mapped[float | None] = mapped_column(Float)
+    slippage_bps: Mapped[float | None] = mapped_column(Float)
+    is_paper: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+
+class Trade(Base):
+    __tablename__ = "trades"
+    __table_args__ = (CheckConstraint("outcome IN ('win','loss','breakeven')", name="ck_trades_outcome"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    position_id: Mapped[int] = mapped_column(ForeignKey("positions.id"), nullable=False)
+    opened_order_id: Mapped[int | None] = mapped_column(ForeignKey("orders.id"))
+    closed_order_id: Mapped[int | None] = mapped_column(ForeignKey("orders.id"))
+    pnl: Mapped[float] = mapped_column(Float, nullable=False)
+    r_multiple: Mapped[float | None] = mapped_column(Float)
+    outcome: Mapped[str] = mapped_column(String, nullable=False)
+    is_paper: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    closed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+    position: Mapped["Position"] = relationship()
+
+
+class CorrelationMatrixEntry(Base):
+    __tablename__ = "correlation_matrix"
+
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), primary_key=True)
+    asset_id_a: Mapped[int] = mapped_column(ForeignKey("assets.id"), primary_key=True)
+    asset_id_b: Mapped[int] = mapped_column(ForeignKey("assets.id"), primary_key=True)
+    window_days: Mapped[int] = mapped_column(primary_key=True)
+    correlation: Mapped[float] = mapped_column(Float, nullable=False)

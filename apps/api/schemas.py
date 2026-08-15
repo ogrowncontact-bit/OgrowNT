@@ -170,3 +170,96 @@ class OpportunityDetailOut(BaseModel):
     status: str
     ts: datetime
     score: ScoreBreakdown
+
+
+# --- Phase 3 -----------------------------------------------------------
+
+
+class RiskCheckOut(BaseModel):
+    check_name: str
+    passed: bool
+    detail: dict
+
+
+class RiskDecisionOut(BaseModel):
+    signal_id: int
+    asset_symbol: str
+    strategy_code: str
+    approved: bool
+    approved_size: float | None
+    reason: str
+    safety_belt_level: str
+    created_at: datetime
+    checks: list[RiskCheckOut] = []
+
+
+class RiskStateOut(BaseModel):
+    safety_belt_level: str
+    trading_enabled: bool
+    limits: dict
+    recent_decisions: list[RiskDecisionOut]
+
+
+class RiskLimitsUpdate(BaseModel):
+    """Partial update — only send the keys you want to change, nested the
+    same way as config/risk_limits.yaml (e.g. {"per_trade": {"max_risk_pct": 0.5}})."""
+
+    capital: dict | None = None
+    per_trade: dict | None = None
+    portfolio: dict | None = None
+    loss_limits: dict | None = None
+    liquidity: dict | None = None
+    data_quality: dict | None = None
+
+
+class PositionOut(BaseModel):
+    id: int
+    asset_symbol: str
+    strategy_code: str
+    direction: str
+    entry_price: float
+    current_stop: float
+    target_price: float | None
+    size: float
+    opened_at: datetime
+    closed_at: datetime | None
+    status: str
+    unrealized_pnl: float | None
+    realized_pnl: float | None
+    exit_price: float | None
+    exit_reason: str | None
+
+
+class OrderOut(BaseModel):
+    id: int
+    position_id: int | None
+    side: str
+    order_type: str
+    qty: float
+    status: str
+    filled_price: float | None
+    fees: float | None
+    slippage_bps: float | None
+    submitted_at: datetime | None
+    filled_at: datetime | None
+    is_paper: bool
+
+
+class TradeOut(BaseModel):
+    id: int
+    position_id: int
+    asset_symbol: str
+    strategy_code: str
+    direction: str
+    pnl: float
+    r_multiple: float | None
+    outcome: str
+    is_paper: bool
+    closed_at: datetime
+
+
+class TradeWhyOut(BaseModel):
+    trade: TradeOut
+    position: PositionOut
+    opportunity: OpportunityDetailOut | None
+    risk_decision: RiskDecisionOut | None

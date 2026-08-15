@@ -12,10 +12,11 @@ os.environ.setdefault("MARKET_DATA_PROVIDER", "mock")
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
+from sqlalchemy.orm import Session as SQLASession  # noqa: E402
 
 from apps.api.deps import get_session  # noqa: E402
 from apps.api.main import app  # noqa: E402
-from packages.shared.db import Base, SessionLocal, engine  # noqa: E402
+from packages.shared.db import Base, engine  # noqa: E402
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -27,11 +28,24 @@ def _schema():
 
 @pytest.fixture()
 def db_session():
-    session = SessionLocal()
+    """Every test gets a fully isolated view of the DB: one connection, one
+    outer transaction, and the session joins it as a SAVEPOINT
+    (join_transaction_mode="create_savepoint") so that application code
+    calling db.commit() (open_position, evaluate_signal, refresh_snapshot,
+    ...) only releases/reopens the savepoint -- it never touches the outer
+    transaction. Rolling that back after the test undoes everything the
+    test did, however many internal commits happened, so tests can no
+    longer see or be seen by other tests' data.
+    """
+    connection = engine.connect()
+    outer_transaction = connection.begin()
+    session = SQLASession(bind=connection, join_transaction_mode="create_savepoint")
     try:
         yield session
     finally:
         session.close()
+        outer_transaction.rollback()
+        connection.close()
 
 
 @pytest.fixture()
