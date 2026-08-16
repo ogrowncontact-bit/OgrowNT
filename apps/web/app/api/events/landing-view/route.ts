@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { prisma } from "@inner/db";
 import { getAssessmentConfig } from "@/lib/assessments";
 import { ensureAnonymousSession } from "@/lib/anonymousSession";
 import { track } from "@/lib/analytics";
@@ -15,8 +16,11 @@ export async function POST(request: NextRequest) {
   const slug = body?.slug as string | undefined;
   if (!slug) return NextResponse.json({ error: "slug is required" }, { status: 400 });
 
-  const config = await getAssessmentConfig(slug);
-  if (!config) return NextResponse.json({ error: "Unknown assessment" }, { status: 404 });
+  const [config, assessment] = await Promise.all([
+    getAssessmentConfig(slug),
+    prisma.assessment.findUnique({ where: { slug }, select: { id: true } }),
+  ]);
+  if (!config || !assessment) return NextResponse.json({ error: "Unknown assessment" }, { status: 404 });
 
   const utm = {
     utmSource: body?.utm?.utm_source,
@@ -27,7 +31,7 @@ export async function POST(request: NextRequest) {
   };
 
   const anonymousSessionId = await ensureAnonymousSession({ firstLandingSlug: slug, utm });
-  await track({ anonymousSessionId, eventName: "landing_view", properties: { slug }, utm });
+  await track({ anonymousSessionId, eventName: "landing_view", assessmentId: assessment.id, properties: { slug }, utm });
 
   return NextResponse.json({ ok: true });
 }

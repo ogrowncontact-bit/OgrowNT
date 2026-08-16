@@ -59,6 +59,16 @@ export async function createAssessment(input: CreateAssessmentInput): Promise<{ 
     },
   });
 
+  // Seed real prices matching the builder's displayed defaults — without this,
+  // an admin who never touches the Pricing section publishes a experience
+  // nobody can actually buy (checkout has no active Price row to charge).
+  await prisma.price.createMany({
+    data: [
+      { assessmentId: assessment.id, productType: "individual", amountCents: 799, currency: "EUR" },
+      { assessmentId: assessment.id, productType: "deep", amountCents: 1299, currency: "EUR" },
+    ],
+  });
+
   return { id: assessment.id };
 }
 
