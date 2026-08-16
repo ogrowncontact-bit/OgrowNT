@@ -1,8 +1,17 @@
+import { randomBytes, scryptSync } from "node:crypto";
 import { PrismaClient } from "@prisma/client";
 import { allAssessments, dimensionPool } from "@inner/content";
 import type { AssessmentConfig } from "@inner/assessment-engine";
 
 const prisma = new PrismaClient();
+
+// Duplicated from apps/web/lib/security/password.ts (kept tiny + inline
+// rather than adding a cross-package dependency just for this one script).
+function hashPassword(password: string): string {
+  const salt = randomBytes(16).toString("hex");
+  const hash = scryptSync(password, salt, 64).toString("hex");
+  return `${salt}:${hash}`;
+}
 
 /**
  * Creates version 1 of an assessment. Re-running this against a DB that
@@ -160,6 +169,17 @@ async function main() {
     }
   }
   console.log("Seeded recommendation graph.");
+
+  const adminEmail = (process.env.ADMIN_EMAIL ?? "admin@inner.dev").toLowerCase();
+  const adminPassword = process.env.ADMIN_PASSWORD ?? "changeme-dev-only";
+  await prisma.adminUser.upsert({
+    where: { email: adminEmail },
+    update: {},
+    create: { email: adminEmail, passwordHash: hashPassword(adminPassword), role: "owner" },
+  });
+  console.log(
+    `Seeded admin user "${adminEmail}"${process.env.ADMIN_PASSWORD ? "" : " with the dev-only default password — set ADMIN_EMAIL/ADMIN_PASSWORD env vars before seeding a real environment"}.`
+  );
 }
 
 main()
