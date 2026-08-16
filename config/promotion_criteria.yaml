@@ -1,0 +1,12 @@
+# Strategy promotion criteria — see docs/blueprint/10-backtesting-paper-trading.md
+# §"Critério de promoção mínimo". Editable here directly (no PATCH endpoint
+# yet — this is read fresh on every promotion check, same as risk_limits.yaml).
+# Meeting these is necessary but not sufficient: promotion is always an
+# explicit admin action (POST /api/strategies/{id}/promote), never automatic.
+promotion:
+  min_paper_trades: 30
+  min_paper_days: 30
+  max_drawdown_pct: 10
+  min_expectancy: 0            # must be positive
+  min_sharpe_like: 0.5
+  degradation_tolerance_pct: 20  # max deviation vs. backtest before a WARNING alert

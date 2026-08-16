@@ -1,12 +1,14 @@
 import { cookies } from "next/headers";
 import {
   getAssets,
+  getBacktests,
   getHealth,
   getLearnedRules,
   getNews,
   getOpportunities,
   getPortfolio,
   getPositions,
+  getPromotionCheck,
   getRegimes,
   getStrategyLearning,
   getSystemStatus,
@@ -44,6 +46,14 @@ export default async function DashboardPage() {
       getTradeJournal(6),
       getLearnedRules(6),
     ]);
+
+  const [backtests, promotionChecks] = await Promise.all([
+    getBacktests(8),
+    Promise.all((strategyLearning ?? []).map((s) => getPromotionCheck(s.strategy_id))),
+  ]);
+  const promotionByStrategyId = new Map(
+    (strategyLearning ?? []).map((s, i) => [s.strategy_id, promotionChecks[i]])
+  );
 
   const systemOnline = health?.overall === "green";
   const dailyPnl = portfolio?.daily_pnl ?? 0;
@@ -316,36 +326,49 @@ export default async function DashboardPage() {
           </p>
           {strategyLearning && strategyLearning.length > 0 ? (
             <div className="space-y-2">
-              {strategyLearning.map((s) => (
-                <div key={s.strategy_id} className="rounded border border-base-700 px-2 py-1.5 text-xs">
-                  <div className="flex items-center justify-between">
-                    <span className="text-ink-100">{s.strategy_code}</span>
-                    <div className="flex items-center gap-2">
-                      <LifecycleBadge stage={s.lifecycle_stage} />
-                      <span
-                        className={
-                          s.health_score === null
-                            ? "text-ink-500"
-                            : s.health_score >= 60
-                              ? "text-signal-green"
-                              : s.health_score >= 35
-                                ? "text-signal-yellow"
-                                : "text-signal-red"
-                        }
-                      >
-                        {s.health_score !== null ? s.health_score.toFixed(1) : "—"}
+              {strategyLearning.map((s) => {
+                const promotion = promotionByStrategyId.get(s.strategy_id);
+                return (
+                  <div key={s.strategy_id} className="rounded border border-base-700 px-2 py-1.5 text-xs">
+                    <div className="flex items-center justify-between">
+                      <span className="text-ink-100">{s.strategy_code}</span>
+                      <div className="flex items-center gap-2">
+                        <LifecycleBadge stage={s.lifecycle_stage} />
+                        <span
+                          className={
+                            s.health_score === null
+                              ? "text-ink-500"
+                              : s.health_score >= 60
+                                ? "text-signal-green"
+                                : s.health_score >= 35
+                                  ? "text-signal-yellow"
+                                  : "text-signal-red"
+                          }
+                        >
+                          {s.health_score !== null ? s.health_score.toFixed(1) : "—"}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="mt-1 flex justify-between text-ink-500">
+                      <span>{s.total_trades} trades closed</span>
+                      <span>
+                        win rate {s.win_rate !== null ? `${Math.round(s.win_rate * 100)}%` : "—"} · expectancy{" "}
+                        {s.expectancy !== null ? s.expectancy.toFixed(2) + "R" : "—"}
                       </span>
                     </div>
+                    {promotion && promotion.next_stage && (
+                      <div
+                        className={`mt-1 text-[10px] ${promotion.eligible ? "text-signal-green" : "text-ink-500"}`}
+                        title={promotion.eligible ? undefined : promotion.reasons.join("; ")}
+                      >
+                        {promotion.eligible
+                          ? `Ready for promotion -> ${promotion.next_stage}`
+                          : `Not yet ready for ${promotion.next_stage} (${promotion.reasons.length} unmet criteria)`}
+                      </div>
+                    )}
                   </div>
-                  <div className="mt-1 flex justify-between text-ink-500">
-                    <span>{s.total_trades} trades closed</span>
-                    <span>
-                      win rate {s.win_rate !== null ? `${Math.round(s.win_rate * 100)}%` : "—"} · expectancy{" "}
-                      {s.expectancy !== null ? s.expectancy.toFixed(2) + "R" : "—"}
-                    </span>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           ) : (
             <p className="text-xs text-ink-500">No strategies registered.</p>
@@ -421,6 +444,50 @@ export default async function DashboardPage() {
           </div>
         ) : (
           <p className="text-xs text-ink-500">No journal entries yet — none closed.</p>
+        )}
+      </section>
+
+      <section className="mb-6 rounded-lg border border-base-700 bg-base-900 p-4">
+        <p className="mb-3 text-[11px] uppercase tracking-wider text-ink-500">
+          Backtests {backtests ? `(${backtests.length})` : ""}
+        </p>
+        {backtests && backtests.length > 0 ? (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead>
+                <tr className="text-ink-500">
+                  <th className="pb-2 pr-3 font-normal">Strategy</th>
+                  <th className="pb-2 pr-3 font-normal">Asset</th>
+                  <th className="pb-2 pr-3 font-normal">Kind</th>
+                  <th className="pb-2 pr-3 font-normal">Trades</th>
+                  <th className="pb-2 pr-3 font-normal">Net Return</th>
+                  <th className="pb-2 pr-3 font-normal">Win Rate</th>
+                  <th className="pb-2 font-normal">Max DD</th>
+                </tr>
+              </thead>
+              <tbody>
+                {backtests.map((b) => (
+                  <tr key={b.id} className="border-t border-base-700/60 hover:bg-base-800">
+                    <td className="py-1.5 pr-3 text-ink-100">{b.strategy_code}</td>
+                    <td className="py-1.5 pr-3 text-ink-300">{b.asset_symbol}</td>
+                    <td className="py-1.5 pr-3 text-ink-500">
+                      {b.kind === "walk_forward_window" ? `wf ${(b.window_index ?? 0) + 1}/${b.total_windows}` : b.kind}
+                    </td>
+                    <td className="py-1.5 pr-3 text-ink-300">{b.num_trades}</td>
+                    <td className={`py-1.5 pr-3 ${(b.net_return ?? 0) > 0 ? "text-signal-green" : (b.net_return ?? 0) < 0 ? "text-signal-red" : "text-ink-300"}`}>
+                      {b.net_return !== null ? `${(b.net_return * 100).toFixed(2)}%` : "—"}
+                    </td>
+                    <td className="py-1.5 pr-3 text-ink-300">{b.win_rate !== null ? `${Math.round(b.win_rate * 100)}%` : "—"}</td>
+                    <td className="py-1.5 text-ink-300">{b.max_drawdown !== null ? `${b.max_drawdown.toFixed(2)}%` : "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <p className="text-xs text-ink-500">
+            No backtests run yet — launch one via <code>POST /api/backtests</code> (see <code>/docs</code>).
+          </p>
         )}
       </section>
 

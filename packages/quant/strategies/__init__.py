@@ -21,6 +21,16 @@ ALL_STRATEGIES: list[Strategy] = [
     MeanReversionStrategy(),
 ]
 
+# code -> class, for packages/backtest (rebuilding a strategy instance with
+# perturbed params for parameter-stability testing) and any other caller
+# that needs a fresh instance rather than the shared ALL_STRATEGIES singletons.
+STRATEGY_CLASSES: dict[str, type] = {
+    TrendFollowingStrategy.code: TrendFollowingStrategy,
+    MomentumStrategy.code: MomentumStrategy,
+    BreakoutStrategy.code: BreakoutStrategy,
+    MeanReversionStrategy.code: MeanReversionStrategy,
+}
+
 __all__ = [
     "AnalysisResult",
     "Direction",
@@ -29,6 +39,7 @@ __all__ = [
     "StrategyBase",
     "StrategySignal",
     "ALL_STRATEGIES",
+    "STRATEGY_CLASSES",
     "TrendFollowingStrategy",
     "MomentumStrategy",
     "BreakoutStrategy",

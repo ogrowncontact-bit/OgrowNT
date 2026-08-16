@@ -131,6 +131,38 @@ export type LearnedRule = {
   created_at: string;
   validated_at: string | null;
 };
+export type BacktestSummary = {
+  id: number;
+  strategy_code: string;
+  asset_symbol: string;
+  timeframe: string;
+  kind: string;
+  group_label: string | null;
+  window_index: number | null;
+  total_windows: number | null;
+  start_ts: string;
+  end_ts: string;
+  initial_capital: number;
+  net_return: number | null;
+  cagr_like_return: number | null;
+  win_rate: number | null;
+  profit_factor: number | null;
+  max_drawdown: number | null;
+  avg_trade: number | null;
+  expectancy: number | null;
+  num_trades: number;
+  sharpe_like: number | null;
+  created_at: string;
+};
+export type PromotionCheck = {
+  strategy_id: number;
+  eligible: boolean;
+  current_stage: string;
+  next_stage: string | null;
+  reasons: string[];
+  criteria: Record<string, unknown>;
+  actual: Record<string, unknown>;
+};
 
 async function apiFetch<T>(path: string, token?: string): Promise<T | null> {
   try {
@@ -161,6 +193,8 @@ export const getNews = (limit = 10) => apiFetch<NewsEvent[]>(`/api/news?limit=${
 export const getStrategyLearning = () => apiFetch<StrategyLearning[]>("/api/learning/strategy-performance");
 export const getTradeJournal = (limit = 10) => apiFetch<TradeJournalEntry[]>(`/api/learning/trade-journal?limit=${limit}`);
 export const getLearnedRules = (limit = 10) => apiFetch<LearnedRule[]>(`/api/research/rules?limit=${limit}`);
+export const getBacktests = (limit = 10) => apiFetch<BacktestSummary[]>(`/api/backtests?limit=${limit}`);
+export const getPromotionCheck = (strategyId: number) => apiFetch<PromotionCheck>(`/api/strategies/${strategyId}/promotion-check`);
 
 export async function login(email: string, password: string) {
   const res = await fetch(`${API_URL}/api/auth/login`, {

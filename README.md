@@ -4,7 +4,7 @@
 **paper trading only** — no real orders are ever sent. See the full engineering
 specification in [`docs/blueprint/`](docs/blueprint/00-overview.md).
 
-## Status: Phase 5 (Learning & Research)
+## Status: Phase 6 (Backtesting)
 
 Per [`docs/blueprint/12-roadmap.md`](docs/blueprint/12-roadmap.md):
 
@@ -42,8 +42,24 @@ Per [`docs/blueprint/12-roadmap.md`](docs/blueprint/12-roadmap.md):
   embeddings. The Scoring Engine's `historical_edge` and `strategy_performance`
   inputs are real Pattern/Strategy Memory reads now, the last two components that
   were still neutral placeholders.
+- **Phase 6 (Backtesting):** an event-driven Backtest Engine that walks real,
+  already-persisted OHLCV bars one at a time (no look-ahead — a strategy only ever
+  sees candles up to "now"), running the same indicators/regime/pattern/scoring
+  pipeline the live worker does, sized and gated by the exact same Risk Engine
+  sizing/safety-belt logic against an isolated simulated portfolio that never
+  touches the real paper account. Anti-overfitting: walk-forward validation
+  (consistency across rolling test windows) and parameter-stability checks
+  (perturbing each strategy's numeric parameters ±20% and confirming the verdict
+  doesn't flip sign — the 4 strategies now take their parameters as constructor
+  arguments for exactly this). A performance-degradation check compares live paper
+  performance against a strategy's reference backtest and raises a warning on
+  sustained divergence. A config-driven promotion pipeline
+  (`config/promotion_criteria.yaml`) gates `paper → small_capital → production`
+  transitions on real paper-trading track record — always proposed by DET, always
+  applied only through an explicit, server-revalidated admin action, never
+  automatically.
 
-Backtesting (Phase 6) arrives later — **every order is `is_paper = true`; no
+Live trading is still out of scope — **every order is `is_paper = true`; no
 broker/exchange adapter is registered; nothing in this repo can send a live order
 or read a real broker/exchange key.**
 
@@ -53,7 +69,7 @@ or read a real broker/exchange key.**
 apps/
   api/         FastAPI backend (auth, system health, assets, market data, portfolio,
                strategies, opportunities/signals, regime, risk, positions/orders/trades,
-               news, patterns, learning, research)
+               news, patterns, learning, research, backtests)
   worker/      24/7 loop: Market Data Agent (scan), Trade Monitor + safety-belt
                refresh + Learning Agent (per trade close, every scan), News
                Intelligence Agent (own cadence), Strategy Engine cycle (history
@@ -64,11 +80,16 @@ packages/
   shared/      DB models, settings, logging, OHLCV lookup — shared across apps/packages
   data/        Market data + news provider interfaces, mock providers for both
   quant/       indicators, regime classifier, pattern detectors, pluggable
-               strategies, scoring engine, learning (strategy stats/health score,
-               quarantine, research/rule validation, market memory)
+               strategies (constructor-parameterized), scoring engine, learning
+               (strategy stats/health score, quarantine, research/rule validation,
+               market memory, degradation analysis, promotion pipeline)
   portfolio/   equity/cash/exposure/drawdown computation, append-only snapshot ledger
   risk/        position sizing, correlation guard, safety belts, the veto-power decision pipeline
-  execution/   ExecutionProvider interface, PaperExecutionProvider, order manager
+  execution/   ExecutionProvider interface, PaperExecutionProvider, order manager,
+               shared fill-simulation math (packages/execution/fills.py)
+  backtest/    event-driven Backtest Engine, isolated simulated portfolio,
+               walk-forward validation, parameter-stability checks — never touches
+               the live paper account
   llm/         Anthropic API client + News Intelligence/Learning/Research
                interpretation — never imported by packages/execution (structural
                "LLM ≠ Trading Engine")
@@ -76,8 +97,8 @@ infra/
   docker/      docker-compose + Dockerfiles
   migrations/  Alembic
 scripts/       seed.py — admin user, asset universe, paper portfolio, strategy registry
-config/        risk_limits.yaml, scoring_weights.yaml — both live-editable (risk
-               limits via PATCH /api/system/risk-limits)
+config/        risk_limits.yaml, scoring_weights.yaml, promotion_criteria.yaml — all
+               live-editable (risk limits via PATCH /api/system/risk-limits)
 docs/blueprint/  full technical spec (architecture, DB schema, API, agents,
                  event flow, memory, scoring, risk engine, dashboard spec,
                  backtesting, LLM prompts, roadmap)
@@ -104,6 +125,17 @@ commodities, the initial €10,000 paper portfolio, and registers the 4 Phase 2
 strategies) before `api`/`worker` start. The worker backfills enough mock history
 per asset on startup so opportunities show up within the first strategy cycle
 rather than after `MIN_CANDLES_REQUIRED` real minutes.
+
+Backtests are launched via the API (no dashboard launcher UI yet — the dashboard's
+Backtests panel is read-only) — use `/docs` for an interactive form, or:
+```bash
+curl -X POST localhost:8000/api/backtests -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"strategy_id":1,"asset_id":1,"timeframe":"1m","start_ts":"...","end_ts":"...","initial_capital":10000}'
+```
+Results are only as deep as the OHLCV history this deployment has actually
+collected — there's no separate historical dataset (see
+`docs/blueprint/12-roadmap.md`'s Phase 6 section).
 
 ### Locally, without Docker
 

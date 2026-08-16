@@ -2,7 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from apps.api.deps import get_current_admin, get_session
-from apps.api.schemas import StrategyOut, StrategyPerformanceOut, StrategyRestoreRequest
+from apps.api.schemas import PromotionCheckOut, StrategyOut, StrategyPerformanceOut, StrategyRestoreRequest
+from packages.quant.learning.promotion import apply_promotion, evaluate_promotion
 from packages.quant.learning.quarantine import restore_from_quarantine
 from packages.shared.models import AdminUser, StrategyPerformance, StrategyRow
 
@@ -57,5 +58,31 @@ def restore_strategy(
     deliberate human decision."""
     try:
         return restore_from_quarantine(db, strategy_id, to_stage=payload.to_stage, actor=admin.email)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.get("/{strategy_id}/promotion-check", response_model=PromotionCheckOut)
+def check_promotion(strategy_id: int, db: Session = Depends(get_session)) -> PromotionCheckOut:
+    """Read-only: does this strategy currently qualify for the next lifecycle
+    stage, and if not, exactly why (docs/blueprint/10-backtesting-paper-trading.md
+    §Critério de promoção mínimo)."""
+    verdict = evaluate_promotion(db, strategy_id)
+    return PromotionCheckOut(
+        strategy_id=strategy_id, eligible=verdict.eligible, current_stage=verdict.current_stage,
+        next_stage=verdict.next_stage, reasons=verdict.reasons, criteria=verdict.criteria, actual=verdict.actual,
+    )
+
+
+@router.post("/{strategy_id}/promote", response_model=StrategyOut)
+def promote_strategy(
+    strategy_id: int, db: Session = Depends(get_session), admin: AdminUser = Depends(get_current_admin),
+) -> StrategyRow:
+    """Admin-only: advance a strategy to its next lifecycle stage
+    (packages/quant/learning/promotion.py). Re-checks eligibility
+    server-side — a client-supplied "it's ready" is never trusted — and
+    rejects with the specific unmet criteria if it isn't."""
+    try:
+        return apply_promotion(db, strategy_id, actor=admin.email)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc

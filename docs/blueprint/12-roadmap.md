@@ -242,10 +242,74 @@ por validação DET (quarantine automática é DET puro; `learned_rules`
 validated nunca é aplicado automaticamente a comportamento nenhum — fica
 disponível para leitura/auditoria, não para ação).
 
-## Fase 6 — Backtesting
+## Fase 6 — Backtesting — **status: implementada e validada nesta sessão**
 
 Motor de backtest orientado a eventos, walk-forward, out-of-sample, anti-overfitting,
 critérios de promoção (`10-backtesting-paper-trading.md`).
+
+**Critério de sucesso:**
+- [x] Backtest Engine orientado a eventos (`packages/backtest/engine.py`):
+      percorre `ohlcv` já persistido barra a barra, a estratégia só vê
+      `candles[0..i]` em cada passo (sem look-ahead) — corre o mesmo
+      pipeline do worker (indicadores, regime, padrões, scoring) e reutiliza
+      as mesmas funções puras de sizing/safety-belt do Risk Engine
+      (`packages/backtest/risk.py`) contra um portfolio simulado isolado
+      (`packages/backtest/portfolio.py`) que nunca escreve nas tabelas
+      reais de paper trading. Fill simulation extraída para
+      `packages/execution/fills.py` e partilhada com o
+      `PaperExecutionProvider` — o mesmo modelo de spread/slippage/fees em
+      backtest e produção
+- [x] Limitações honestas documentadas em código, não escondidas: sem sinais
+      de notícias (não são retroativamente atribuíveis a uma barra
+      histórica arbitrária), sem `historical_edge`/`strategy_performance`
+      vindos do aprendizado ao vivo (usar isso seria uma forma de
+      look-ahead), sem correlation guard (motor de um único ativo/uma
+      posição de cada vez — estruturalmente não há o que verificar)
+- [x] Anti-overfitting: walk-forward (`packages/backtest/walkforward.py`,
+      janelas de teste consecutivas, veredicto de consistência a partir da
+      expectancy pooled + fração de janelas positivas, nunca `None`
+      escondido como falso); parameter stability
+      (`packages/backtest/stability.py`, perturbação de ±20% em cada
+      parâmetro numérico, veredicto = nenhuma perturbação inverte o sinal
+      da expectancy) — só possível porque as 4 estratégias
+      (`packages/quant/strategies`) passaram a aceitar os seus parâmetros
+      no construtor em vez de constantes fixas, sem alterar o
+      comportamento por omissão (219/219 testes pré-existentes continuaram
+      a passar inalterados depois do refactor)
+- [x] Performance degradation analysis
+      (`packages/quant/learning/degradation.py`): compara a expectancy real
+      (paper) com a do backtest de referência da estratégia; divergência
+      sustentada acima da tolerância → `Alert` de warning (nunca força
+      quarentena sozinha — essa já é automática pelo Health Score desde a
+      Fase 5), com cooldown de 24h para não repetir o aviso a cada trade
+- [x] Critério de promoção (`config/promotion_criteria.yaml`,
+      `packages/quant/learning/promotion.py`): `evaluate_promotion` é DET
+      puro (nunca decide sozinho); `apply_promotion` só avança
+      `lifecycle_stage` (`paper→small_capital→production`) através de uma
+      ação admin explícita (`POST /api/strategies/{id}/promote`), que
+      revalida os critérios no servidor — nunca confia num veredicto vindo
+      do cliente
+- [x] API: `POST/GET /api/backtests`, `GET /api/backtests/{id}`,
+      `POST /api/backtests/walkforward`,
+      `GET /api/strategies/{id}/promotion-check`,
+      `POST /api/strategies/{id}/promote`
+- [x] dashboard mostra painel de Backtests (execuções recentes) e indicador
+      de promotion-readiness no painel de Strategy Health — verificado ao
+      vivo via build de produção + login real + inspeção do HTML
+      renderizado
+- [x] verificado ao vivo contra Postgres real: backtest de
+      `trend_following_v1` sobre os ~70 candles mock reais persistidos
+      nesta sessão (única história disponível neste ambiente — sem
+      fabricar um dataset histórico separado) devolveu corretamente 0
+      trades (mercado essencialmente lateral/aleatório nesse curto
+      intervalo), com equity curve completa e `params` auditáveis
+      persistidos em `backtest_runs`
+- [x] 35 novos testes automatizados (254/254 no total da suite, confirmado
+      em duas corridas consecutivas)
+
+Nada nesta fase aproxima o sistema de capital real: promoção só avança
+`lifecycle_stage`, nunca liga a uma exchange/corretora; `Order.is_paper`/
+`Trade.is_paper` continuam sempre `true`.
 
 ## Fase 7 — Advanced Analytics, Alerts, Optimization
 

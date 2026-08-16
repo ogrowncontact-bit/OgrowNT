@@ -22,6 +22,7 @@ from packages.execution.adapters.base import ExecutionProvider
 from packages.execution.order_manager import close_position
 from packages.llm.client import LLMClient
 from packages.llm.learning import generate_trade_hypothesis
+from packages.quant.learning.degradation import check_degradation
 from packages.quant.learning.quarantine import evaluate_quarantine
 from packages.quant.learning.strategy_stats import compute_strategy_performance
 from packages.quant.patterns.performance import record_trade_outcome
@@ -174,13 +175,18 @@ def _record_market_memory_outcome(db: Session, position: Position, trade: Trade)
 
 
 def _record_strategy_learning(db: Session, position: Position) -> None:
-    """Strategy Memory + Quarantine — docs/blueprint/04-agents-architecture.md
-    #agent-13. Recomputed from the fresh trade history, not incrementally,
-    then checked against the quarantine threshold."""
+    """Strategy Memory + Quarantine + degradation check —
+    docs/blueprint/04-agents-architecture.md#agent-13. Recomputed from the
+    fresh trade history, not incrementally, then checked against the
+    quarantine threshold (Phase 5) and the softer degradation-vs-backtest
+    warning (Phase 6, docs/blueprint/10-backtesting-paper-trading.md)."""
     perf = compute_strategy_performance(db, position.strategy_id)
     if evaluate_quarantine(db, position.strategy_id, perf):
         strategy = db.get(StrategyRow, position.strategy_id)
         logger.warning("Strategy %s quarantined: health_score=%s", strategy.code if strategy else position.strategy_id, perf.health_score)
+    elif check_degradation(db, position.strategy_id):
+        strategy = db.get(StrategyRow, position.strategy_id)
+        logger.warning("Strategy %s flagged for performance degradation vs. its reference backtest", strategy.code if strategy else position.strategy_id)
 
 
 def run_trade_monitor_cycle(db: Session, provider: ExecutionProvider, llm_client: LLMClient | None = None) -> dict:

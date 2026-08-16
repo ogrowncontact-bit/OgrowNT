@@ -8,6 +8,7 @@ that uses them:
   Phase 3: risk checks/decisions, positions, orders, trades, correlation matrix
   Phase 4: news events/impact, patterns, pattern performance
   Phase 5: strategy performance/health, trade journal, learned rules, market memory
+  Phase 6: backtest runs
 macro_events (from the blueprint schema) is not yet implemented — out of
 scope for every phase planned so far; a macro economic calendar is a
 natural but separate future addition.
@@ -586,4 +587,60 @@ class MarketMemory(Base):
     outcome: Mapped[str | None] = mapped_column(String)
 
     asset: Mapped["Asset | None"] = relationship()
-    signal: Mapped["Signal | None"] = relationship()
+
+
+# --- Phase 6 (Backtesting) ------------------------------------------------
+
+
+class BacktestRun(Base):
+    """One event-driven backtest run (packages/backtest/engine.py) —
+    docs/blueprint/10-backtesting-paper-trading.md's "Backtest Engine".
+    Not in the blueprint's SQL sketch verbatim (02-database-schema.md has no
+    backtest table; 03-api-spec.md only names the read endpoint
+    `/api/research/experiments/{id}`) — this is the concrete schema behind
+    that endpoint, one row per run whether it's a plain backtest, an
+    out-of-sample check, or a single window of a walk-forward batch
+    (`group_label`/`window_index`/`total_windows` tie those together).
+    `params` records the exact strategy parameters used (defaults unless a
+    parameter-stability check perturbed them) so every result stays
+    reproducible and auditable, per docs/blueprint/00-overview.md.
+    """
+
+    __tablename__ = "backtest_runs"
+    __table_args__ = (
+        CheckConstraint(
+            "kind IN ('backtest','out_of_sample','walk_forward_window','stability_check')",
+            name="ck_backtest_runs_kind",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    strategy_id: Mapped[int] = mapped_column(ForeignKey("strategies.id"), nullable=False)
+    asset_id: Mapped[int] = mapped_column(ForeignKey("assets.id"), nullable=False)
+    timeframe: Mapped[str] = mapped_column(String, nullable=False)
+    kind: Mapped[str] = mapped_column(String, default="backtest", nullable=False)
+    group_label: Mapped[str | None] = mapped_column(String)
+    window_index: Mapped[int | None] = mapped_column()
+    total_windows: Mapped[int | None] = mapped_column()
+    params: Mapped[dict] = mapped_column(JSON, default=dict)
+    start_ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    end_ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    initial_capital: Mapped[float] = mapped_column(Float, nullable=False)
+
+    net_return: Mapped[float | None] = mapped_column(Float)
+    cagr_like_return: Mapped[float | None] = mapped_column(Float)
+    win_rate: Mapped[float | None] = mapped_column(Float)
+    profit_factor: Mapped[float | None] = mapped_column(Float)
+    max_drawdown: Mapped[float | None] = mapped_column(Float)
+    avg_trade: Mapped[float | None] = mapped_column(Float)
+    expectancy: Mapped[float | None] = mapped_column(Float)
+    num_trades: Mapped[int] = mapped_column(default=0, nullable=False)
+    sharpe_like: Mapped[float | None] = mapped_column(Float)
+
+    equity_curve: Mapped[list] = mapped_column(JSON, default=list)
+    trades: Mapped[list] = mapped_column(JSON, default=list)
+    notes: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+    strategy: Mapped["StrategyRow"] = relationship()
+    asset: Mapped["Asset"] = relationship()

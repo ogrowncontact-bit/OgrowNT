@@ -15,6 +15,9 @@ ATR_STOP_BUFFER = 0.3
 
 
 class BreakoutStrategy(StrategyBase):
+    """Numeric constants are constructor parameters (see
+    packages/quant/strategies/trend_following.py's docstring for why)."""
+
     code = "breakout_v1"
     name = "Breakout"
     version = "1.0"
@@ -22,19 +25,28 @@ class BreakoutStrategy(StrategyBase):
     best_regimes = frozenset({"trending_bull", "trending_bear", "low_volatility"})
     worst_regimes = frozenset({"ranging", "high_volatility"})
 
+    def __init__(
+        self, lookback: int = LOOKBACK, volume_confirmation_mult: float = VOLUME_CONFIRMATION_MULT,
+        risk_reward: float = RISK_REWARD, atr_stop_buffer: float = ATR_STOP_BUFFER,
+    ) -> None:
+        self.lookback = lookback
+        self.volume_confirmation_mult = volume_confirmation_mult
+        self.risk_reward = risk_reward
+        self.atr_stop_buffer = atr_stop_buffer
+
     def analyze(self, ctx: MarketContext) -> AnalysisResult:
         candles = ctx.candles
-        if len(candles) < LOOKBACK + 1:
+        if len(candles) < self.lookback + 1:
             return AnalysisResult(direction=None, strength=0.0, rationale={"reason": "insufficient_data"})
 
-        prior = candles[-(LOOKBACK + 1) : -1]  # excludes the current bar
-        prior_high, prior_low = recent_high(prior, LOOKBACK), recent_low(prior, LOOKBACK)
+        prior = candles[-(self.lookback + 1) : -1]  # excludes the current bar
+        prior_high, prior_low = recent_high(prior, self.lookback), recent_low(prior, self.lookback)
         current = candles[-1]
-        avg_vol = avg_volume(prior, LOOKBACK)
+        avg_vol = avg_volume(prior, self.lookback)
         if prior_high is None or prior_low is None or avg_vol is None or avg_vol == 0:
             return AnalysisResult(direction=None, strength=0.0, rationale={"reason": "insufficient_data"})
 
-        volume_confirmed = current.volume >= VOLUME_CONFIRMATION_MULT * avg_vol
+        volume_confirmed = current.volume >= self.volume_confirmation_mult * avg_vol
         breaks_up = current.close > prior_high
         breaks_down = current.close < prior_low
 
@@ -64,13 +76,13 @@ class BreakoutStrategy(StrategyBase):
         prior_high = analysis.rationale["prior_high"]
         prior_low = analysis.rationale["prior_low"]
         if analysis.direction == "long":
-            stop = prior_high - ATR_STOP_BUFFER * atr_v
+            stop = prior_high - self.atr_stop_buffer * atr_v
             risk = entry - stop
-            target = entry + RISK_REWARD * risk
+            target = entry + self.risk_reward * risk
         else:
-            stop = prior_low + ATR_STOP_BUFFER * atr_v
+            stop = prior_low + self.atr_stop_buffer * atr_v
             risk = stop - entry
-            target = entry - RISK_REWARD * risk
+            target = entry - self.risk_reward * risk
 
         if risk <= 0:
             return None

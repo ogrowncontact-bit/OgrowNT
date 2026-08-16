@@ -18,6 +18,9 @@ ATR_STOP_MULT = 1.2
 
 
 class MeanReversionStrategy(StrategyBase):
+    """Numeric constants are constructor parameters (see
+    packages/quant/strategies/trend_following.py's docstring for why)."""
+
     code = "mean_reversion_v1"
     name = "Mean Reversion"
     version = "1.0"
@@ -25,19 +28,29 @@ class MeanReversionStrategy(StrategyBase):
     best_regimes = frozenset({"ranging", "low_volatility"})
     worst_regimes = frozenset({"trending_bull", "trending_bear", "high_volatility"})
 
+    def __init__(
+        self, rsi_oversold: float = RSI_OVERSOLD, rsi_overbought: float = RSI_OVERBOUGHT,
+        min_deviation: float = MIN_DEVIATION, risk_reward: float = RISK_REWARD, atr_stop_mult: float = ATR_STOP_MULT,
+    ) -> None:
+        self.rsi_oversold = rsi_oversold
+        self.rsi_overbought = rsi_overbought
+        self.min_deviation = min_deviation
+        self.risk_reward = risk_reward
+        self.atr_stop_mult = atr_stop_mult
+
     def analyze(self, ctx: MarketContext) -> AnalysisResult:
         rsi, sma_slow, close = ctx.indicators.rsi_14, ctx.indicators.sma_slow, ctx.indicators.close
         if rsi is None or sma_slow is None or sma_slow == 0:
             return AnalysisResult(direction=None, strength=0.0, rationale={"reason": "insufficient_data"})
 
         deviation = (close - sma_slow) / sma_slow
-        oversold = rsi <= RSI_OVERSOLD and deviation <= -MIN_DEVIATION
-        overbought = rsi >= RSI_OVERBOUGHT and deviation >= MIN_DEVIATION
+        oversold = rsi <= self.rsi_oversold and deviation <= -self.min_deviation
+        overbought = rsi >= self.rsi_overbought and deviation >= self.min_deviation
         if not oversold and not overbought:
             return AnalysisResult(direction=None, strength=0.0, rationale={"rsi": rsi, "deviation": deviation})
 
         direction = "long" if oversold else "short"
-        rsi_extremity = (RSI_OVERSOLD - rsi) if oversold else (rsi - RSI_OVERBOUGHT)
+        rsi_extremity = (self.rsi_oversold - rsi) if oversold else (rsi - self.rsi_overbought)
         strength = min(1.0, max(0.0, rsi_extremity) / 15.0)
         return AnalysisResult(direction=direction, strength=strength, rationale={"rsi": rsi, "deviation": deviation})
 
@@ -48,13 +61,13 @@ class MeanReversionStrategy(StrategyBase):
             return None
 
         entry = ctx.indicators.close
-        risk = ATR_STOP_MULT * atr_v
+        risk = self.atr_stop_mult * atr_v
         if analysis.direction == "long":
             stop = entry - risk
-            target = min(sma_slow, entry + RISK_REWARD * risk)  # revert toward the mean, capped by R multiple
+            target = min(sma_slow, entry + self.risk_reward * risk)  # revert toward the mean, capped by R multiple
         else:
             stop = entry + risk
-            target = max(sma_slow, entry - RISK_REWARD * risk)
+            target = max(sma_slow, entry - self.risk_reward * risk)
 
         return StrategySignal(
             direction=analysis.direction,

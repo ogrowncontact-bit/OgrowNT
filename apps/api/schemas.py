@@ -363,3 +363,73 @@ class MarketMemoryOut(BaseModel):
 
 class StrategyRestoreRequest(BaseModel):
     to_stage: str = "paper"
+
+
+# --- Phase 6 -----------------------------------------------------------
+
+
+class BacktestRequest(BaseModel):
+    strategy_id: int
+    asset_id: int
+    timeframe: str = "1m"
+    start_ts: datetime
+    end_ts: datetime
+    initial_capital: float = 10_000.0
+
+
+class BacktestSummaryOut(BaseModel):
+    id: int
+    strategy_code: str
+    asset_symbol: str
+    timeframe: str
+    kind: str
+    group_label: str | None
+    window_index: int | None
+    total_windows: int | None
+    start_ts: datetime
+    end_ts: datetime
+    initial_capital: float
+    net_return: float | None
+    cagr_like_return: float | None
+    win_rate: float | None
+    profit_factor: float | None
+    max_drawdown: float | None
+    avg_trade: float | None
+    expectancy: float | None
+    num_trades: int
+    sharpe_like: float | None
+    created_at: datetime
+
+
+class BacktestDetailOut(BacktestSummaryOut):
+    params: dict
+    equity_curve: list[dict]
+    trades: list[dict]
+    notes: dict
+
+
+class WalkForwardRequest(BaseModel):
+    strategy_id: int
+    asset_id: int
+    timeframe: str = "1m"
+    start_ts: datetime
+    end_ts: datetime
+    window_days: float
+    initial_capital: float = 10_000.0
+
+
+class WalkForwardResponseOut(BaseModel):
+    group_label: str
+    windows: list[BacktestSummaryOut]
+    consistent: bool | None
+    reason: str
+
+
+class PromotionCheckOut(BaseModel):
+    strategy_id: int
+    eligible: bool
+    current_stage: str
+    next_stage: str | None
+    reasons: list[str]
+    criteria: dict
+    actual: dict
