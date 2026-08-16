@@ -3,6 +3,7 @@ import { prisma } from "@inner/db";
 import { Screen } from "@inner/ui";
 import { isMockPayments } from "@/lib/payments";
 import { getAssessmentConfig } from "@/lib/assessments";
+import { readAnonymousSessionId } from "@/lib/anonymousSession";
 import { MockPaymentForm } from "@/components/MockPaymentForm";
 
 // Dev-only stand-in for the Stripe Checkout page — only reachable when no
@@ -14,6 +15,9 @@ export default async function MockCheckoutPage({ params }: { params: Promise<{ o
   const { orderId } = await params;
   const order = await prisma.order.findUnique({ where: { id: orderId }, include: { assessmentSession: true } });
   if (!order) notFound();
+
+  const anonymousSessionId = await readAnonymousSessionId();
+  if (!anonymousSessionId || order.assessmentSession.anonymousSessionId !== anonymousSessionId) notFound();
 
   const config = await getAssessmentConfig(order.assessmentSession.sourceSlug);
   if (!config) notFound();

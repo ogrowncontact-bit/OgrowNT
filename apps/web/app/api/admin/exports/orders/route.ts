@@ -2,8 +2,13 @@ import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/adminAuth";
 import { getAllOrdersForExport } from "@/lib/admin/analyticsReader";
 
+// Neutralizes CSV/formula injection (CWE-1236): a cell starting with =, +, -, @,
+// tab, or CR is interpreted as a formula by Excel/Sheets regardless of quoting.
+// order.user.email is end-user-submitted at checkout and only loosely validated,
+// so it must never reach a spreadsheet-opened export unescaped.
 function csvCell(value: string | number): string {
-  const str = String(value);
+  let str = String(value);
+  if (/^[=+\-@\t\r]/.test(str)) str = `'${str}`;
   return /[",\n]/.test(str) ? `"${str.replace(/"/g, '""')}"` : str;
 }
 

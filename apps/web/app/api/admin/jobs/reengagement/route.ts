@@ -1,6 +1,14 @@
+import { timingSafeEqual } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdminWriter } from "@/lib/adminAuth";
 import { runReengagementBatch } from "@/lib/reengagement";
+
+function isValidCronAuth(authHeader: string | null, cronSecret: string | undefined): boolean {
+  if (!cronSecret || !authHeader) return false;
+  const expected = Buffer.from(`Bearer ${cronSecret}`);
+  const actual = Buffer.from(authHeader);
+  return expected.length === actual.length && timingSafeEqual(expected, actual);
+}
 
 /**
  * Runs the re-engagement batch (checkout reminders + post-purchase
@@ -14,9 +22,7 @@ import { runReengagementBatch } from "@/lib/reengagement";
  *    not open.
  */
 export async function POST(request: NextRequest) {
-  const cronSecret = process.env.CRON_SECRET;
-  const authHeader = request.headers.get("authorization");
-  const isCronCall = Boolean(cronSecret) && authHeader === `Bearer ${cronSecret}`;
+  const isCronCall = isValidCronAuth(request.headers.get("authorization"), process.env.CRON_SECRET);
 
   if (!isCronCall) {
     await requireAdminWriter();

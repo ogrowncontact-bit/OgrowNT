@@ -1,4 +1,4 @@
-import { prisma } from "@inner/db";
+import { prisma, Prisma } from "@inner/db";
 import { generateReport } from "@inner/ai";
 import { renderReportPdf } from "@inner/pdf";
 import { renderReportDeliveryEmail } from "@inner/email";
@@ -85,16 +85,27 @@ export async function completeOrder(orderId: string): Promise<void> {
     attachments: [{ filename: "inner-report.pdf", content: pdf, contentType: "application/pdf" }],
   });
 
-  await prisma.$transaction([
-    prisma.report.update({
-      where: { id: report.id },
-      data: { pdfObjectKey: objectKey, deliveredAt: sendResult.ok ? new Date() : null },
-    }),
-    prisma.order.update({ where: { id: order.id }, data: { status: "paid", paidAt: new Date() } }),
-    prisma.entitlement.create({
-      data: { userId: order.userId, assessmentSessionId: session.id, orderId: order.id, reportId: report.id },
-    }),
-  ]);
+  try {
+    await prisma.$transaction([
+      prisma.report.update({
+        where: { id: report.id },
+        data: { pdfObjectKey: objectKey, deliveredAt: sendResult.ok ? new Date() : null },
+      }),
+      prisma.order.update({ where: { id: order.id }, data: { status: "paid", paidAt: new Date() } }),
+      prisma.entitlement.create({
+        data: { userId: order.userId, assessmentSessionId: session.id, orderId: order.id, reportId: report.id },
+      }),
+    ]);
+  } catch (error) {
+    // A concurrent call for the same order (a double-click, a retried mock
+    // click, or Stripe's documented at-least-once webhook redelivery) can
+    // race past the status==="paid" guard above before either has committed.
+    // Entitlement.orderId is unique, so the loser hits P2002 here — that's
+    // the other call having already finished the job, not a real failure.
+    const isDuplicateEntitlement = error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002";
+    if (!isDuplicateEntitlement) throw error;
+    return;
+  }
 
   await track({ anonymousSessionId: session.anonymousSessionId, eventName: "payment_completed", assessmentId: session.assessmentId });
   await track({ anonymousSessionId: session.anonymousSessionId, eventName: "report_generated", assessmentId: session.assessmentId });
