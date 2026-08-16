@@ -1,4 +1,5 @@
-import { FUNNEL_STAGES, getConsentSummary, getFunnelSummary, getRecentOrders, getRevenueSummary } from "@/lib/admin/analyticsReader";
+import Link from "next/link";
+import { FUNNEL_STAGES, getConsentSummary, getFunnelSummary, getQuestionDropoff, getRecentOrders, getRevenueSummary } from "@/lib/admin/analyticsReader";
 import { ReengagementRunner } from "@/components/admin/ReengagementRunner";
 
 function formatMoney(cents: number, currency = "EUR") {
@@ -13,13 +14,17 @@ const card = "rounded-[var(--inner-radius-lg)] border border-[var(--inner-line)]
 const cardLabel = "text-[12px] text-[var(--inner-muted)]";
 const cardValue = "font-display text-[22px] text-[var(--inner-ink)]";
 
-export default async function AdminAnalyticsPage() {
+export default async function AdminAnalyticsPage({ searchParams }: { searchParams: Promise<{ assessmentId?: string }> }) {
+  const { assessmentId: requestedAssessmentId } = await searchParams;
   const [funnel, orders, revenue, consent] = await Promise.all([
     getFunnelSummary(),
     getRecentOrders(50),
     getRevenueSummary(),
     getConsentSummary(),
   ]);
+
+  const selectedAssessmentId = requestedAssessmentId ?? funnel[0]?.assessmentId;
+  const dropoff = selectedAssessmentId ? await getQuestionDropoff(selectedAssessmentId) : null;
 
   return (
     <div>
@@ -90,7 +95,64 @@ export default async function AdminAnalyticsPage() {
         </table>
       </div>
 
-      <h2 className="font-display mb-3 text-[18px] text-[var(--inner-ink)]">Recent orders</h2>
+      <h2 className="font-display mb-3 text-[18px] text-[var(--inner-ink)]">Drop-off by question</h2>
+      <p className="mb-3 text-[13px] text-[var(--inner-ink-soft)]">
+        Core questions only, in order — where people stop within one experience's fixed backbone.
+      </p>
+      <div className="mb-3 flex flex-wrap gap-2">
+        {funnel.map((row) => (
+          <Link
+            key={row.assessmentId}
+            href={`/admin/analytics?assessmentId=${row.assessmentId}`}
+            className={
+              row.assessmentId === selectedAssessmentId
+                ? "rounded-[var(--inner-radius-sm)] bg-[var(--inner-accent)] px-3 py-1.5 text-[13px] font-medium text-[var(--inner-accent-contrast)]"
+                : "rounded-[var(--inner-radius-sm)] border border-[var(--inner-line)] px-3 py-1.5 text-[13px] text-[var(--inner-ink-soft)] hover:border-[var(--inner-accent-soft)]"
+            }
+          >
+            /{row.slug}
+          </Link>
+        ))}
+      </div>
+      <div className="mb-8 overflow-hidden rounded-[var(--inner-radius-lg)] border border-[var(--inner-line)] bg-[var(--inner-card)]">
+        {!dropoff || dropoff.questions.length === 0 ? (
+          <p className="px-4 py-6 text-center text-[13px] text-[var(--inner-muted)]">
+            No published core questions for this experience yet.
+          </p>
+        ) : (
+          <table className="w-full text-left text-[13px]">
+            <thead>
+              <tr className="border-b border-[var(--inner-line)] text-[var(--inner-muted)]">
+                <th className="px-4 py-3 font-medium">#</th>
+                <th className="px-4 py-3 font-medium">Question</th>
+                <th className="px-4 py-3 font-medium">Answered</th>
+              </tr>
+            </thead>
+            <tbody>
+              {dropoff.questions.map((q, i) => (
+                <tr key={q.key} className="border-b border-[var(--inner-line)] last:border-0">
+                  <td className="px-4 py-3 text-[var(--inner-muted)]">{i + 1}</td>
+                  <td className="px-4 py-3 text-[var(--inner-ink)]">{q.prompt}</td>
+                  <td className="whitespace-nowrap px-4 py-3 text-[var(--inner-ink-soft)]">
+                    {q.answered} / {dropoff.totalStarted}
+                    <span className="ml-1 text-[11px] text-[var(--inner-muted)]">({q.pctOfStarted}%)</span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      <div className="mb-3 flex items-center justify-between">
+        <h2 className="font-display text-[18px] text-[var(--inner-ink)]">Recent orders</h2>
+        <a
+          href="/api/admin/exports/orders"
+          className="rounded-[var(--inner-radius-sm)] border border-[var(--inner-line)] px-3 py-1.5 text-[13px] text-[var(--inner-ink-soft)] hover:border-[var(--inner-accent-soft)]"
+        >
+          Export CSV
+        </a>
+      </div>
       <div className="overflow-x-auto rounded-[var(--inner-radius-lg)] border border-[var(--inner-line)] bg-[var(--inner-card)]">
         <table className="w-full text-left text-[13px]">
           <thead>

@@ -1,10 +1,11 @@
 import { prisma } from "@inner/db";
 
 /**
- * Read-only rollups for the admin analytics dashboard. Deliberately never
- * touches runtime.Response / runtime.OpenResponse — per-user answer content
- * has no legitimate reason to appear in an operator dashboard (see
- * docs/ARCHITECTURE.md §12). Everything here is counts and aggregates.
+ * Read-only rollups for the admin analytics dashboard. Never surfaces answer
+ * content (see docs/ARCHITECTURE.md §12) — the one place that queries
+ * runtime.Response (getQuestionDropoff, below) counts rows grouped by
+ * questionId only, never selecting selectedOptionIds/scaleValue, and
+ * runtime.OpenResponse is never touched at all.
  */
 
 export const FUNNEL_STAGES = [
@@ -97,6 +98,87 @@ export async function getRevenueSummary(): Promise<RevenueSummary> {
     refundedCents: refundAgg._sum.amountCents ?? 0,
     refundedCount: refundAgg._count._all,
   };
+}
+
+export interface QuestionDropoffRow {
+  key: string;
+  prompt: string;
+  answered: number;
+  pctOfStarted: number;
+}
+
+export interface QuestionDropoffResult {
+  assessmentId: string;
+  totalStarted: number;
+  questions: QuestionDropoffRow[];
+}
+
+/**
+ * Where in the core question sequence people stop, for one assessment's
+ * published version. Only counts rows in runtime.Response grouped by
+ * questionId — never reads selectedOptionIds/scaleValue, so no answer
+ * content leaves runtime.* here.
+ */
+export async function getQuestionDropoff(assessmentId: string): Promise<QuestionDropoffResult | null> {
+  const version = await prisma.assessmentVersion.findFirst({
+    where: { assessmentId, publishedAt: { not: null } },
+    orderBy: { versionNumber: "desc" },
+    include: { questions: { where: { isCore: true }, orderBy: { orderHint: "asc" } } },
+  });
+  if (!version) return null;
+
+  const [totalStarted, responseCounts] = await Promise.all([
+    prisma.assessmentSession.count({ where: { assessmentId } }),
+    prisma.response.groupBy({
+      by: ["questionId"],
+      _count: { _all: true },
+      where: { assessmentSession: { assessmentId } },
+    }),
+  ]);
+
+  const countByKey = new Map(responseCounts.map((r) => [r.questionId, r._count._all]));
+
+  return {
+    assessmentId,
+    totalStarted,
+    questions: version.questions.map((q) => {
+      const answered = countByKey.get(q.key) ?? 0;
+      return {
+        key: q.key,
+        prompt: q.prompt,
+        answered,
+        pctOfStarted: totalStarted > 0 ? Math.round((answered / totalStarted) * 100) : 0,
+      };
+    }),
+  };
+}
+
+export interface OrderExportRow {
+  id: string;
+  createdAt: Date;
+  email: string;
+  assessmentName: string;
+  productType: string;
+  amountCents: number;
+  currency: string;
+  status: string;
+}
+
+export async function getAllOrdersForExport(): Promise<OrderExportRow[]> {
+  const orders = await prisma.order.findMany({
+    orderBy: { createdAt: "desc" },
+    include: { user: true, price: { include: { assessment: true } } },
+  });
+  return orders.map((o) => ({
+    id: o.id,
+    createdAt: o.createdAt,
+    email: o.user.email,
+    assessmentName: o.price.assessment.name,
+    productType: o.price.productType,
+    amountCents: o.amountCents,
+    currency: o.currency,
+    status: o.status,
+  }));
 }
 
 export interface ConsentSummary {
