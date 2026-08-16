@@ -1,51 +1,50 @@
 import { PrismaClient } from "@prisma/client";
-import { loveAssessment } from "@inner/content";
-import { dimensionPool } from "@inner/content/dimensions";
+import { allAssessments, dimensionPool } from "@inner/content";
+import type { AssessmentConfig } from "@inner/assessment-engine";
 
 const prisma = new PrismaClient();
 
-async function main() {
-  for (const dim of dimensionPool) {
-    await prisma.dimension.upsert({
-      where: { key: dim.key },
-      update: { label: dim.label, description: dim.description },
-      create: dim,
-    });
-  }
-
-  const assessment = await prisma.assessment.upsert({
-    where: { slug: loveAssessment.slug },
+/**
+ * Creates version 1 of an assessment. Re-running this against a DB that
+ * already has version 1 for the same slug will fail on the
+ * (assessmentId, versionNumber) unique constraint — draft/republish
+ * versioning is Phase 5 (admin) territory; for now this script is meant
+ * for a fresh dev database.
+ */
+async function seedAssessment(assessment: AssessmentConfig) {
+  const row = await prisma.assessment.upsert({
+    where: { slug: assessment.slug },
     update: {
-      name: loveAssessment.name,
-      category: loveAssessment.category,
-      description: loveAssessment.description,
-      hook: loveAssessment.hook,
-      targetAudience: loveAssessment.targetAudience,
+      name: assessment.name,
+      category: assessment.category,
+      description: assessment.description,
+      hook: assessment.hook,
+      targetAudience: assessment.targetAudience,
       status: "published",
     },
     create: {
-      slug: loveAssessment.slug,
-      name: loveAssessment.name,
-      category: loveAssessment.category,
-      description: loveAssessment.description,
-      hook: loveAssessment.hook,
-      targetAudience: loveAssessment.targetAudience,
+      slug: assessment.slug,
+      name: assessment.name,
+      category: assessment.category,
+      description: assessment.description,
+      hook: assessment.hook,
+      targetAudience: assessment.targetAudience,
       status: "published",
     },
   });
 
   const version = await prisma.assessmentVersion.create({
     data: {
-      assessmentId: assessment.id,
+      assessmentId: row.id,
       versionNumber: 1,
-      minQuestions: loveAssessment.minQuestions,
-      recommendedQuestions: loveAssessment.recommendedQuestions,
-      maxQuestions: loveAssessment.maxQuestions,
-      aiInfluenceCap: loveAssessment.scoringModel.aiInfluenceCap,
+      minQuestions: assessment.minQuestions,
+      recommendedQuestions: assessment.recommendedQuestions,
+      maxQuestions: assessment.maxQuestions,
+      aiInfluenceCap: assessment.scoringModel.aiInfluenceCap,
       publishedAt: new Date(),
       dimensions: {
         create: await Promise.all(
-          loveAssessment.dimensions.map(async (d) => {
+          assessment.dimensions.map(async (d) => {
             const dim = await prisma.dimension.findUniqueOrThrow({ where: { key: d.key } });
             return { dimensionId: dim.id, weight: d.weight };
           })
@@ -53,7 +52,7 @@ async function main() {
       },
       questions: {
         create: [
-          ...loveAssessment.questionBank.core.map((q, i) => ({
+          ...assessment.questionBank.core.map((q, i) => ({
             key: q.key,
             type: q.type,
             isCore: true,
@@ -69,7 +68,7 @@ async function main() {
               })),
             },
           })),
-          ...loveAssessment.questionBank.adaptivePool.map((q, i) => ({
+          ...assessment.questionBank.adaptivePool.map((q, i) => ({
             key: q.key,
             type: q.type,
             isCore: false,
@@ -88,7 +87,7 @@ async function main() {
         ],
       },
       adaptiveRules: {
-        create: loveAssessment.adaptiveRules.map((r) => ({
+        create: assessment.adaptiveRules.map((r) => ({
           key: r.key,
           trigger: r.trigger,
           action: r.action,
@@ -96,7 +95,7 @@ async function main() {
         })),
       },
       profiles: {
-        create: loveAssessment.profiles.map((p) => ({
+        create: assessment.profiles.map((p) => ({
           key: p.key,
           name: p.name,
           descriptionTemplate: p.descriptionTemplate,
@@ -104,15 +103,16 @@ async function main() {
         })),
       },
       reportTemplate: {
-        create: { sections: loveAssessment.premiumReportStructure },
+        create: { sections: assessment.premiumReportStructure },
       },
     },
   });
 
-  for (const priceRef of Object.values(loveAssessment.pricing)) {
+  await prisma.price.deleteMany({ where: { assessmentId: row.id } });
+  for (const priceRef of Object.values(assessment.pricing)) {
     await prisma.price.create({
       data: {
-        assessmentId: assessment.id,
+        assessmentId: row.id,
         productType: priceRef.productType,
         amountCents: priceRef.amountCents,
         currency: priceRef.currency,
@@ -120,7 +120,21 @@ async function main() {
     });
   }
 
-  console.log(`Seeded assessment "${assessment.slug}" (version ${version.versionNumber}).`);
+  console.log(`Seeded assessment "${row.slug}" (version ${version.versionNumber}).`);
+}
+
+async function main() {
+  for (const dim of dimensionPool) {
+    await prisma.dimension.upsert({
+      where: { key: dim.key },
+      update: { label: dim.label, description: dim.description },
+      create: dim,
+    });
+  }
+
+  for (const assessment of allAssessments) {
+    await seedAssessment(assessment);
+  }
 }
 
 main()

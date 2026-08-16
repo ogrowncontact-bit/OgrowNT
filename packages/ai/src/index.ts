@@ -7,5 +7,7 @@ export { generateFreeInsight } from "./profileAI";
 export type { GeneratedInsight } from "./profileAI";
 export { generateReport } from "./reportAI";
 export type { ReportSectionSpec, GeneratedReportSection } from "./reportAI";
+export { generateRecommendationCopy } from "./recommendationAI";
+export type { GeneratedRecommendation } from "./recommendationAI";
 export { enforceNonDiagnostic, sanitizeOpeners, findHardBannedTerms } from "./guardrails/nonDiagnosticFilter";
 export { detectSafetyConcern, SUPPORT_MESSAGE } from "./guardrails/safetyFlag";

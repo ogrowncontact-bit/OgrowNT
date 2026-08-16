@@ -59,13 +59,40 @@ export async function chooseFollowup(params: ChooseFollowupParams): Promise<Foll
   return { chosenKey: isValidCandidate ? chosen : null, aiGenerated: true };
 }
 
-/** Simple keyword heuristic used only when the model is unavailable — honest fallback, not a substitute for real interpretation. */
-function fallbackChoice(params: ChooseFollowupParams): string | null {
-  const text = params.answerText.toLowerCase();
-  const mentionsHistory = /\b(again|before|used to|every time|always|pattern|history|past relationship)\b/.test(text);
-  const byKey = new Map(params.candidates.map((c) => [c.key, c]));
+const STOP_WORDS = new Set([
+  "the", "a", "an", "and", "or", "but", "to", "of", "in", "on", "for", "with", "is", "was", "were",
+  "it", "i", "you", "me", "my", "your", "this", "that", "at", "be", "as", "so", "not", "just", "really",
+]);
 
-  if (mentionsHistory && byKey.has("what_pattern_notice")) return "what_pattern_notice";
-  if (byKey.has("what_would_help")) return "what_would_help";
-  return params.candidates[0]?.key ?? null;
+function words(text: string): string[] {
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .filter((w) => w.length > 2 && !STOP_WORDS.has(w));
+}
+
+/**
+ * Generic word-overlap heuristic used only when the model is unavailable —
+ * scores each candidate by vocabulary overlap between its own prompt and
+ * the answer text, rather than hardcoding any assessment's specific
+ * candidate keys (every assessment names its candidates differently).
+ * Honest fallback, not a substitute for real interpretation.
+ */
+function fallbackChoice(params: ChooseFollowupParams): string | null {
+  if (params.candidates.length === 1) return params.candidates[0].key;
+
+  const answerWords = new Set(words(params.answerText));
+  if (answerWords.size === 0) return params.candidates[0]?.key ?? null;
+
+  let best = params.candidates[0];
+  let bestScore = -1;
+  for (const candidate of params.candidates) {
+    const overlap = words(candidate.prompt).filter((w) => answerWords.has(w)).length;
+    if (overlap > bestScore) {
+      bestScore = overlap;
+      best = candidate;
+    }
+  }
+  return best?.key ?? null;
 }

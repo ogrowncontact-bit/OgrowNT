@@ -9,10 +9,14 @@
     ".": "./src/index.ts",
     "./dimensions": "./src/dimensions.ts"
   },
+  "scripts": {
+    "test": "vitest run"
+  },
   "dependencies": {
     "@inner/assessment-engine": "workspace:*"
   },
   "devDependencies": {
-    "typescript": "^5.7.3"
+    "typescript": "^5.7.3",
+    "vitest": "^2.1.8"
   }
 }
