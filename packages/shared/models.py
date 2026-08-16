@@ -135,6 +135,13 @@ class Alert(Base):
     message: Mapped[str] = mapped_column(Text, nullable=False)
     meta: Mapped[dict] = mapped_column(JSON, default=dict)
     acknowledged: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # Phase 7 (packages/notifications): when a delivery attempt was last made
+    # to the configured channels — not "delivered successfully", since a
+    # channel failure or "not configured" is still a completed attempt, just
+    # like every other honest-degradation state in this codebase. Per-channel
+    # outcomes live in meta["_delivery"] (packages/worker/alerts.py), not a
+    # separate column, since the channel set is itself configurable.
+    delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class AuditLog(Base):

@@ -11,7 +11,7 @@ from packages.data.connectors.news.factory import get_news_provider
 from packages.llm.client import LLMClient
 from packages.risk.config import CONFIG_PATH as RISK_CONFIG_PATH
 from packages.risk.config import load_risk_limits
-from packages.shared.models import AdminUser, AuditLog, SystemState
+from packages.shared.models import AdminUser, Alert, AuditLog, SystemState
 
 router = APIRouter(prefix="/api/system", tags=["system"])
 
@@ -103,6 +103,13 @@ def trigger_kill_switch(
             detail={"trigger": "manual"},
         )
     )
+    db.add(
+        Alert(
+            severity="critical", category="emergency",
+            message=f"Kill switch manually triggered by {admin.email}",
+            meta={"trigger": "manual", "actor": admin.email},
+        )
+    )
     db.commit()
     db.refresh(state)
     return state
@@ -159,6 +166,13 @@ def release_kill_switch(
             action="kill_switch_released",
             entity_type="system_state",
             detail={},
+        )
+    )
+    db.add(
+        Alert(
+            severity="info", category="emergency",
+            message=f"Kill switch manually released by {admin.email}",
+            meta={"actor": admin.email},
         )
     )
     db.commit()

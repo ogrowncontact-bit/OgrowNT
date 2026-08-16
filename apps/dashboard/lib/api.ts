@@ -163,6 +163,44 @@ export type PromotionCheck = {
   criteria: Record<string, unknown>;
   actual: Record<string, unknown>;
 };
+export type SystemAlert = {
+  id: number;
+  ts: string;
+  severity: "info" | "warning" | "critical";
+  category: string;
+  message: string;
+  meta: Record<string, unknown>;
+  acknowledged: boolean;
+  delivered_at: string | null;
+};
+export type EquityPoint = { ts: string; equity: number; drawdown_pct: number };
+export type TradeStats = {
+  total_trades: number;
+  win_rate: number | null;
+  expectancy: number | null;
+  profit_factor: number | null;
+  avg_pnl: number | null;
+};
+export type DrawdownStats = {
+  current_drawdown_pct: number | null;
+  max_drawdown_pct: number | null;
+  peak_equity: number | null;
+};
+export type PatternLeaderboardEntry = {
+  pattern_type: string;
+  regime: string;
+  sample_size: number;
+  win_rate: number | null;
+  expectancy: number | null;
+};
+export type AnalyticsOverview = {
+  equity_curve: EquityPoint[];
+  trade_stats: TradeStats;
+  drawdown: DrawdownStats;
+  tier_distribution: Record<string, number>;
+  pattern_leaderboard: PatternLeaderboardEntry[];
+  regime_distribution: Record<string, number>;
+};
 
 async function apiFetch<T>(path: string, token?: string): Promise<T | null> {
   try {
@@ -195,6 +233,8 @@ export const getTradeJournal = (limit = 10) => apiFetch<TradeJournalEntry[]>(`/a
 export const getLearnedRules = (limit = 10) => apiFetch<LearnedRule[]>(`/api/research/rules?limit=${limit}`);
 export const getBacktests = (limit = 10) => apiFetch<BacktestSummary[]>(`/api/backtests?limit=${limit}`);
 export const getPromotionCheck = (strategyId: number) => apiFetch<PromotionCheck>(`/api/strategies/${strategyId}/promotion-check`);
+export const getAlerts = (limit = 10) => apiFetch<SystemAlert[]>(`/api/alerts?limit=${limit}`);
+export const getAnalyticsOverview = () => apiFetch<AnalyticsOverview>("/api/analytics/overview");
 
 export async function login(email: string, password: string) {
   const res = await fetch(`${API_URL}/api/auth/login`, {

@@ -1,4 +1,5 @@
 from packages.backtest.engine import BacktestResult, run_backtest
+from packages.backtest.optimize import OptimizationCandidate, OptimizationResult, optimize_parameters
 from packages.backtest.portfolio import EquityPoint, SimPosition, SimTrade, SimulatedPortfolio
 from packages.backtest.risk import BacktestRiskVerdict, evaluate_signal_for_backtest
 from packages.backtest.stability import StabilityResult, check_parameter_stability
@@ -18,4 +19,7 @@ __all__ = [
     "WalkForwardResult",
     "WalkForwardWindow",
     "run_walk_forward",
+    "OptimizationCandidate",
+    "OptimizationResult",
+    "optimize_parameters",
 ]

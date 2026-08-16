@@ -18,6 +18,10 @@ Runs three independent cadences (docs/blueprint/05-event-flow.md §Cadência):
   Agent's per-trade half (strategy performance, health score, quarantine,
   trade journal) runs inline in the Trade Monitor above, not on this
   cadence — it reacts to trade closes, not to a clock.
+- Every ALERT_DELIVERY_INTERVAL_SECONDS: attempts delivery of any
+  not-yet-delivered Alert row to whatever notification channels are
+  configured (apps/worker/alerts.py) — short by default since alerts
+  (kill switch, safety belt changes) are time-sensitive.
 
 Nothing here ever reads a real broker/exchange key or sends a live order —
 see docs/blueprint/12-roadmap.md, live trading is explicitly out of scope
@@ -28,6 +32,7 @@ from __future__ import annotations
 import signal
 import time
 
+from apps.worker.alerts import run_alert_delivery_cycle
 from apps.worker.history import backfill_active_assets
 from apps.worker.news_agent import run_news_cycle
 from apps.worker.scanner import run_scan_cycle
@@ -37,6 +42,7 @@ from packages.data.connectors.market.factory import get_market_data_provider
 from packages.data.connectors.news.factory import get_news_provider
 from packages.execution.adapters.paper import PaperExecutionProvider
 from packages.llm.client import LLMClient
+from packages.notifications.dispatcher import NotificationDispatcher
 from packages.quant.learning.research import run_research_cycle
 from packages.risk.monitor import update_safety_belt
 from packages.shared.db import SessionLocal
@@ -59,12 +65,15 @@ def main() -> None:
     provider = get_market_data_provider()
     news_provider = get_news_provider()
     llm_client = LLMClient()
+    dispatcher = NotificationDispatcher()
     logger.info(
         "Worker starting — market_data=%s news=%s llm_configured=%s "
-        "scan_interval=%ss news_interval=%ss strategy_interval=%ss research_interval=%ss",
+        "scan_interval=%ss news_interval=%ss strategy_interval=%ss research_interval=%ss "
+        "alert_delivery_interval=%ss",
         provider.name, news_provider.name, llm_client.is_available(),
         settings.scan_interval_seconds, settings.news_interval_seconds,
         settings.strategy_interval_seconds, settings.research_interval_seconds,
+        settings.alert_delivery_interval_seconds,
     )
     if not llm_client.is_available():
         logger.warning(
@@ -86,6 +95,7 @@ def main() -> None:
     last_news_run = 0.0
     last_strategy_run = 0.0
     last_research_run = 0.0
+    last_alert_delivery_run = 0.0
 
     while _running:
         cycle_start = time.monotonic()
@@ -110,6 +120,10 @@ def main() -> None:
             if cycle_start - last_research_run >= settings.research_interval_seconds:
                 run_research_cycle(db, llm_client)
                 last_research_run = cycle_start
+
+            if cycle_start - last_alert_delivery_run >= settings.alert_delivery_interval_seconds:
+                run_alert_delivery_cycle(db, dispatcher)
+                last_alert_delivery_run = cycle_start
         except Exception:  # noqa: BLE001 - never let one bad cycle kill the loop
             logger.exception("Worker cycle failed")
         finally:

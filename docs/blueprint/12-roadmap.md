@@ -311,10 +311,74 @@ Nada nesta fase aproxima o sistema de capital real: promoção só avança
 `lifecycle_stage`, nunca liga a uma exchange/corretora; `Order.is_paper`/
 `Trade.is_paper` continuam sempre `true`.
 
-## Fase 7 — Advanced Analytics, Alerts, Optimization
+## Fase 7 — Advanced Analytics, Alerts, Optimization — **status: implementada e validada nesta sessão**
 
-Canais de alerta adicionais (email/Telegram/WhatsApp — arquitetura preparada desde a
-Fase 1, implementação aqui), otimização de parâmetros, analytics avançado.
+Canais de alerta adicionais (email/Telegram/WhatsApp), otimização de parâmetros,
+analytics avançado.
+
+**Critério de sucesso:**
+- [x] Canais de entrega de alertas (`packages/notifications/`): `NotificationChannel`
+      Protocol comum + `EmailChannel` (stdlib `smtplib`), `TelegramChannel`
+      (`httpx` contra a Bot API), `WhatsAppChannel` — este último honesto: sem
+      conta Business API real disponível neste ambiente, `is_configured()`
+      devolve sempre `False` e o motivo fica documentado no código
+      (`TODO(real-whatsapp)`), nunca finge um envio. `NotificationDispatcher`
+      faz fan-out para todos os canais, nunca lança exceção — cada tentativa
+      (sucesso, falha ou não configurado) fica registada por canal em
+      `alert.meta["_delivery"]`. Nova cadência no worker
+      (`apps/worker/alerts.py`, `ALERT_DELIVERY_INTERVAL_SECONDS`) marca
+      `alerts.delivered_at` em todas as tentativas, mesmo quando nenhum canal
+      está configurado
+- [x] Lacuna corrigida: nem todos os eventos alerta-dignos escreviam `Alert`
+      antes desta fase — mudança de nível de safety belt
+      (`packages/risk/monitor.py`) e kill switch manual
+      (`apps/api/routers/system.py`) agora escrevem sempre um `Alert` com
+      severidade/categoria coerentes
+- [x] Otimização de parâmetros (`packages/backtest/optimize.py`): grid search
+      limitado (`MAX_COMBINATIONS=30`, amostragem determinística com seed
+      quando a grelha excede o limite, combinação base sempre incluída);
+      cada candidato é julgado pelo mesmo veredicto de consistência walk-forward
+      da Fase 6 — nunca por um único backtest "sortudo". Nunca aplica nada
+      sozinho: devolve sempre um relatório ranqueado (`OptimizationResult`),
+      a decisão de mudar os parâmetros por omissão de uma estratégia continua
+      manual, mesma disciplina "DET propõe, nunca aplica" do
+      `promotion.py`/`research.py`
+- [x] Analytics avançado (`packages/analytics/overview.py`): agregação pura de
+      leitura sobre dados que as fases anteriores já escrevem — equity curve
+      (`portfolio_snapshots`), estatísticas globais de trades (win rate,
+      expectancy, profit factor), drawdown atual/máximo/pico de equity,
+      distribuição de tiers de oportunidade (janela 30 dias), leaderboard de
+      padrões por expectancy (`pattern_performance`), distribuição de regimes
+      (janela 7 dias). Nenhuma escrita nova na base de dados, nenhum número
+      inventado — estado vazio/insuficiente devolve `None`/lista vazia, nunca
+      um placeholder
+- [x] API: `POST /api/backtests/optimize`, `GET /api/alerts`,
+      `POST /api/alerts/{id}/ack`, `GET /api/analytics/overview`
+- [x] dashboard mostra painel de Alerts (severidade, categoria, estado de
+      entrega/reconhecimento), painel de Equity Curve (sparkline SVG inline,
+      sem nova dependência de gráficos) com peak equity/max drawdown/win
+      rate/expectancy, distribuição de Opportunity Tiers e Regime Mix, e
+      leaderboard de padrões — verificado ao vivo via build de produção do
+      Next.js + login real + inspeção do HTML renderizado (SVG da equity
+      curve, badges de tier/regime e contagens reais presentes no output)
+- [x] verificado ao vivo contra Postgres real: `POST /api/backtests/optimize`
+      sobre `trend_following_v1`/AAPL com os mesmos ~70 candles mock reais da
+      Fase 6 devolveu corretamente `best_params: null` e a razão "none of N
+      candidate parameter sets passed the walk-forward consistency bar"
+      (mercado lateral, sem trades reais nessa janela curta — nenhum valor
+      fabricado para parecer melhor), com todas as janelas de cada candidato
+      persistidas em `backtest_runs` (32 grupos `opt-*` confirmados por query
+      direta); `GET /api/analytics/overview` devolveu equity curve, trade
+      stats, drawdown e distribuições de tier/regime reais, calculados a
+      partir dos dados já existentes no Postgres de desenvolvimento (sem
+      dataset fabricado)
+- [x] 48 novos testes automatizados (302/302 no total da suite, confirmado em
+      duas corridas consecutivas)
+
+Nada nesta fase aproxima o sistema de capital real: os canais de alerta apenas
+notificam, nunca decidem; a otimização de parâmetros nunca escreve nos
+parâmetros por omissão de uma estratégia; `Order.is_paper`/`Trade.is_paper`
+continuam sempre `true`.
 
 ## Evolução futura (fora de âmbito até validação completa)
 

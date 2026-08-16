@@ -4,7 +4,7 @@
 **paper trading only** — no real orders are ever sent. See the full engineering
 specification in [`docs/blueprint/`](docs/blueprint/00-overview.md).
 
-## Status: Phase 6 (Backtesting)
+## Status: Phase 7 (Advanced Analytics, Alerts, Optimization)
 
 Per [`docs/blueprint/12-roadmap.md`](docs/blueprint/12-roadmap.md):
 
@@ -58,6 +58,23 @@ Per [`docs/blueprint/12-roadmap.md`](docs/blueprint/12-roadmap.md):
   transitions on real paper-trading track record — always proposed by DET, always
   applied only through an explicit, server-revalidated admin action, never
   automatically.
+- **Phase 7 (Advanced Analytics, Alerts, Optimization):** real alert delivery —
+  `EmailChannel` (stdlib `smtplib`) and `TelegramChannel` (Bot API via `httpx`),
+  plus an honest `WhatsAppChannel` stub (`is_configured()` always `False` — no
+  Business API account available in this environment, documented rather than
+  faked). A worker cadence delivers every pending `Alert` through all channels
+  and records the per-channel outcome, even when nothing is configured.
+  Safety-belt tier changes and manual kill-switch actions now always raise an
+  `Alert` (a gap that existed since Phase 3). Parameter optimization
+  (`packages/backtest/optimize.py`) runs a bounded grid search over a
+  strategy's numeric parameters, judging every candidate by the same
+  walk-forward consistency check from Phase 6 — never a single lucky
+  backtest — and never writes to a strategy's live defaults; it only ever
+  returns a ranked report for a human to act on. Advanced analytics
+  (`packages/analytics/overview.py`) is pure read-side aggregation over data
+  every earlier phase already writes: equity curve, trade stats, drawdown,
+  opportunity-tier distribution, pattern leaderboard, regime distribution —
+  no new computation engine, no fabricated numbers.
 
 Live trading is still out of scope — **every order is `is_paper = true`; no
 broker/exchange adapter is registered; nothing in this repo can send a live order
@@ -69,12 +86,13 @@ or read a real broker/exchange key.**
 apps/
   api/         FastAPI backend (auth, system health, assets, market data, portfolio,
                strategies, opportunities/signals, regime, risk, positions/orders/trades,
-               news, patterns, learning, research, backtests)
+               news, patterns, learning, research, backtests, alerts, analytics)
   worker/      24/7 loop: Market Data Agent (scan), Trade Monitor + safety-belt
                refresh + Learning Agent (per trade close, every scan), News
                Intelligence Agent (own cadence), Strategy Engine cycle (history
                backfill, regime, patterns, strategies, scoring, Risk Engine, paper
-               execution), Research Agent (own, longer cadence)
+               execution), Research Agent (own, longer cadence), Alert delivery
+               cycle (own cadence)
   dashboard/   Next.js dashboard (single admin user)
 packages/
   shared/      DB models, settings, logging, OHLCV lookup — shared across apps/packages
@@ -88,8 +106,14 @@ packages/
   execution/   ExecutionProvider interface, PaperExecutionProvider, order manager,
                shared fill-simulation math (packages/execution/fills.py)
   backtest/    event-driven Backtest Engine, isolated simulated portfolio,
-               walk-forward validation, parameter-stability checks — never touches
-               the live paper account
+               walk-forward validation, parameter-stability checks, bounded
+               grid-search parameter optimization — never touches the live
+               paper account, never writes a strategy's live parameters
+  notifications/ NotificationChannel Protocol, Email/Telegram channels, an
+               honest WhatsApp stub, and a fan-out dispatcher — never decides,
+               only delivers
+  analytics/   read-only aggregation over existing data — equity curve, trade
+               stats, drawdown, tier/regime distributions, pattern leaderboard
   llm/         Anthropic API client + News Intelligence/Learning/Research
                interpretation — never imported by packages/execution (structural
                "LLM ≠ Trading Engine")
@@ -126,16 +150,29 @@ strategies) before `api`/`worker` start. The worker backfills enough mock histor
 per asset on startup so opportunities show up within the first strategy cycle
 rather than after `MIN_CANDLES_REQUIRED` real minutes.
 
-Backtests are launched via the API (no dashboard launcher UI yet — the dashboard's
-Backtests panel is read-only) — use `/docs` for an interactive form, or:
+Backtests, walk-forward runs, and parameter optimization are launched via the API
+(no dashboard launcher UI yet — the dashboard's Backtests panel is read-only) —
+use `/docs` for an interactive form, or:
 ```bash
 curl -X POST localhost:8000/api/backtests -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"strategy_id":1,"asset_id":1,"timeframe":"1m","start_ts":"...","end_ts":"...","initial_capital":10000}'
+
+curl -X POST localhost:8000/api/backtests/optimize -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"strategy_id":1,"asset_id":1,"timeframe":"1m","start_ts":"...","end_ts":"...","window_days":1,"initial_capital":10000}'
 ```
 Results are only as deep as the OHLCV history this deployment has actually
 collected — there's no separate historical dataset (see
-`docs/blueprint/12-roadmap.md`'s Phase 6 section).
+`docs/blueprint/12-roadmap.md`'s Phase 6/7 sections). Optimization always
+returns a ranked report (`best_params` is `null` when no candidate passes the
+walk-forward consistency bar) — nothing is ever applied automatically to a
+strategy's live defaults.
+
+Alert delivery (email/Telegram) needs the `SMTP_*`/`TELEGRAM_*` settings in
+`.env` (see `.env.example`); with none configured, alerts still get a
+`delivered_at` timestamp on every attempt and an honest `not_configured`
+status per channel in `alerts.meta["_delivery"]`.
 
 ### Locally, without Docker
 

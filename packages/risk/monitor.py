@@ -12,10 +12,21 @@ from sqlalchemy.orm import Session
 
 from packages.portfolio.state import compute_state
 from packages.risk.config import load_risk_limits
-from packages.risk.safety_belt import KILL_SWITCH, evaluate_safety_belt, should_trigger_kill_switch
-from packages.shared.models import AuditLog, SystemState
+from packages.risk.safety_belt import CAUTION, DEFENSIVE, EMERGENCY, KILL_SWITCH, NORMAL, evaluate_safety_belt, should_trigger_kill_switch
+from packages.shared.models import Alert, AuditLog, SystemState
 
 logger = logging.getLogger("worker.risk_monitor")
+
+# docs/blueprint/08-risk-engine.md#safe-mode calls out severity=critical on
+# entering a kill-switch/emergency state explicitly; the rest is a judgment
+# call kept conservative (any belt tightening is at least a warning).
+_ALERT_SEVERITY_BY_BELT = {
+    NORMAL: "info",
+    CAUTION: "warning",
+    DEFENSIVE: "warning",
+    EMERGENCY: "critical",
+    KILL_SWITCH: "critical",
+}
 
 
 def update_safety_belt(db: Session) -> str:
@@ -51,6 +62,14 @@ def update_safety_belt(db: Session) -> str:
                 action="safety_belt_changed",
                 entity_type="system_state",
                 detail={"from": previous_level, "to": new_level, "drawdown_pct": state.drawdown_pct},
+            )
+        )
+        db.add(
+            Alert(
+                severity=_ALERT_SEVERITY_BY_BELT.get(new_level, "warning"),
+                category="risk" if new_level != KILL_SWITCH else "emergency",
+                message=f"Safety belt changed: {previous_level} -> {new_level} (drawdown {state.drawdown_pct:.2f}%)",
+                meta={"from": previous_level, "to": new_level, "drawdown_pct": state.drawdown_pct},
             )
         )
         logger.info("Safety belt: %s -> %s", previous_level, new_level)

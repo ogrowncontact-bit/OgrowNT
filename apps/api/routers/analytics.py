@@ -1,0 +1,21 @@
+from fastapi import APIRouter, Depends
+from sqlalchemy.orm import Session
+
+from apps.api.deps import get_session
+from apps.api.schemas import AnalyticsOverviewOut
+from packages.analytics.overview import build_analytics_overview
+
+router = APIRouter(prefix="/api/analytics", tags=["analytics"])
+
+
+@router.get("/overview", response_model=AnalyticsOverviewOut)
+def get_analytics_overview(db: Session = Depends(get_session)) -> AnalyticsOverviewOut:
+    overview = build_analytics_overview(db)
+    return AnalyticsOverviewOut(
+        equity_curve=[{"ts": p.ts, "equity": p.equity, "drawdown_pct": p.drawdown_pct} for p in overview.equity_curve],
+        trade_stats=overview.trade_stats,
+        drawdown=overview.drawdown,
+        tier_distribution=overview.tier_distribution,
+        pattern_leaderboard=overview.pattern_leaderboard,
+        regime_distribution=overview.regime_distribution,
+    )

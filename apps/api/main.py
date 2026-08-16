@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from apps.api.routers import (
-    assets, auth, backtests, learning, market_data, news, opportunities, patterns,
+    alerts, analytics, assets, auth, backtests, learning, market_data, news, opportunities, patterns,
     portfolio, research, risk, strategies, system, trading,
 )
 from packages.shared.logging import configure_logging
@@ -20,8 +20,8 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(
     title="OgrowNT API",
-    description="Private AI quant research & paper trading system — Phase 6",
-    version="0.6.0",
+    description="Private AI quant research & paper trading system — Phase 7",
+    version="0.7.0",
     lifespan=lifespan,
 )
 
@@ -47,6 +47,8 @@ app.include_router(patterns.router)
 app.include_router(learning.router)
 app.include_router(research.router)
 app.include_router(backtests.router)
+app.include_router(alerts.router)
+app.include_router(analytics.router)
 
 
 @app.get("/")

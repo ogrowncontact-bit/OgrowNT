@@ -160,3 +160,81 @@ def test_promote_rejects_when_not_eligible(client, db_session):
     assert resp.status_code == 400
     assert "reason" not in resp.json()  # sanity: just checking it's a normal detail-shaped error
     assert "detail" in resp.json()
+
+
+def test_optimize_requires_auth(client, db_session):
+    strategy = _strategy(db_session)
+    asset, start, end = _asset_with_uptrend(db_session, "BTAPIOPTNOAUTH")
+    resp = client.post("/api/backtests/optimize", json={
+        "strategy_id": strategy.id, "asset_id": asset.id, "timeframe": TIMEFRAME,
+        "start_ts": start.isoformat(), "end_ts": end.isoformat(),
+        "window_days": 100 / (24 * 60), "initial_capital": 10000.0,
+    })
+    assert resp.status_code == 401
+
+
+def test_optimize_endpoint_runs_grid_and_persists_windows(client, db_session):
+    strategy = _strategy(db_session, "trend_following_v1")
+    asset, start, end = _asset_with_uptrend(db_session, "BTAPIOPT")
+    token = _login(client, db_session)
+
+    resp = client.post(
+        "/api/backtests/optimize",
+        json={
+            "strategy_id": strategy.id, "asset_id": asset.id, "timeframe": TIMEFRAME,
+            "start_ts": start.isoformat(), "end_ts": end.isoformat(),
+            "window_days": 100 / (24 * 60), "initial_capital": 10000.0,
+            "multipliers": [0.8, 1.0, 1.2],
+        },
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert len(body["candidates"]) == 3**3  # trend_following_v1 has 3 numeric params
+    assert "reason" in body
+
+    first = body["candidates"][0]
+    assert first["group_label"].startswith("opt-")
+    assert len(first["windows"]) > 0
+    assert first["windows"][0]["group_label"] == first["group_label"]
+
+    persisted = db_session.query(BacktestRun).filter(BacktestRun.group_label == first["group_label"]).all()
+    assert len(persisted) == len(first["windows"])
+
+
+def test_optimize_endpoint_respects_max_combinations(client, db_session):
+    strategy = _strategy(db_session, "breakout_v1")
+    asset, start, end = _asset_with_uptrend(db_session, "BTAPIOPTBOUND")
+    token = _login(client, db_session)
+
+    resp = client.post(
+        "/api/backtests/optimize",
+        json={
+            "strategy_id": strategy.id, "asset_id": asset.id, "timeframe": TIMEFRAME,
+            "start_ts": start.isoformat(), "end_ts": end.isoformat(),
+            "window_days": 100 / (24 * 60), "initial_capital": 10000.0,
+            "multipliers": [0.8, 1.0, 1.2], "max_combinations": 5,
+        },
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    assert len(resp.json()["candidates"]) == 5
+
+
+def test_optimize_unregistered_strategy_code_rejected(client, db_session):
+    strategy = StrategyRow(code="not_a_real_optimize_strategy", name="x", family="trend", version="1.0")
+    db_session.add(strategy)
+    db_session.commit()
+    asset, start, end = _asset_with_uptrend(db_session, "BTAPIOPTUNREG")
+    token = _login(client, db_session)
+
+    resp = client.post(
+        "/api/backtests/optimize",
+        json={
+            "strategy_id": strategy.id, "asset_id": asset.id, "timeframe": TIMEFRAME,
+            "start_ts": start.isoformat(), "end_ts": end.isoformat(),
+            "window_days": 100 / (24 * 60), "initial_capital": 10000.0,
+        },
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 400

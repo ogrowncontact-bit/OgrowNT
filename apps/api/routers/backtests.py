@@ -17,10 +17,14 @@ from apps.api.schemas import (
     BacktestDetailOut,
     BacktestRequest,
     BacktestSummaryOut,
+    OptimizeCandidateOut,
+    OptimizeRequest,
+    OptimizeResponseOut,
     WalkForwardRequest,
     WalkForwardResponseOut,
 )
 from packages.backtest.engine import run_backtest
+from packages.backtest.optimize import optimize_parameters
 from packages.backtest.walkforward import run_walk_forward
 from packages.quant.strategies import STRATEGY_CLASSES
 from packages.shared.models import AdminUser, Asset, BacktestRun, StrategyRow
@@ -142,3 +146,51 @@ def create_walk_forward(
         summaries.append(_summary(run, strategy_row.code, asset.symbol))
 
     return WalkForwardResponseOut(group_label=group_label, windows=summaries, consistent=wf_result.consistent, reason=wf_result.reason)
+
+
+@router.post("/optimize", response_model=OptimizeResponseOut)
+def create_optimization(
+    payload: OptimizeRequest, db: Session = Depends(get_session), _: AdminUser = Depends(get_current_admin),
+) -> OptimizeResponseOut:
+    """Bounded grid-search parameter optimization. Every candidate is judged by
+    the same walk-forward consistency bar as `/walkforward`, and each
+    candidate's windows are persisted the same way — this endpoint only ever
+    reports a ranked result, it never touches a strategy's live/default
+    parameters (see packages/backtest/optimize.py's docstring).
+    """
+    strategy_row, asset = _resolve(db, payload.strategy_id, payload.asset_id)
+
+    kwargs: dict = {}
+    if payload.multipliers is not None:
+        kwargs["multipliers"] = tuple(payload.multipliers)
+    if payload.max_combinations is not None:
+        kwargs["max_combinations"] = payload.max_combinations
+
+    opt_result = optimize_parameters(
+        db, strategy_code=strategy_row.code, asset_id=asset.id, symbol=asset.symbol, timeframe=payload.timeframe,
+        start_ts=payload.start_ts, end_ts=payload.end_ts, window_days=payload.window_days,
+        initial_capital=payload.initial_capital, **kwargs,
+    )
+
+    candidate_outs: list[OptimizeCandidateOut] = []
+    for candidate in opt_result.candidates:
+        group_label = f"opt-{uuid.uuid4().hex[:12]}"
+        wf = candidate.walk_forward
+        total_windows = len(wf.windows)
+        summaries = []
+        for window in wf.windows:
+            run = _persist_run(
+                db, strategy_row=strategy_row, asset=asset, timeframe=payload.timeframe, kind="walk_forward_window",
+                group_label=group_label, window_index=window.index, total_windows=total_windows, params=candidate.params,
+                start_ts=window.start_ts, end_ts=window.end_ts, initial_capital=payload.initial_capital, result=window.result,
+            )
+            summaries.append(_summary(run, strategy_row.code, asset.symbol))
+        candidate_outs.append(
+            OptimizeCandidateOut(
+                params=candidate.params, group_label=group_label, windows=summaries,
+                consistent=wf.consistent, walk_forward_reason=wf.reason,
+            )
+        )
+
+    best_params = opt_result.best.params if opt_result.best is not None else None
+    return OptimizeResponseOut(candidates=candidate_outs, best_params=best_params, reason=opt_result.reason)

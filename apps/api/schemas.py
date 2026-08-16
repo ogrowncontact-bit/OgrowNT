@@ -433,3 +433,84 @@ class PromotionCheckOut(BaseModel):
     reasons: list[str]
     criteria: dict
     actual: dict
+
+
+# --- Phase 7 -----------------------------------------------------------
+
+
+class AlertOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    ts: datetime
+    severity: str
+    category: str
+    message: str
+    meta: dict
+    acknowledged: bool
+    delivered_at: datetime | None
+
+
+class OptimizeRequest(BaseModel):
+    strategy_id: int
+    asset_id: int
+    timeframe: str = "1m"
+    start_ts: datetime
+    end_ts: datetime
+    window_days: float
+    initial_capital: float = 10_000.0
+    multipliers: list[float] | None = None
+    max_combinations: int | None = None
+
+
+class OptimizeCandidateOut(BaseModel):
+    params: dict
+    group_label: str
+    windows: list[BacktestSummaryOut]
+    consistent: bool | None
+    walk_forward_reason: str
+
+
+class OptimizeResponseOut(BaseModel):
+    candidates: list[OptimizeCandidateOut]
+    best_params: dict | None
+    reason: str
+
+
+class EquityPointOut(BaseModel):
+    ts: datetime
+    equity: float
+    drawdown_pct: float
+
+
+class TradeStatsOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    total_trades: int
+    win_rate: float | None
+    expectancy: float | None
+    profit_factor: float | None
+    avg_pnl: float | None
+
+
+class DrawdownStatsOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    current_drawdown_pct: float | None
+    max_drawdown_pct: float | None
+    peak_equity: float | None
+
+
+class PatternLeaderboardEntryOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    pattern_type: str
+    regime: str
+    sample_size: int
+    win_rate: float | None
+    expectancy: float | None
+
+
+class AnalyticsOverviewOut(BaseModel):
+    equity_curve: list[EquityPointOut]
+    trade_stats: TradeStatsOut
+    drawdown: DrawdownStatsOut
+    tier_distribution: dict[str, int]
+    pattern_leaderboard: list[PatternLeaderboardEntryOut]
+    regime_distribution: dict[str, int]

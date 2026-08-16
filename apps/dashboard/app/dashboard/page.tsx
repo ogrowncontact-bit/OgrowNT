@@ -1,5 +1,7 @@
 import { cookies } from "next/headers";
 import {
+  getAlerts,
+  getAnalyticsOverview,
   getAssets,
   getBacktests,
   getHealth,
@@ -21,6 +23,7 @@ import { RegimeBadge } from "@/components/RegimeBadge";
 import { TierBadge } from "@/components/TierBadge";
 import { LifecycleBadge } from "@/components/LifecycleBadge";
 import { LogoutButton } from "@/components/LogoutButton";
+import { EquitySparkline } from "@/components/EquitySparkline";
 
 export const dynamic = "force-dynamic";
 
@@ -31,7 +34,7 @@ export default async function DashboardPage() {
   const cookieStore = await cookies();
   const token = cookieStore.get("ogrownt_token")?.value ?? "";
 
-  const [health, status, portfolio, assets, positions, opportunities, regimes, trades, news, strategyLearning, tradeJournal, learnedRules] =
+  const [health, status, portfolio, assets, positions, opportunities, regimes, trades, news, strategyLearning, tradeJournal, learnedRules, alerts] =
     await Promise.all([
       getHealth(),
       getSystemStatus(token),
@@ -45,11 +48,13 @@ export default async function DashboardPage() {
       getStrategyLearning(),
       getTradeJournal(6),
       getLearnedRules(6),
+      getAlerts(8),
     ]);
 
-  const [backtests, promotionChecks] = await Promise.all([
+  const [backtests, promotionChecks, analytics] = await Promise.all([
     getBacktests(8),
     Promise.all((strategyLearning ?? []).map((s) => getPromotionCheck(s.strategy_id))),
+    getAnalyticsOverview(),
   ]);
   const promotionByStrategyId = new Map(
     (strategyLearning ?? []).map((s, i) => [s.strategy_id, promotionChecks[i]])
@@ -447,6 +452,100 @@ export default async function DashboardPage() {
         )}
       </section>
 
+      <section className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-2">
+        <div className="rounded-lg border border-base-700 bg-base-900 p-4">
+          <p className="mb-3 text-[11px] uppercase tracking-wider text-ink-500">
+            Equity Curve {analytics ? `(${analytics.equity_curve.length} snapshots)` : ""}
+          </p>
+          {analytics ? (
+            <>
+              <EquitySparkline points={analytics.equity_curve} />
+              <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-ink-500">
+                <span>Peak equity: {analytics.drawdown.peak_equity !== null ? eur(analytics.drawdown.peak_equity) : "—"}</span>
+                <span>Max drawdown: {analytics.drawdown.max_drawdown_pct !== null ? `${analytics.drawdown.max_drawdown_pct.toFixed(2)}%` : "—"}</span>
+                <span>Trades: {analytics.trade_stats.total_trades}</span>
+                <span>
+                  Win rate: {analytics.trade_stats.win_rate !== null ? `${Math.round(analytics.trade_stats.win_rate * 100)}%` : "—"} ·
+                  Expectancy: {analytics.trade_stats.expectancy !== null ? `${analytics.trade_stats.expectancy.toFixed(2)}R` : "—"}
+                </span>
+              </div>
+            </>
+          ) : (
+            <p className="text-xs text-ink-500">DATA_UNAVAILABLE</p>
+          )}
+        </div>
+
+        <div className="rounded-lg border border-base-700 bg-base-900 p-4">
+          <p className="mb-3 text-[11px] uppercase tracking-wider text-ink-500">
+            Opportunity Tiers (30d) &amp; Regime Mix (7d)
+          </p>
+          {analytics && Object.keys(analytics.tier_distribution).length > 0 ? (
+            <div className="mb-3 space-y-1">
+              {Object.entries(analytics.tier_distribution).map(([tier, count]) => (
+                <div key={tier} className="flex items-center gap-2 text-xs">
+                  <span className="w-24 shrink-0">
+                    <TierBadge tier={tier} />
+                  </span>
+                  <span className="text-ink-500">{count}</span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="mb-3 text-xs text-ink-500">No scored opportunities in the last 30 days.</p>
+          )}
+          {analytics && Object.keys(analytics.regime_distribution).length > 0 ? (
+            <div className="flex flex-wrap gap-2">
+              {Object.entries(analytics.regime_distribution).map(([regime, count]) => (
+                <span key={regime} className="flex items-center gap-1">
+                  <RegimeBadge regime={regime} />
+                  <span className="text-[10px] text-ink-500">{count}</span>
+                </span>
+              ))}
+            </div>
+          ) : (
+            <p className="text-xs text-ink-500">No regime reads in the last 7 days.</p>
+          )}
+        </div>
+      </section>
+
+      <section className="mb-6 rounded-lg border border-base-700 bg-base-900 p-4">
+        <p className="mb-3 text-[11px] uppercase tracking-wider text-ink-500">
+          Pattern Leaderboard {analytics ? `(${analytics.pattern_leaderboard.length})` : ""}
+        </p>
+        {analytics && analytics.pattern_leaderboard.length > 0 ? (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead>
+                <tr className="text-ink-500">
+                  <th className="pb-2 pr-3 font-normal">Pattern</th>
+                  <th className="pb-2 pr-3 font-normal">Regime</th>
+                  <th className="pb-2 pr-3 font-normal">Sample</th>
+                  <th className="pb-2 pr-3 font-normal">Win Rate</th>
+                  <th className="pb-2 font-normal">Expectancy</th>
+                </tr>
+              </thead>
+              <tbody>
+                {analytics.pattern_leaderboard.map((p, i) => (
+                  <tr key={`${p.pattern_type}-${p.regime}-${i}`} className="border-t border-base-700/60 hover:bg-base-800">
+                    <td className="py-1.5 pr-3 text-ink-100">{p.pattern_type.replace(/_/g, " ")}</td>
+                    <td className="py-1.5 pr-3">
+                      <RegimeBadge regime={p.regime} />
+                    </td>
+                    <td className="py-1.5 pr-3 text-ink-300">{p.sample_size}</td>
+                    <td className="py-1.5 pr-3 text-ink-300">{p.win_rate !== null ? `${Math.round(p.win_rate * 100)}%` : "—"}</td>
+                    <td className={`py-1.5 ${(p.expectancy ?? 0) > 0 ? "text-signal-green" : (p.expectancy ?? 0) < 0 ? "text-signal-red" : "text-ink-300"}`}>
+                      {p.expectancy !== null ? `${p.expectancy.toFixed(2)}R` : "—"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <p className="text-xs text-ink-500">No pattern performance recorded yet.</p>
+        )}
+      </section>
+
       <section className="mb-6 rounded-lg border border-base-700 bg-base-900 p-4">
         <p className="mb-3 text-[11px] uppercase tracking-wider text-ink-500">
           Backtests {backtests ? `(${backtests.length})` : ""}
@@ -488,6 +587,39 @@ export default async function DashboardPage() {
           <p className="text-xs text-ink-500">
             No backtests run yet — launch one via <code>POST /api/backtests</code> (see <code>/docs</code>).
           </p>
+        )}
+      </section>
+
+      <section className="mb-6 rounded-lg border border-base-700 bg-base-900 p-4">
+        <p className="mb-3 text-[11px] uppercase tracking-wider text-ink-500">
+          Alerts {alerts ? `(${alerts.length})` : ""}
+        </p>
+        {alerts && alerts.length > 0 ? (
+          <div className="space-y-2">
+            {alerts.map((a) => (
+              <div key={a.id} className="rounded border border-base-700 px-2 py-1.5 text-xs">
+                <div className="flex items-center justify-between">
+                  <span
+                    className={`text-[10px] uppercase tracking-wide ${
+                      a.severity === "critical"
+                        ? "text-signal-red"
+                        : a.severity === "warning"
+                          ? "text-signal-yellow"
+                          : "text-ink-500"
+                    }`}
+                  >
+                    {a.severity} · {a.category}
+                  </span>
+                  <span className="text-ink-500">
+                    {a.acknowledged ? "acknowledged" : a.delivered_at ? "delivered" : "pending delivery"}
+                  </span>
+                </div>
+                <p className="mt-1 text-ink-100">{a.message}</p>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-xs text-ink-500">No alerts — nothing has needed the admin's attention yet.</p>
         )}
       </section>
 

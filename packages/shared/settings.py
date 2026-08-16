@@ -44,6 +44,26 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     llm_model: str = "claude-sonnet-5"
 
+    # packages/notifications — alert delivery channels (Phase 7). Each is
+    # independently optional; an empty value means that channel is not
+    # configured, the same honest-degradation convention as anthropic_api_key
+    # above (alerts still land in the `alerts` table and the dashboard either
+    # way — these only control whether they're also pushed out).
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_from: str = ""
+    alert_email_to: str = ""
+
+    telegram_bot_token: str = ""
+    telegram_chat_id: str = ""
+
+    # How often apps/worker/alerts.py attempts to deliver not-yet-delivered
+    # Alert rows to whatever channels are configured. Short on purpose —
+    # alerts (kill switch, safety belt changes) are time-sensitive.
+    alert_delivery_interval_seconds: int = 60
+
 
 @lru_cache
 def get_settings() -> Settings:
