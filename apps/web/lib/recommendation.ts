@@ -38,7 +38,7 @@ export async function selectRecommendation(params: {
     include: { assessment: true },
   });
   const completedSlugs = new Set(completedSessions.map((s) => s.assessment.slug));
-  const publishedSlugs = listPublishedSlugs();
+  const publishedSlugs = await listPublishedSlugs();
 
   const eligible = params.fromConfig.recommendedNext.filter(
     (c) => publishedSlugs.includes(c.assessmentSlug) && !completedSlugs.has(c.assessmentSlug)
@@ -57,7 +57,7 @@ export async function selectRecommendation(params: {
   }
   if (!chosenSlug) return null;
 
-  const targetConfig = getAssessmentConfig(chosenSlug);
+  const targetConfig = await getAssessmentConfig(chosenSlug);
   if (!targetConfig) return null;
 
   const topDimension = Object.entries(params.dimensionScores).sort((a, b) => b[1] - a[1])[0];

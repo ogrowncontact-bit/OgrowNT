@@ -17,7 +17,7 @@ export default async function SessionPage({ params }: { params: Promise<{ slug: 
   if (!session || session.anonymousSessionId !== anonymousSessionId) notFound();
   if (session.status === "completed") redirect(`/${slug}/session/${id}/result`);
 
-  const config = getAssessmentConfig(session.sourceSlug);
+  const config = await getAssessmentConfig(session.sourceSlug);
   if (!config) notFound();
 
   const state = await reconstructSessionState(config, id);

@@ -41,6 +41,7 @@ async function seedAssessment(assessment: AssessmentConfig) {
       recommendedQuestions: assessment.recommendedQuestions,
       maxQuestions: assessment.maxQuestions,
       aiInfluenceCap: assessment.scoringModel.aiInfluenceCap,
+      freeResultTemplate: assessment.freeResultTemplate as any,
       publishedAt: new Date(),
       dimensions: {
         create: await Promise.all(
@@ -58,7 +59,7 @@ async function seedAssessment(assessment: AssessmentConfig) {
             isCore: true,
             prompt: q.prompt,
             orderHint: i,
-            metadata: { scaleMax: q.scaleMax, scaleDimension: q.scaleDimension },
+            metadata: { scaleMax: q.scaleMax, scaleDimension: q.scaleDimension, dynamicFollowupCandidates: q.dynamicFollowupCandidates },
             options: {
               create: (q.options ?? []).map((o, j) => ({
                 key: o.key,
@@ -74,7 +75,7 @@ async function seedAssessment(assessment: AssessmentConfig) {
             isCore: false,
             prompt: q.prompt,
             orderHint: 1000 + i,
-            metadata: { scaleMax: q.scaleMax, scaleDimension: q.scaleDimension },
+            metadata: { scaleMax: q.scaleMax, scaleDimension: q.scaleDimension, dynamicFollowupCandidates: q.dynamicFollowupCandidates },
             options: {
               create: (q.options ?? []).map((o, j) => ({
                 key: o.key,
@@ -135,6 +136,30 @@ async function main() {
   for (const assessment of allAssessments) {
     await seedAssessment(assessment);
   }
+
+  // Second pass: recommendedNext references other assessments by slug, so
+  // this can only run once every assessment row already exists.
+  for (const assessment of allAssessments) {
+    const fromRow = await prisma.assessment.findUniqueOrThrow({ where: { slug: assessment.slug } });
+    await prisma.recommendationRule.deleteMany({ where: { fromAssessmentId: fromRow.id } });
+    for (const candidate of assessment.recommendedNext) {
+      const toRow = await prisma.assessment.findUnique({ where: { slug: candidate.assessmentSlug } });
+      if (!toRow) {
+        console.warn(`Skipping recommendation ${assessment.slug} -> ${candidate.assessmentSlug}: target not seeded`);
+        continue;
+      }
+      await prisma.recommendationRule.create({
+        data: {
+          fromAssessmentId: fromRow.id,
+          toAssessmentId: toRow.id,
+          condition: candidate.condition as any,
+          weight: candidate.weight,
+          bridgeCopy: candidate.bridgeCopy,
+        },
+      });
+    }
+  }
+  console.log("Seeded recommendation graph.");
 }
 
 main()

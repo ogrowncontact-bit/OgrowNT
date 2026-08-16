@@ -23,7 +23,7 @@ export default async function ReportPage({ params }: { params: Promise<{ slug: s
   const session = await prisma.assessmentSession.findUnique({ where: { id } });
   if (!session || session.anonymousSessionId !== anonymousSessionId) notFound();
 
-  const config = getAssessmentConfig(session.sourceSlug);
+  const config = await getAssessmentConfig(session.sourceSlug);
   if (!config) notFound();
 
   const entitlement = await prisma.entitlement.findFirst({ where: { assessmentSessionId: id } });

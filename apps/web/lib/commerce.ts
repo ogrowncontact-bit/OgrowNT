@@ -28,7 +28,7 @@ export async function completeOrder(orderId: string): Promise<void> {
   if (order.status === "paid") return;
 
   const session = order.assessmentSession;
-  const config = getAssessmentConfig(session.sourceSlug);
+  const config = await getAssessmentConfig(session.sourceSlug);
   if (!config) throw new Error(`Unknown assessment for order ${orderId}`);
 
   const [profileResultRow, dimensionScoreRows, openResponses, user] = await Promise.all([

@@ -15,7 +15,7 @@ export default async function MockCheckoutPage({ params }: { params: Promise<{ o
   const order = await prisma.order.findUnique({ where: { id: orderId }, include: { assessmentSession: true } });
   if (!order) notFound();
 
-  const config = getAssessmentConfig(order.assessmentSession.sourceSlug);
+  const config = await getAssessmentConfig(order.assessmentSession.sourceSlug);
   if (!config) notFound();
 
   return (

@@ -5,10 +5,11 @@ import { getAssessmentConfig, listPublishedSlugs } from "@/lib/assessments";
 // The deliberate full-catalog surface — everywhere else in the product stays
 // focused on the single experience a user entered through or was pointed to
 // (docs/ARCHITECTURE.md — Progressive Discovery / Explore Mode).
-export default function ExplorePage() {
-  const configs = listPublishedSlugs()
-    .map((slug) => getAssessmentConfig(slug))
-    .filter((c): c is NonNullable<typeof c> => c !== null);
+export default async function ExplorePage() {
+  const slugs = await listPublishedSlugs();
+  const configs = (await Promise.all(slugs.map((slug) => getAssessmentConfig(slug)))).filter(
+    (c): c is NonNullable<typeof c> => c !== null
+  );
 
   return (
     <Screen align="top">

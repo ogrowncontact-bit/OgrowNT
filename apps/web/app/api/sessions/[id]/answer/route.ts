@@ -23,7 +23,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     return NextResponse.json({ error: "Assessment already completed" }, { status: 409 });
   }
 
-  const config = getAssessmentConfig(session.sourceSlug);
+  const config = await getAssessmentConfig(session.sourceSlug);
   if (!config) return NextResponse.json({ error: "Unknown assessment" }, { status: 500 });
 
   const body = await request.json().catch(() => null);

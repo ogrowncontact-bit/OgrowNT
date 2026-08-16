@@ -120,6 +120,7 @@ model AssessmentVersion {
   recommendedQuestions Int
   maxQuestions    Int
   aiInfluenceCap  Float      @default(0.15)
+  freeResultTemplate Json?   // { headline, insightIntro, lockedInsightsLabel }
   publishedAt     DateTime?
   createdBy       String?
   createdAt       DateTime   @default(now())
@@ -240,6 +241,7 @@ model RecommendationRule {
   toAssessment     Assessment @relation("RecommendationTo", fields: [toAssessmentId], references: [id])
   condition        Json
   weight           Float      @default(1.0)
+  bridgeCopy       String     // static fallback narration; Recommendation AI narrates when available (§8)
 
   @@schema("catalog")
 }
@@ -538,10 +540,11 @@ enum AdminRole {
 }
 
 model AdminUser {
-  id        String    @id @default(cuid())
-  email     String    @unique
-  role      AdminRole
-  createdAt DateTime  @default(now())
+  id           String    @id @default(cuid())
+  email        String    @unique
+  passwordHash String
+  role         AdminRole
+  createdAt    DateTime  @default(now())
 
   auditLogs AuditLog[]
 

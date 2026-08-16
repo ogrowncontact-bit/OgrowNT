@@ -16,7 +16,7 @@ export default async function ResultPage({ params }: { params: Promise<{ slug: s
   if (!session || session.anonymousSessionId !== anonymousSessionId) notFound();
   if (session.status !== "completed") redirect(`/${slug}/session/${id}`);
 
-  const config = getAssessmentConfig(session.sourceSlug);
+  const config = await getAssessmentConfig(session.sourceSlug);
   if (!config) notFound();
 
   const profileResult = await prisma.profileResult.findUnique({ where: { assessmentSessionId: id } });

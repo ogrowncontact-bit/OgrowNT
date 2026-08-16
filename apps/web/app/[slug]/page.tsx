@@ -7,7 +7,7 @@ import { LandingViewTracker } from "@/components/LandingViewTracker";
 
 export default async function ExperienceLanding({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
-  const config = getAssessmentConfig(slug);
+  const config = await getAssessmentConfig(slug);
   if (!config) notFound();
 
   return (

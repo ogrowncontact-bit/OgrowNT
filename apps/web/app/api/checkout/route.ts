@@ -31,7 +31,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Assessment isn't finished yet" }, { status: 409 });
   }
 
-  const config = getAssessmentConfig(session.sourceSlug);
+  const config = await getAssessmentConfig(session.sourceSlug);
   if (!config) return NextResponse.json({ error: "Unknown assessment" }, { status: 500 });
 
   // Already purchased — don't charge twice.

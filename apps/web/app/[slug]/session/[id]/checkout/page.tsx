@@ -14,7 +14,7 @@ export default async function CheckoutPage({ params }: { params: Promise<{ slug:
   if (!session || session.anonymousSessionId !== anonymousSessionId) notFound();
   if (session.status !== "completed") redirect(`/${slug}/session/${id}`);
 
-  const config = getAssessmentConfig(session.sourceSlug);
+  const config = await getAssessmentConfig(session.sourceSlug);
   if (!config) notFound();
 
   // Already purchased — go straight to the report instead of charging again.

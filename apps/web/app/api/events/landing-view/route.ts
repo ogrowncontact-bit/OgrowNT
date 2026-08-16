@@ -15,7 +15,7 @@ export async function POST(request: NextRequest) {
   const slug = body?.slug as string | undefined;
   if (!slug) return NextResponse.json({ error: "slug is required" }, { status: 400 });
 
-  const config = getAssessmentConfig(slug);
+  const config = await getAssessmentConfig(slug);
   if (!config) return NextResponse.json({ error: "Unknown assessment" }, { status: 404 });
 
   const utm = {
