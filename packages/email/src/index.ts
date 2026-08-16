@@ -2,3 +2,5 @@ export type { EmailProvider, SendEmailParams, SendResult, Attachment } from "./t
 export { ResendProvider } from "./resendProvider";
 export { LocalProvider } from "./localProvider";
 export { renderReportDeliveryEmail } from "./templates/reportDelivery";
+export { renderCheckoutReminderEmail } from "./templates/checkoutReminder";
+export { renderRecommendationNudgeEmail } from "./templates/recommendationNudge";

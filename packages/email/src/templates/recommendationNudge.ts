@@ -1,11 +1,13 @@
-interface ReportDeliveryParams {
-  assessmentName: string;
-  profileName: string;
-  reportViewUrl: string;
+interface RecommendationNudgeParams {
+  fromAssessmentName: string;
+  targetAssessmentName: string;
+  bridgeCopy: string;
+  targetUrl: string;
+  unsubscribeUrl: string;
 }
 
-/** Hand-written HTML (no external assets/fonts) so it renders consistently across email clients. */
-export function renderReportDeliveryEmail(params: ReportDeliveryParams): string {
+/** Marketing — only sent when explicit consent exists and no unsubscribe is on file. See docs/ARCHITECTURE.md §11-12. */
+export function renderRecommendationNudgeEmail(params: RecommendationNudgeParams): string {
   return `<!doctype html>
 <html>
   <body style="margin:0;padding:0;background-color:#faf6ef;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,system-ui,sans-serif;">
@@ -17,23 +19,22 @@ export function renderReportDeliveryEmail(params: ReportDeliveryParams): string 
               <td style="padding:32px 28px 8px;">
                 <p style="margin:0 0 12px;font-size:12px;letter-spacing:0.2em;text-transform:uppercase;color:#78705f;">INNER</p>
                 <h1 style="margin:0 0 16px;font-family:Georgia,'Iowan Old Style','Palatino Linotype',ui-serif,serif;font-size:24px;line-height:1.3;color:#1c1a17;">
-                  ${escapeHtml(params.assessmentName)} — your report is ready
+                  Since you explored ${escapeHtml(params.fromAssessmentName)}...
                 </h1>
                 <p style="margin:0 0 20px;font-size:15px;line-height:1.6;color:#4a453d;">
-                  Your personal profile — <strong>${escapeHtml(params.profileName)}</strong> — is attached as a PDF,
-                  and you can also view it online any time.
+                  ${escapeHtml(params.bridgeCopy)}
                 </p>
-                <a href="${params.reportViewUrl}"
+                <a href="${params.targetUrl}"
                    style="display:inline-block;background-color:#6f342a;color:#fff7ef;text-decoration:none;padding:14px 24px;border-radius:14px;font-size:15px;font-weight:500;">
-                  View My Report
+                  Try ${escapeHtml(params.targetAssessmentName)}
                 </a>
               </td>
             </tr>
             <tr>
               <td style="padding:20px 28px 28px;border-top:1px solid #e6dcc8;">
                 <p style="margin:0;font-size:12px;line-height:1.6;color:#78705f;">
-                  This is a personal reflection tool, not a clinical assessment. Your responses suggest patterns
-                  worth considering — they aren't a diagnosis or a fixed description of who you are.
+                  You're getting this because you agreed to hear about new INNER experiences.
+                  <a href="${params.unsubscribeUrl}" style="color:#78705f;">Unsubscribe</a> any time.
                 </p>
               </td>
             </tr>

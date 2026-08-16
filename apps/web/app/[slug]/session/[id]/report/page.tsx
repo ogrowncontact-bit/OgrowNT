@@ -64,7 +64,7 @@ export default async function ReportPage({ params }: { params: Promise<{ slug: s
   return (
     <Screen align="top">
       <p className="mb-3 text-xs font-medium uppercase tracking-[0.2em] text-[var(--inner-muted)]">
-        Your {config.name} Report
+        {config.name} — Full Report
       </p>
       <h1 className="font-display text-[30px] leading-tight text-[var(--inner-ink)]">{primary?.name}</h1>
 

@@ -80,7 +80,7 @@ export async function completeOrder(orderId: string): Promise<void> {
   const emailProvider = getEmailProvider();
   const sendResult = await emailProvider.send({
     to: user.email,
-    subject: `Your ${config.name} report is ready`,
+    subject: `${config.name} — your report is ready`,
     html: renderReportDeliveryEmail({ assessmentName: config.name, profileName: primary.name, reportViewUrl }),
     attachments: [{ filename: "inner-report.pdf", content: pdf, contentType: "application/pdf" }],
   });

@@ -1,4 +1,5 @@
 import { FUNNEL_STAGES, getConsentSummary, getFunnelSummary, getRecentOrders, getRevenueSummary } from "@/lib/admin/analyticsReader";
+import { ReengagementRunner } from "@/components/admin/ReengagementRunner";
 
 function formatMoney(cents: number, currency = "EUR") {
   return new Intl.NumberFormat("en-IE", { style: "currency", currency }).format(cents / 100);
@@ -45,6 +46,8 @@ export default async function AdminAnalyticsPage() {
           <p className={cardValue}>{consent.totalUnsubscribed}</p>
         </div>
       </div>
+
+      <ReengagementRunner />
 
       <h2 className="font-display mb-3 text-[18px] text-[var(--inner-ink)]">Funnel by experience</h2>
       <p className="mb-3 text-[13px] text-[var(--inner-ink-soft)]">
