@@ -5,7 +5,7 @@
 :root {
   --inner-ink: #1c1a17;
   --inner-ink-soft: #4a453d;
-  --inner-muted: #78705f;
+  --inner-muted: #635c4e; /* darkened from #78705f — that was 4.55:1 against --inner-paper, right at the WCAG AA line for the small text it's used for throughout; this is 6.15:1 */
   --inner-paper: #faf6ef;
   --inner-paper-dim: #f1eadd;
   --inner-card: #ffffff;

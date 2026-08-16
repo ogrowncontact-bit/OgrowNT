@@ -42,7 +42,11 @@ export function BeginButton({ slug }: { slug: string }) {
       <Button onClick={begin} disabled={loading}>
         {loading ? "One moment..." : "Begin"}
       </Button>
-      {error && <p className="mt-3 text-sm text-[var(--inner-accent)]">{error}</p>}
+      {error && (
+        <p role="alert" className="mt-3 text-sm text-[var(--inner-accent)]">
+          {error}
+        </p>
+      )}
     </div>
   );
 }

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { Screen, ProgressBar, OptionCard, Button, ScaleInput, OpenTextArea } from "@inner/ui";
 import type { ClientQuestion } from "@/lib/clientQuestion";
 
@@ -21,6 +21,7 @@ interface AssessmentFlowProps {
 
 export function AssessmentFlow({ slug, assessmentSessionId, initialQuestion, initialProgress }: AssessmentFlowProps) {
   const router = useRouter();
+  const reducedMotion = useReducedMotion();
   const [question, setQuestion] = useState(initialQuestion);
   const [progress, setProgress] = useState(initialProgress);
   const [selected, setSelected] = useState<string[]>([]);
@@ -98,53 +99,80 @@ export function AssessmentFlow({ slug, assessmentSessionId, initialQuestion, ini
           <Button onClick={handleContinue} disabled={!canContinue || submitting}>
             {submitting ? "..." : "Continue"}
           </Button>
-          {error && <p className="mt-3 text-sm text-[var(--inner-accent)]">{error}</p>}
+          {error && (
+            <p role="alert" className="mt-3 text-sm text-[var(--inner-accent)]">
+              {error}
+            </p>
+          )}
         </>
       }
     >
-      <AnimatePresence mode="wait">
-        <motion.div
-          key={question.key}
-          initial={{ opacity: 0, x: 16 }}
-          animate={{ opacity: 1, x: 0 }}
-          exit={{ opacity: 0, x: -16 }}
-          transition={{ duration: 0.18, ease: "easeOut" }}
-        >
-          {supportMessage && (
-            <div className="mb-6 rounded-[var(--inner-radius-md)] border border-[var(--inner-accent-soft)] bg-[var(--inner-card)] p-4">
-              <p className="text-[14px] leading-relaxed text-[var(--inner-ink-soft)]">{supportMessage}</p>
-            </div>
-          )}
-
-          <h1 className="font-display text-[26px] leading-snug text-[var(--inner-ink)]">{question.prompt}</h1>
-
-          <div className="mt-8 space-y-3">
-            {question.type === "open_text" && (
-              <OpenTextArea value={openText} onChange={setOpenText} />
+      {/* A stable (non-keyed) live region wrapping the keyed AnimatePresence content: screen
+          readers announce the new question as it swaps in, without stealing keyboard focus
+          from the Continue button the way moving focus to the heading would. */}
+      <div aria-live="polite" aria-atomic="true">
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={question.key}
+            initial={reducedMotion ? false : { opacity: 0, x: 16 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={reducedMotion ? undefined : { opacity: 0, x: -16 }}
+            transition={{ duration: 0.18, ease: "easeOut" }}
+          >
+            {supportMessage && (
+              <div
+                role="status"
+                className="mb-6 rounded-[var(--inner-radius-md)] border border-[var(--inner-accent-soft)] bg-[var(--inner-card)] p-4"
+              >
+                <p className="text-[14px] leading-relaxed text-[var(--inner-ink-soft)]">{supportMessage}</p>
+              </div>
             )}
 
-            {question.type === "scale" && question.scaleMax && (
-              <ScaleInput
-                max={question.scaleMax}
-                value={scaleValue}
-                onChange={setScaleValue}
-                lowLabel="Not much"
-                highLabel="A lot"
-              />
-            )}
+            <h1 id="question-heading" className="font-display text-[26px] leading-snug text-[var(--inner-ink)]">
+              {question.prompt}
+            </h1>
 
-            {(question.type === "single_select" || question.type === "multi_select") &&
-              question.options?.map((option) => (
-                <OptionCard
-                  key={option.key}
-                  label={option.label}
-                  selected={selected.includes(option.key)}
-                  onClick={() => toggleOption(option.key)}
+            <div className="mt-8 space-y-3">
+              {question.type === "open_text" && (
+                <>
+                  <label htmlFor="open-text-answer" className="sr-only">
+                    {question.prompt}
+                  </label>
+                  <OpenTextArea id="open-text-answer" value={openText} onChange={setOpenText} />
+                </>
+              )}
+
+              {question.type === "scale" && question.scaleMax && (
+                <ScaleInput
+                  max={question.scaleMax}
+                  value={scaleValue}
+                  onChange={setScaleValue}
+                  lowLabel="Not much"
+                  highLabel="A lot"
                 />
-              ))}
-          </div>
-        </motion.div>
-      </AnimatePresence>
+              )}
+
+              {(question.type === "single_select" || question.type === "multi_select") && (
+                <div
+                  role={question.type === "single_select" ? "radiogroup" : "group"}
+                  aria-labelledby="question-heading"
+                  className="space-y-3"
+                >
+                  {question.options?.map((option) => (
+                    <OptionCard
+                      key={option.key}
+                      variant={question.type === "single_select" ? "radio" : "checkbox"}
+                      label={option.label}
+                      selected={selected.includes(option.key)}
+                      onClick={() => toggleOption(option.key)}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+          </motion.div>
+        </AnimatePresence>
+      </div>
     </Screen>
   );
 }

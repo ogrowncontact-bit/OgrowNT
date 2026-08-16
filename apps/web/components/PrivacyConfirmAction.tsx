@@ -53,7 +53,11 @@ export function PrivacyConfirmAction({ token, action }: { token: string; action:
       <Button onClick={handleConfirm} disabled={submitting}>
         {submitting ? "..." : action === "export" ? "Download My Data" : "Permanently Delete My Data"}
       </Button>
-      {error && <p className="mt-3 text-sm text-[var(--inner-accent)]">{error}</p>}
+      {error && (
+        <p role="alert" className="mt-3 text-sm text-[var(--inner-accent)]">
+          {error}
+        </p>
+      )}
     </div>
   );
 }

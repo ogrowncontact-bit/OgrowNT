@@ -31,7 +31,11 @@ export function AdminLoginForm() {
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
+      <label htmlFor="admin-email" className="sr-only">
+        Email
+      </label>
       <input
+        id="admin-email"
         type="email"
         placeholder="Email"
         autoComplete="username"
@@ -39,7 +43,11 @@ export function AdminLoginForm() {
         onChange={(e) => setEmail(e.target.value)}
         className="w-full rounded-[var(--inner-radius-md)] border border-[var(--inner-line)] bg-[var(--inner-card)] px-4 py-3 text-[15px] text-[var(--inner-ink)] focus:border-[var(--inner-accent)] focus:outline-none"
       />
+      <label htmlFor="admin-password" className="sr-only">
+        Password
+      </label>
       <input
+        id="admin-password"
         type="password"
         placeholder="Password"
         autoComplete="current-password"
@@ -47,7 +55,11 @@ export function AdminLoginForm() {
         onChange={(e) => setPassword(e.target.value)}
         className="w-full rounded-[var(--inner-radius-md)] border border-[var(--inner-line)] bg-[var(--inner-card)] px-4 py-3 text-[15px] text-[var(--inner-ink)] focus:border-[var(--inner-accent)] focus:outline-none"
       />
-      {error && <p className="text-sm text-[var(--inner-accent)]">{error}</p>}
+      {error && (
+        <p role="alert" className="text-sm text-[var(--inner-accent)]">
+          {error}
+        </p>
+      )}
       <button
         type="submit"
         disabled={submitting}

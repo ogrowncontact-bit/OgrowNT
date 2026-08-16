@@ -46,12 +46,18 @@ export function CheckoutForm({ slug, assessmentSessionId, priceLabel }: Checkout
           <Button onClick={handleSubmit} disabled={!emailValid || submitting}>
             {submitting ? "..." : `Continue to Payment — ${priceLabel}`}
           </Button>
-          {error && <p className="mt-3 text-sm text-[var(--inner-accent)]">{error}</p>}
+          {error && (
+            <p role="alert" className="mt-3 text-sm text-[var(--inner-accent)]">
+              {error}
+            </p>
+          )}
         </>
       }
     >
       <p className="mb-3 text-xs font-medium uppercase tracking-[0.2em] text-[var(--inner-muted)]">Almost there</p>
-      <h1 className="font-display text-[26px] leading-snug text-[var(--inner-ink)]">Where should we send your report?</h1>
+      <h1 id="checkout-email-heading" className="font-display text-[26px] leading-snug text-[var(--inner-ink)]">
+        Where should we send your report?
+      </h1>
 
       <div className="mt-8">
         <input
@@ -59,6 +65,7 @@ export function CheckoutForm({ slug, assessmentSessionId, priceLabel }: Checkout
           inputMode="email"
           autoComplete="email"
           placeholder="you@example.com"
+          aria-labelledby="checkout-email-heading"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           className="w-full rounded-[var(--inner-radius-md)] border border-[var(--inner-line)] bg-[var(--inner-card)] px-4 py-4 text-[16px] text-[var(--inner-ink)] placeholder:text-[var(--inner-muted)] focus:border-[var(--inner-accent)] focus:outline-none"

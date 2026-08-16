@@ -26,7 +26,11 @@ export function MockPaymentForm({ orderId }: { orderId: string }) {
       <Button onClick={handleComplete} disabled={submitting}>
         {submitting ? "Generating your report..." : "Simulate Successful Payment"}
       </Button>
-      {error && <p className="mt-3 text-sm text-[var(--inner-accent)]">{error}</p>}
+      {error && (
+        <p role="alert" className="mt-3 text-sm text-[var(--inner-accent)]">
+          {error}
+        </p>
+      )}
     </div>
   );
 }

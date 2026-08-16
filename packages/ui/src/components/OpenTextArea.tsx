@@ -2,11 +2,13 @@ interface OpenTextAreaProps {
   value: string;
   onChange: (value: string) => void;
   placeholder?: string;
+  id?: string;
 }
 
-export function OpenTextArea({ value, onChange, placeholder }: OpenTextAreaProps) {
+export function OpenTextArea({ value, onChange, placeholder, id }: OpenTextAreaProps) {
   return (
     <textarea
+      id={id}
       value={value}
       onChange={(e) => onChange(e.target.value)}
       placeholder={placeholder ?? "Take your time..."}

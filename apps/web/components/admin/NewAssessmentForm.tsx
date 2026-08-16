@@ -61,7 +61,11 @@ export function NewAssessmentForm() {
         <label className="mb-1 block text-[13px] text-[var(--inner-muted)]">Target audience</label>
         <input value={form.targetAudience} onChange={(e) => update("targetAudience", e.target.value)} className={inputClass} required />
       </div>
-      {error && <p className="text-sm text-[var(--inner-accent)]">{error}</p>}
+      {error && (
+        <p role="alert" className="text-sm text-[var(--inner-accent)]">
+          {error}
+        </p>
+      )}
       <button
         type="submit"
         disabled={submitting}

@@ -10,13 +10,15 @@ export function ScaleInput({ max, value, onChange, lowLabel, highLabel }: ScaleI
   const steps = Array.from({ length: max }, (_, i) => i + 1);
   return (
     <div>
-      <div className="flex justify-between gap-2">
+      <div role="radiogroup" aria-label={`Scale from ${lowLabel} to ${highLabel}`} className="flex justify-between gap-2">
         {steps.map((step) => (
           <button
             key={step}
             type="button"
+            role="radio"
             onClick={() => onChange(step)}
-            aria-pressed={value === step}
+            aria-checked={value === step}
+            aria-label={`${step} of ${max}${step === 1 ? ` — ${lowLabel}` : step === max ? ` — ${highLabel}` : ""}`}
             className={[
               "flex h-14 flex-1 items-center justify-center rounded-[var(--inner-radius-sm)] border text-[17px] font-medium transition-colors",
               value === step
@@ -28,7 +30,7 @@ export function ScaleInput({ max, value, onChange, lowLabel, highLabel }: ScaleI
           </button>
         ))}
       </div>
-      <div className="mt-2 flex justify-between text-xs text-[var(--inner-muted)]">
+      <div aria-hidden="true" className="mt-2 flex justify-between text-xs text-[var(--inner-muted)]">
         <span>{lowLabel}</span>
         <span>{highLabel}</span>
       </div>

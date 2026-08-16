@@ -53,7 +53,11 @@ export function PrivacyRequestForm() {
       </p>
 
       <div className="mt-8">
+        <label htmlFor="privacy-email" className="sr-only">
+          Email
+        </label>
         <input
+          id="privacy-email"
           type="email"
           inputMode="email"
           autoComplete="email"
@@ -63,7 +67,7 @@ export function PrivacyRequestForm() {
           className="w-full rounded-[var(--inner-radius-md)] border border-[var(--inner-line)] bg-[var(--inner-card)] px-4 py-4 text-[16px] text-[var(--inner-ink)] placeholder:text-[var(--inner-muted)] focus:border-[var(--inner-accent)] focus:outline-none"
         />
 
-        <div className="mt-5 flex gap-3">
+        <div role="radiogroup" aria-label="What would you like to do?" className="mt-5 flex gap-3">
           <label className="flex flex-1 items-center gap-2 rounded-[var(--inner-radius-md)] border border-[var(--inner-line)] p-3 text-[14px] text-[var(--inner-ink)]">
             <input type="radio" name="action" checked={action === "export"} onChange={() => setAction("export")} />
             Export my data

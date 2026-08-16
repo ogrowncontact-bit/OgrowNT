@@ -41,7 +41,11 @@ export function ReengagementRunner() {
           {running ? "Running..." : "Run now"}
         </button>
       </div>
-      {error && <p className="mt-3 text-[13px] text-[var(--inner-accent)]">{error}</p>}
+      {error && (
+        <p role="alert" className="mt-3 text-[13px] text-[var(--inner-accent)]">
+          {error}
+        </p>
+      )}
       {result && (
         <p className="mt-3 text-[13px] text-[var(--inner-ink-soft)]">
           Checkout reminders: {result.checkoutReminders.sent} sent, {result.checkoutReminders.skipped} skipped.
