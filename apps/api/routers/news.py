@@ -2,15 +2,17 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from apps.api.deps import get_session
+from apps.api.deps import get_current_admin, get_session
 from apps.api.schemas import NewsEventOut, NewsImpactOut
-from packages.shared.models import Asset, NewsEvent, NewsImpact
+from packages.shared.models import AdminUser, Asset, NewsEvent, NewsImpact
 
 router = APIRouter(prefix="/api/news", tags=["news"])
 
 
 @router.get("", response_model=list[NewsEventOut])
-def list_news(limit: int = 50, db: Session = Depends(get_session)) -> list[NewsEventOut]:
+def list_news(
+    limit: int = 50, db: Session = Depends(get_session), _: AdminUser = Depends(get_current_admin)
+) -> list[NewsEventOut]:
     events = db.execute(select(NewsEvent).order_by(NewsEvent.published_at.desc()).limit(limit)).scalars().all()
 
     out = []

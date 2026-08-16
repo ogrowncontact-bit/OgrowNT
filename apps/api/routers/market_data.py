@@ -3,9 +3,9 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from apps.api.deps import get_session
+from apps.api.deps import get_current_admin, get_session
 from apps.api.schemas import CandleOut
-from packages.shared.models import OHLCV, Asset
+from packages.shared.models import OHLCV, AdminUser, Asset
 
 router = APIRouter(prefix="/api/market-data", tags=["market-data"])
 
@@ -24,6 +24,7 @@ def get_market_data(
     since: datetime | None = None,
     limit: int = 500,
     db: Session = Depends(get_session),
+    _: AdminUser = Depends(get_current_admin),
 ) -> list[OHLCV]:
     _get_asset_or_404(asset_id, db)
     query = db.query(OHLCV).filter(OHLCV.asset_id == asset_id, OHLCV.timeframe == timeframe)
@@ -37,6 +38,7 @@ def get_latest_market_data(
     asset_id: int,
     timeframe: str = "1m",
     db: Session = Depends(get_session),
+    _: AdminUser = Depends(get_current_admin),
 ) -> OHLCV:
     _get_asset_or_404(asset_id, db)
     candle = (

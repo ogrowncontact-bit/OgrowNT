@@ -13,6 +13,7 @@ def list_assets(
     asset_class: str | None = None,
     is_active: bool | None = None,
     db: Session = Depends(get_session),
+    _: AdminUser = Depends(get_current_admin),
 ) -> list[Asset]:
     query = db.query(Asset)
     if asset_class:

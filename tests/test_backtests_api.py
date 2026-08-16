@@ -85,19 +85,25 @@ def test_list_and_get_backtest(client, db_session):
     )
     run_id = create_resp.json()["id"]
 
-    list_resp = client.get(f"/api/backtests?strategy_id={strategy.id}")
+    list_resp = client.get(f"/api/backtests?strategy_id={strategy.id}", headers={"Authorization": f"Bearer {token}"})
     assert list_resp.status_code == 200
     assert any(r["id"] == run_id for r in list_resp.json())
     assert "equity_curve" not in list_resp.json()[0]  # summary view stays lean
 
-    detail_resp = client.get(f"/api/backtests/{run_id}")
+    detail_resp = client.get(f"/api/backtests/{run_id}", headers={"Authorization": f"Bearer {token}"})
     assert detail_resp.status_code == 200
     assert detail_resp.json()["id"] == run_id
     assert "equity_curve" in detail_resp.json()
 
 
+def test_list_backtests_requires_auth(client, db_session):
+    resp = client.get("/api/backtests")
+    assert resp.status_code == 401
+
+
 def test_get_unknown_backtest_404s(client, db_session):
-    resp = client.get("/api/backtests/999999")
+    token = _login(client, db_session)
+    resp = client.get("/api/backtests/999999", headers={"Authorization": f"Bearer {token}"})
     assert resp.status_code == 404
 
 
@@ -138,9 +144,16 @@ def test_backtest_unregistered_strategy_code_rejected(client, db_session):
     assert resp.status_code == 400
 
 
-def test_promotion_check_is_read_only_and_public(client, db_session):
-    strategy = _strategy(db_session, "promo_check_v1")
+def test_promotion_check_requires_auth(client, db_session):
+    strategy = _strategy(db_session, "promo_check_noauth_v1")
     resp = client.get(f"/api/strategies/{strategy.id}/promotion-check")
+    assert resp.status_code == 401
+
+
+def test_promotion_check_is_read_only(client, db_session):
+    strategy = _strategy(db_session, "promo_check_v1")
+    token = _login(client, db_session)
+    resp = client.get(f"/api/strategies/{strategy.id}/promotion-check", headers={"Authorization": f"Bearer {token}"})
     assert resp.status_code == 200
     body = resp.json()
     assert body["eligible"] is False

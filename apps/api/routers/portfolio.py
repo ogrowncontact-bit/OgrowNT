@@ -2,15 +2,15 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from apps.api.deps import get_session
+from apps.api.deps import get_current_admin, get_session
 from apps.api.schemas import PortfolioResponse, PortfolioSnapshotOut
-from packages.shared.models import PortfolioSnapshot
+from packages.shared.models import AdminUser, PortfolioSnapshot
 
 router = APIRouter(tags=["portfolio"])
 
 
 @router.get("/api/portfolio", response_model=PortfolioResponse)
-def get_portfolio(db: Session = Depends(get_session)) -> PortfolioResponse:
+def get_portfolio(db: Session = Depends(get_session), _: AdminUser = Depends(get_current_admin)) -> PortfolioResponse:
     latest = db.execute(
         select(PortfolioSnapshot).order_by(PortfolioSnapshot.ts.desc()).limit(1)
     ).scalar_one_or_none()
@@ -31,7 +31,9 @@ def get_portfolio(db: Session = Depends(get_session)) -> PortfolioResponse:
 
 
 @router.get("/api/portfolio/history", response_model=list[PortfolioSnapshotOut])
-def get_portfolio_history(limit: int = 500, db: Session = Depends(get_session)) -> list[PortfolioSnapshot]:
+def get_portfolio_history(
+    limit: int = 500, db: Session = Depends(get_session), _: AdminUser = Depends(get_current_admin)
+) -> list[PortfolioSnapshot]:
     return (
         db.execute(select(PortfolioSnapshot).order_by(PortfolioSnapshot.ts.desc()).limit(limit))
         .scalars()

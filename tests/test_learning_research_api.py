@@ -34,7 +34,8 @@ def test_strategy_performance_list_includes_health_score(client, db_session):
     )
     db_session.commit()
 
-    resp = client.get("/api/learning/strategy-performance")
+    token = _login(client, db_session)
+    resp = client.get("/api/learning/strategy-performance", headers={"Authorization": f"Bearer {token}"})
     assert resp.status_code == 200
     matching = [r for r in resp.json() if r["strategy_code"] == "learnapi_v1"]
     assert len(matching) == 1
@@ -42,12 +43,18 @@ def test_strategy_performance_list_includes_health_score(client, db_session):
     assert matching[0]["best_regime"] == "trending_bull"
 
 
+def test_strategy_performance_requires_auth(client, db_session):
+    resp = client.get("/api/learning/strategy-performance")
+    assert resp.status_code == 401
+
+
 def test_strategy_performance_list_handles_strategy_with_no_history(client, db_session):
     strategy = StrategyRow(code="learnapi_empty_v1", name="learnapi_empty_v1", family="trend", version="1.0")
     db_session.add(strategy)
     db_session.commit()
 
-    resp = client.get("/api/learning/strategy-performance")
+    token = _login(client, db_session)
+    resp = client.get("/api/learning/strategy-performance", headers={"Authorization": f"Bearer {token}"})
     matching = [r for r in resp.json() if r["strategy_code"] == "learnapi_empty_v1"]
     assert len(matching) == 1
     assert matching[0]["health_score"] is None
@@ -71,7 +78,8 @@ def test_trade_journal_list_returns_recent_entries(client, db_session):
     db_session.add(TradeJournal(trade_id=trade.id, expected_outcome="win", actual_outcome="loss", hypothesis="Regime shifted.", root_cause="regime_shift"))
     db_session.commit()
 
-    resp = client.get("/api/learning/trade-journal?limit=50")
+    token = _login(client, db_session)
+    resp = client.get("/api/learning/trade-journal?limit=50", headers={"Authorization": f"Bearer {token}"})
     assert resp.status_code == 200
     matching = [r for r in resp.json() if r["asset_symbol"] == "JOURNALAPI"]
     assert len(matching) == 1
@@ -87,12 +95,16 @@ def test_market_memory_list_and_similar(client, db_session):
     db_session.add(MarketMemory(ts=datetime.now(timezone.utc), asset_id=asset.id, context={"regime": "trending_bull", "pattern_type": "momentum", "direction": "long"}, outcome="win"))
     db_session.commit()
 
-    resp = client.get("/api/learning/memory?limit=50")
+    token = _login(client, db_session)
+    resp = client.get("/api/learning/memory?limit=50", headers={"Authorization": f"Bearer {token}"})
     assert resp.status_code == 200
     matching = [r for r in resp.json() if r["asset_symbol"] == "MEMAPI"]
     assert len(matching) == 1
 
-    similar = client.get("/api/learning/memory/similar?regime=trending_bull&pattern_type=momentum&direction=long")
+    similar = client.get(
+        "/api/learning/memory/similar?regime=trending_bull&pattern_type=momentum&direction=long",
+        headers={"Authorization": f"Bearer {token}"},
+    )
     assert similar.status_code == 200
     assert any(r["asset_symbol"] == "MEMAPI" for r in similar.json())
 
@@ -102,7 +114,8 @@ def test_learned_rules_filters_by_status(client, db_session):
     db_session.add(LearnedRule(scope="strategy:foo_v1", condition={}, conclusion="validated rule", confidence=0.8, sample_size=25, status="validated"))
     db_session.commit()
 
-    resp = client.get("/api/research/rules?status=validated")
+    token = _login(client, db_session)
+    resp = client.get("/api/research/rules?status=validated", headers={"Authorization": f"Bearer {token}"})
     assert resp.status_code == 200
     conclusions = {r["conclusion"] for r in resp.json()}
     assert "validated rule" in conclusions

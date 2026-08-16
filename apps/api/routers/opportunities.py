@@ -2,15 +2,17 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from apps.api.deps import get_session
+from apps.api.deps import get_current_admin, get_session
 from apps.api.schemas import OpportunityDetailOut, OpportunityOut, RegimeOut, ScoreBreakdown
-from packages.shared.models import Asset, MarketRegime, OpportunityScore, Signal, StrategyRow
+from packages.shared.models import AdminUser, Asset, MarketRegime, OpportunityScore, Signal, StrategyRow
 
 router = APIRouter(tags=["opportunities"])
 
 
 @router.get("/api/opportunities", response_model=list[OpportunityOut])
-def list_opportunities(limit: int = 50, db: Session = Depends(get_session)) -> list[OpportunityOut]:
+def list_opportunities(
+    limit: int = 50, db: Session = Depends(get_session), _: AdminUser = Depends(get_current_admin)
+) -> list[OpportunityOut]:
     rows = db.execute(
         select(Signal, Asset, StrategyRow, MarketRegime, OpportunityScore)
         .join(Asset, Asset.id == Signal.asset_id)
@@ -45,7 +47,9 @@ def list_opportunities(limit: int = 50, db: Session = Depends(get_session)) -> l
 
 
 @router.get("/api/opportunities/{signal_id}", response_model=OpportunityDetailOut)
-def get_opportunity(signal_id: int, db: Session = Depends(get_session)) -> OpportunityDetailOut:
+def get_opportunity(
+    signal_id: int, db: Session = Depends(get_session), _: AdminUser = Depends(get_current_admin)
+) -> OpportunityDetailOut:
     row = db.execute(
         select(Signal, Asset, StrategyRow, MarketRegime, OpportunityScore)
         .join(Asset, Asset.id == Signal.asset_id)
@@ -97,7 +101,9 @@ def get_opportunity(signal_id: int, db: Session = Depends(get_session)) -> Oppor
 
 
 @router.get("/api/signals", response_model=list[OpportunityOut])
-def list_signals(limit: int = 100, db: Session = Depends(get_session)) -> list[OpportunityOut]:
+def list_signals(
+    limit: int = 100, db: Session = Depends(get_session), _: AdminUser = Depends(get_current_admin)
+) -> list[OpportunityOut]:
     """All signals regardless of tier (including 'ignore') — the full record
     of what the Strategy Engine considered, for audit/debugging. The
     dashboard's opportunity list uses /api/opportunities instead, which
@@ -136,7 +142,9 @@ def list_signals(limit: int = 100, db: Session = Depends(get_session)) -> list[O
 
 
 @router.get("/api/regime", response_model=list[RegimeOut])
-def get_regime(asset_id: int | None = None, db: Session = Depends(get_session)) -> list[RegimeOut]:
+def get_regime(
+    asset_id: int | None = None, db: Session = Depends(get_session), _: AdminUser = Depends(get_current_admin)
+) -> list[RegimeOut]:
     """Latest known regime per asset (docs/blueprint/04-agents-architecture.md#agent-06)."""
     query = select(MarketRegime, Asset).join(Asset, Asset.id == MarketRegime.asset_id)
     if asset_id is not None:

@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from apps.api.deps import get_session
+from apps.api.deps import get_current_admin, get_session
 from apps.api.schemas import (
     OpportunityDetailOut,
     OrderOut,
@@ -15,6 +15,7 @@ from apps.api.schemas import (
 )
 from packages.shared.market_data import get_latest_close
 from packages.shared.models import (
+    AdminUser,
     Asset,
     MarketRegime,
     OpportunityScore,
@@ -57,7 +58,9 @@ def _position_out(db: Session, position: Position, asset: Asset, strategy: Strat
 
 
 @router.get("/api/positions", response_model=list[PositionOut])
-def list_positions(status_filter: str = "open", db: Session = Depends(get_session)) -> list[PositionOut]:
+def list_positions(
+    status_filter: str = "open", db: Session = Depends(get_session), _: AdminUser = Depends(get_current_admin)
+) -> list[PositionOut]:
     query = db.query(Position)
     if status_filter in ("open", "closed"):
         query = query.filter(Position.status == status_filter)
@@ -72,12 +75,16 @@ def list_positions(status_filter: str = "open", db: Session = Depends(get_sessio
 
 
 @router.get("/api/orders", response_model=list[OrderOut])
-def list_orders(limit: int = 100, db: Session = Depends(get_session)) -> list[Order]:
+def list_orders(
+    limit: int = 100, db: Session = Depends(get_session), _: AdminUser = Depends(get_current_admin)
+) -> list[Order]:
     return db.execute(select(Order).order_by(Order.id.desc()).limit(limit)).scalars().all()
 
 
 @router.get("/api/trades", response_model=list[TradeOut])
-def list_trades(limit: int = 100, db: Session = Depends(get_session)) -> list[TradeOut]:
+def list_trades(
+    limit: int = 100, db: Session = Depends(get_session), _: AdminUser = Depends(get_current_admin)
+) -> list[TradeOut]:
     rows = db.execute(
         select(Trade, Position, Asset, StrategyRow)
         .join(Position, Position.id == Trade.position_id)
@@ -97,7 +104,9 @@ def list_trades(limit: int = 100, db: Session = Depends(get_session)) -> list[Tr
 
 
 @router.get("/api/trades/{trade_id}/why", response_model=TradeWhyOut)
-def get_trade_why(trade_id: int, db: Session = Depends(get_session)) -> TradeWhyOut:
+def get_trade_why(
+    trade_id: int, db: Session = Depends(get_session), _: AdminUser = Depends(get_current_admin)
+) -> TradeWhyOut:
     row = db.execute(
         select(Trade, Position, Asset, StrategyRow)
         .join(Position, Position.id == Trade.position_id)

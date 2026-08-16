@@ -11,12 +11,16 @@ router = APIRouter(prefix="/api/strategies", tags=["strategies"])
 
 
 @router.get("", response_model=list[StrategyOut])
-def list_strategies(db: Session = Depends(get_session)) -> list[StrategyRow]:
+def list_strategies(
+    db: Session = Depends(get_session), _: AdminUser = Depends(get_current_admin)
+) -> list[StrategyRow]:
     return db.query(StrategyRow).order_by(StrategyRow.code).all()
 
 
 @router.get("/{strategy_id}/performance", response_model=StrategyPerformanceOut)
-def get_strategy_performance(strategy_id: int, db: Session = Depends(get_session)) -> StrategyPerformanceOut:
+def get_strategy_performance(
+    strategy_id: int, db: Session = Depends(get_session), _: AdminUser = Depends(get_current_admin)
+) -> StrategyPerformanceOut:
     strategy = db.get(StrategyRow, strategy_id)
     if strategy is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Strategy not found")
@@ -63,10 +67,15 @@ def restore_strategy(
 
 
 @router.get("/{strategy_id}/promotion-check", response_model=PromotionCheckOut)
-def check_promotion(strategy_id: int, db: Session = Depends(get_session)) -> PromotionCheckOut:
+def check_promotion(
+    strategy_id: int, db: Session = Depends(get_session), _: AdminUser = Depends(get_current_admin)
+) -> PromotionCheckOut:
     """Read-only: does this strategy currently qualify for the next lifecycle
     stage, and if not, exactly why (docs/blueprint/10-backtesting-paper-trading.md
-    §Critério de promoção mínimo)."""
+    §Critério de promoção mínimo). Still admin-gated like every other read here
+    (docs/blueprint/03-api-spec.md requires Bearer auth on everything except
+    /api/auth/login and /api/system/health) — "read-only" affects blast
+    radius, not whether it needs authentication."""
     verdict = evaluate_promotion(db, strategy_id)
     return PromotionCheckOut(
         strategy_id=strategy_id, eligible=verdict.eligible, current_stage=verdict.current_stage,

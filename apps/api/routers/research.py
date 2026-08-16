@@ -1,15 +1,18 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
-from apps.api.deps import get_session
+from apps.api.deps import get_current_admin, get_session
 from apps.api.schemas import LearnedRuleOut
-from packages.shared.models import LearnedRule
+from packages.shared.models import AdminUser, LearnedRule
 
 router = APIRouter(prefix="/api/research", tags=["research"])
 
 
 @router.get("/rules", response_model=list[LearnedRuleOut])
-def list_learned_rules(status: str | None = None, limit: int = 50, db: Session = Depends(get_session)) -> list[LearnedRule]:
+def list_learned_rules(
+    status: str | None = None, limit: int = 50,
+    db: Session = Depends(get_session), _: AdminUser = Depends(get_current_admin),
+) -> list[LearnedRule]:
     query = db.query(LearnedRule)
     if status is not None:
         query = query.filter(LearnedRule.status == status)

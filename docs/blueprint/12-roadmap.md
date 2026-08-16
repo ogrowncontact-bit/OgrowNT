@@ -380,6 +380,59 @@ notificam, nunca decidem; a otimização de parâmetros nunca escreve nos
 parâmetros por omissão de uma estratégia; `Order.is_paper`/`Trade.is_paper`
 continuam sempre `true`.
 
+## Hardening de segurança (pós-Fase 7) — **status: implementada e validada nesta sessão**
+
+Com as 7 fases do blueprint completas, uma revisão de segurança dedicada
+(metodologia: um agente de identificação sobre o branch inteiro, seguido de
+um agente de verificação independente por achado candidato — cada um
+julgando exploitabilidade concreta contra critérios explícitos de falso
+positivo — e só reportando achados com confiança ≥ 8/10) encontrou 3 lacunas
+reais, todas corrigidas nesta sessão:
+
+- [x] **~30 endpoints `GET` sem autenticação** (`/api/portfolio`,
+      `/api/trades`, `/api/trades/{id}/why`, `/api/opportunities`,
+      `/api/backtests`, `/api/learning/*`, `/api/research/rules`,
+      `/api/news`, `/api/patterns*`, `/api/analytics/overview`,
+      `/api/strategies*`, `/api/market-data/*`, `/api/assets`, `/api/alerts`)
+      — contradizia diretamente `docs/blueprint/03-api-spec.md` ("Todas as
+      rotas abaixo, exceto `/api/auth/login` e `/api/system/health`, exigem
+      `Authorization: Bearer <token>`") e era explorável no deployment
+      padrão (`docker-compose up`, API exposta em `0.0.0.0:8000`). Corrigido
+      adicionando `Depends(get_current_admin)` a cada um; o dashboard
+      (`apps/dashboard/lib/api.ts`) agora passa o token em cada fetcher; 14
+      novos testes `requires_auth` cobrem cada endpoint corrigido
+- [x] **JWT_SECRET/ADMIN_PASSWORD com valores por omissão públicos e sem
+      guarda de arranque** (`change-me-to-a-long-random-string`/`change-me`,
+      idênticos ao `.env.example` commitado) — nada impedia o sistema de
+      arrancar com esses valores, permitindo forjar um JWT admin válido.
+      Corrigido com um `model_validator` em `packages/shared/settings.py`
+      que recusa arrancar (`ValueError`) se `jwt_secret`/`admin_password`
+      ainda forem exatamente os placeholders — verificado a bloquear o
+      arranque com os valores por omissão e a passar com valores reais,
+      sem afetar testes/CI (que já usam segredos fixos mas diferentes)
+- [x] **CORS `allow_origins=["*"]`** — combinado com o achado anterior,
+      permitia que qualquer página que o browser do operador visitasse lesse
+      respostas da API via `fetch()` cross-origin. Corrigido com
+      `CORS_ALLOWED_ORIGINS` (`packages/shared/settings.py`), por omissão
+      restrito às origens do próprio dashboard (`localhost:3000`/
+      `127.0.0.1:3000`) — verificado ao vivo: preflight de uma origem
+      permitida devolve `Access-Control-Allow-Origin`, uma origem arbitrária
+      não devolve nada
+- [x] verificado ao vivo contra Postgres real: `curl` sem token a
+      `/api/portfolio`/`/api/trades`/`/api/analytics/overview` devolve 401;
+      `/api/system/health` continua público (200); login com a nova
+      password funciona; todos os endpoints antes abertos devolvem 200 com
+      token válido; dashboard testado via build de produção + login real —
+      todos os painéis (incluindo o novo Equity Curve/Analytics) continuam a
+      mostrar dados reais, zero fugas 401
+- [x] 14 novos testes automatizados (316/316 no total da suite, confirmado
+      em três corridas consecutivas, incluindo uma migração `alembic upgrade
+      head` completa 0001→0007 contra uma base de dados nova)
+
+Nada nesta secção altera comportamento de trading: são apenas correções de
+controlo de acesso e configuração — nenhuma lógica de scoring, risco ou
+execução foi tocada.
+
 ## Evolução futura (fora de âmbito até validação completa)
 
 Live brokers, exchanges reais (crypto/forex/ações), ML avançado, deep learning,

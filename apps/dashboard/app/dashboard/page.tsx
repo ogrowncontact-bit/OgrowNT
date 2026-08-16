@@ -38,23 +38,23 @@ export default async function DashboardPage() {
     await Promise.all([
       getHealth(),
       getSystemStatus(token),
-      getPortfolio(),
-      getAssets(),
-      getPositions("open"),
-      getOpportunities(10),
-      getRegimes(),
-      getTrades(8),
-      getNews(6),
-      getStrategyLearning(),
-      getTradeJournal(6),
-      getLearnedRules(6),
-      getAlerts(8),
+      getPortfolio(token),
+      getAssets(token),
+      getPositions(token, "open"),
+      getOpportunities(token, 10),
+      getRegimes(token),
+      getTrades(token, 8),
+      getNews(token, 6),
+      getStrategyLearning(token),
+      getTradeJournal(token, 6),
+      getLearnedRules(token, 6),
+      getAlerts(token, 8),
     ]);
 
   const [backtests, promotionChecks, analytics] = await Promise.all([
-    getBacktests(8),
-    Promise.all((strategyLearning ?? []).map((s) => getPromotionCheck(s.strategy_id))),
-    getAnalyticsOverview(),
+    getBacktests(token, 8),
+    Promise.all((strategyLearning ?? []).map((s) => getPromotionCheck(token, s.strategy_id))),
+    getAnalyticsOverview(token),
   ]);
   const promotionByStrategyId = new Map(
     (strategyLearning ?? []).map((s, i) => [s.strategy_id, promotionChecks[i]])

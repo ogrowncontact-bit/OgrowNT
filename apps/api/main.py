@@ -8,6 +8,7 @@ from apps.api.routers import (
     portfolio, research, risk, strategies, system, trading,
 )
 from packages.shared.logging import configure_logging
+from packages.shared.settings import get_settings
 
 logger = configure_logging("api")
 
@@ -25,10 +26,14 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Single-user dashboard served from a known origin; tighten if deployed beyond localhost.
+# Single-user dashboard served from a known, configured origin
+# (CORS_ALLOWED_ORIGINS) — never "*". Every read/write endpoint below except
+# /api/auth/login and /api/system/health requires a Bearer token anyway, but
+# a wildcard origin would still let any webpage the operator's browser
+# visits attempt cross-origin requests against this API.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[o.strip() for o in get_settings().cors_allowed_origins.split(",") if o.strip()],
     allow_methods=["*"],
     allow_headers=["*"],
 )

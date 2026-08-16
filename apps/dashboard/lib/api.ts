@@ -218,23 +218,28 @@ async function apiFetch<T>(path: string, token?: string): Promise<T | null> {
   }
 }
 
+// getHealth is the one deliberately public read (docs/blueprint/03-api-spec.md
+// exempts /api/system/health, same as /api/auth/login) — every other read
+// below requires the admin's Bearer token, same as every mutating endpoint.
 export const getHealth = () => apiFetch<HealthResponse>("/api/system/health");
 export const getSystemStatus = (token: string) => apiFetch<SystemStatus>("/api/system/status", token);
-export const getPortfolio = () => apiFetch<Portfolio>("/api/portfolio");
-export const getAssets = () => apiFetch<Asset[]>("/api/assets");
-export const getPositions = (statusFilter: "open" | "closed" = "open") =>
-  apiFetch<Position[]>(`/api/positions?status_filter=${statusFilter}`);
-export const getOpportunities = (limit = 10) => apiFetch<Opportunity[]>(`/api/opportunities?limit=${limit}`);
-export const getRegimes = () => apiFetch<Regime[]>("/api/regime");
-export const getTrades = (limit = 10) => apiFetch<Trade[]>(`/api/trades?limit=${limit}`);
-export const getNews = (limit = 10) => apiFetch<NewsEvent[]>(`/api/news?limit=${limit}`);
-export const getStrategyLearning = () => apiFetch<StrategyLearning[]>("/api/learning/strategy-performance");
-export const getTradeJournal = (limit = 10) => apiFetch<TradeJournalEntry[]>(`/api/learning/trade-journal?limit=${limit}`);
-export const getLearnedRules = (limit = 10) => apiFetch<LearnedRule[]>(`/api/research/rules?limit=${limit}`);
-export const getBacktests = (limit = 10) => apiFetch<BacktestSummary[]>(`/api/backtests?limit=${limit}`);
-export const getPromotionCheck = (strategyId: number) => apiFetch<PromotionCheck>(`/api/strategies/${strategyId}/promotion-check`);
-export const getAlerts = (limit = 10) => apiFetch<SystemAlert[]>(`/api/alerts?limit=${limit}`);
-export const getAnalyticsOverview = () => apiFetch<AnalyticsOverview>("/api/analytics/overview");
+export const getPortfolio = (token: string) => apiFetch<Portfolio>("/api/portfolio", token);
+export const getAssets = (token: string) => apiFetch<Asset[]>("/api/assets", token);
+export const getPositions = (token: string, statusFilter: "open" | "closed" = "open") =>
+  apiFetch<Position[]>(`/api/positions?status_filter=${statusFilter}`, token);
+export const getOpportunities = (token: string, limit = 10) => apiFetch<Opportunity[]>(`/api/opportunities?limit=${limit}`, token);
+export const getRegimes = (token: string) => apiFetch<Regime[]>("/api/regime", token);
+export const getTrades = (token: string, limit = 10) => apiFetch<Trade[]>(`/api/trades?limit=${limit}`, token);
+export const getNews = (token: string, limit = 10) => apiFetch<NewsEvent[]>(`/api/news?limit=${limit}`, token);
+export const getStrategyLearning = (token: string) => apiFetch<StrategyLearning[]>("/api/learning/strategy-performance", token);
+export const getTradeJournal = (token: string, limit = 10) =>
+  apiFetch<TradeJournalEntry[]>(`/api/learning/trade-journal?limit=${limit}`, token);
+export const getLearnedRules = (token: string, limit = 10) => apiFetch<LearnedRule[]>(`/api/research/rules?limit=${limit}`, token);
+export const getBacktests = (token: string, limit = 10) => apiFetch<BacktestSummary[]>(`/api/backtests?limit=${limit}`, token);
+export const getPromotionCheck = (token: string, strategyId: number) =>
+  apiFetch<PromotionCheck>(`/api/strategies/${strategyId}/promotion-check`, token);
+export const getAlerts = (token: string, limit = 10) => apiFetch<SystemAlert[]>(`/api/alerts?limit=${limit}`, token);
+export const getAnalyticsOverview = (token: string) => apiFetch<AnalyticsOverview>("/api/analytics/overview", token);
 
 export async function login(email: string, password: string) {
   const res = await fetch(`${API_URL}/api/auth/login`, {

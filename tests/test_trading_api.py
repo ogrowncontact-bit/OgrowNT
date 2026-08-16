@@ -1,8 +1,17 @@
 from datetime import datetime, timezone
 
+from apps.api.security import hash_password
 from packages.shared.models import (
-    Asset, MarketRegime, OpportunityScore, Order, Position, RiskCheck, RiskDecision, Signal, StrategyRow, Trade,
+    AdminUser, Asset, MarketRegime, OpportunityScore, Order, Position, RiskCheck, RiskDecision, Signal, StrategyRow, Trade,
 )
+
+
+def _login(client, db_session, email="trading-admin@example.com", password="correct-horse") -> str:
+    db_session.add(AdminUser(email=email, hashed_password=hash_password(password)))
+    db_session.commit()
+    resp = client.post("/api/auth/login", json={"email": email, "password": password})
+    assert resp.status_code == 200
+    return resp.json()["access_token"]
 
 
 def _seed_trade(db_session, symbol: str):
@@ -49,24 +58,31 @@ def _seed_open_position(db_session, symbol: str):
     return asset, position
 
 
+def test_positions_endpoint_requires_auth(client, db_session):
+    resp = client.get("/api/positions")
+    assert resp.status_code == 401
+
+
 def test_positions_endpoint_filters_by_status(client, db_session):
     _, open_position = _seed_open_position(db_session, "APIOPEN")
     _, _, _, closed_position, _ = _seed_trade(db_session, "APICLOSED")
+    token = _login(client, db_session)
 
-    open_resp = client.get("/api/positions?status_filter=open")
+    open_resp = client.get("/api/positions?status_filter=open", headers={"Authorization": f"Bearer {token}"})
     assert open_resp.status_code == 200
     open_ids = {p["id"] for p in open_resp.json()}
     assert open_position.id in open_ids
     assert closed_position.id not in open_ids
 
-    closed_resp = client.get("/api/positions?status_filter=closed")
+    closed_resp = client.get("/api/positions?status_filter=closed", headers={"Authorization": f"Bearer {token}"})
     closed_ids = {p["id"] for p in closed_resp.json()}
     assert closed_position.id in closed_ids
 
 
 def test_trades_endpoint_lists_closed_trades(client, db_session):
     _, _, _, _, trade = _seed_trade(db_session, "APITRADES")
-    resp = client.get("/api/trades?limit=200")
+    token = _login(client, db_session)
+    resp = client.get("/api/trades?limit=200", headers={"Authorization": f"Bearer {token}"})
     assert resp.status_code == 200
     trade_ids = {t["id"] for t in resp.json()}
     assert trade.id in trade_ids
@@ -74,14 +90,16 @@ def test_trades_endpoint_lists_closed_trades(client, db_session):
 
 def test_orders_endpoint_lists_orders(client, db_session):
     _seed_trade(db_session, "APIORDERS")
-    resp = client.get("/api/orders?limit=200")
+    token = _login(client, db_session)
+    resp = client.get("/api/orders?limit=200", headers={"Authorization": f"Bearer {token}"})
     assert resp.status_code == 200
     assert len(resp.json()) > 0
 
 
 def test_trade_why_returns_full_audit_trail(client, db_session):
     _, _, _, _, trade = _seed_trade(db_session, "APIWHY")
-    resp = client.get(f"/api/trades/{trade.id}/why")
+    token = _login(client, db_session)
+    resp = client.get(f"/api/trades/{trade.id}/why", headers={"Authorization": f"Bearer {token}"})
     assert resp.status_code == 200
     body = resp.json()
     assert body["trade"]["id"] == trade.id
@@ -91,8 +109,9 @@ def test_trade_why_returns_full_audit_trail(client, db_session):
     assert body["risk_decision"]["approved"] is True
 
 
-def test_trade_why_404_for_unknown_trade(client):
-    resp = client.get("/api/trades/999999/why")
+def test_trade_why_404_for_unknown_trade(client, db_session):
+    token = _login(client, db_session)
+    resp = client.get("/api/trades/999999/why", headers={"Authorization": f"Bearer {token}"})
     assert resp.status_code == 404
 
 

@@ -1,6 +1,15 @@
 from datetime import datetime, timezone
 
-from packages.shared.models import Asset, MarketRegime, OpportunityScore, Signal, StrategyRow
+from apps.api.security import hash_password
+from packages.shared.models import AdminUser, Asset, MarketRegime, OpportunityScore, Signal, StrategyRow
+
+
+def _login(client, db_session, email="opportunities-admin@example.com", password="correct-horse") -> str:
+    db_session.add(AdminUser(email=email, hashed_password=hash_password(password)))
+    db_session.commit()
+    resp = client.post("/api/auth/login", json={"email": email, "password": password})
+    assert resp.status_code == 200
+    return resp.json()["access_token"]
 
 
 def _seed_opportunity(db_session, *, symbol="APITEST", tier="high_quality", score=85.0):
@@ -35,9 +44,15 @@ def _seed_opportunity(db_session, *, symbol="APITEST", tier="high_quality", scor
     return asset, strategy, signal
 
 
+def test_list_strategies_requires_auth(client, db_session):
+    resp = client.get("/api/strategies")
+    assert resp.status_code == 401
+
+
 def test_list_strategies(client, db_session):
     _seed_opportunity(db_session, symbol="STRATLIST")
-    resp = client.get("/api/strategies")
+    token = _login(client, db_session)
+    resp = client.get("/api/strategies", headers={"Authorization": f"Bearer {token}"})
     assert resp.status_code == 200
     codes = {s["code"] for s in resp.json()}
     assert "strategy_stratlist" in codes
@@ -45,7 +60,8 @@ def test_list_strategies(client, db_session):
 
 def test_strategy_performance_is_honestly_empty(client, db_session):
     _, strategy, _ = _seed_opportunity(db_session, symbol="PERF")
-    resp = client.get(f"/api/strategies/{strategy.id}/performance")
+    token = _login(client, db_session)
+    resp = client.get(f"/api/strategies/{strategy.id}/performance", headers={"Authorization": f"Bearer {token}"})
     assert resp.status_code == 200
     body = resp.json()
     assert body["total_trades"] == 0
@@ -53,8 +69,9 @@ def test_strategy_performance_is_honestly_empty(client, db_session):
     assert "No trades closed yet" in body["note"]
 
 
-def test_strategy_performance_404_for_unknown(client):
-    resp = client.get("/api/strategies/999999/performance")
+def test_strategy_performance_404_for_unknown(client, db_session):
+    token = _login(client, db_session)
+    resp = client.get("/api/strategies/999999/performance", headers={"Authorization": f"Bearer {token}"})
     assert resp.status_code == 404
 
 
@@ -62,7 +79,8 @@ def test_opportunities_excludes_ignore_tier(client, db_session):
     _seed_opportunity(db_session, symbol="GOODOPP", tier="high_quality", score=85.0)
     _seed_opportunity(db_session, symbol="BADOPP", tier="ignore", score=40.0)
 
-    resp = client.get("/api/opportunities?limit=100")
+    token = _login(client, db_session)
+    resp = client.get("/api/opportunities?limit=100", headers={"Authorization": f"Bearer {token}"})
     assert resp.status_code == 200
     symbols = {o["asset_symbol"] for o in resp.json()}
     assert "GOODOPP" in symbols
@@ -71,7 +89,8 @@ def test_opportunities_excludes_ignore_tier(client, db_session):
 
 def test_signals_includes_ignore_tier(client, db_session):
     _seed_opportunity(db_session, symbol="AUDITME", tier="ignore", score=30.0)
-    resp = client.get("/api/signals?limit=200")
+    token = _login(client, db_session)
+    resp = client.get("/api/signals?limit=200", headers={"Authorization": f"Bearer {token}"})
     assert resp.status_code == 200
     symbols = {o["asset_symbol"] for o in resp.json()}
     assert "AUDITME" in symbols
@@ -79,7 +98,8 @@ def test_signals_includes_ignore_tier(client, db_session):
 
 def test_opportunity_detail_has_full_score_breakdown(client, db_session):
     _, _, signal = _seed_opportunity(db_session, symbol="DETAIL", tier="high_quality", score=85.0)
-    resp = client.get(f"/api/opportunities/{signal.id}")
+    token = _login(client, db_session)
+    resp = client.get(f"/api/opportunities/{signal.id}", headers={"Authorization": f"Bearer {token}"})
     assert resp.status_code == 200
     body = resp.json()
     assert body["asset_symbol"] == "DETAIL"
@@ -87,14 +107,16 @@ def test_opportunity_detail_has_full_score_breakdown(client, db_session):
     assert body["score"]["regime_fit"] == 100.0
 
 
-def test_opportunity_detail_404_for_unknown_signal(client):
-    resp = client.get("/api/opportunities/999999")
+def test_opportunity_detail_404_for_unknown_signal(client, db_session):
+    token = _login(client, db_session)
+    resp = client.get("/api/opportunities/999999", headers={"Authorization": f"Bearer {token}"})
     assert resp.status_code == 404
 
 
 def test_regime_endpoint_returns_latest_per_asset(client, db_session):
     _seed_opportunity(db_session, symbol="REGIMETEST")
-    resp = client.get("/api/regime")
+    token = _login(client, db_session)
+    resp = client.get("/api/regime", headers={"Authorization": f"Bearer {token}"})
     assert resp.status_code == 200
     entries = [r for r in resp.json() if r["asset_symbol"] == "REGIMETEST"]
     assert len(entries) == 1

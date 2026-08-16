@@ -5,7 +5,15 @@ should be hardcoded that a deployer would reasonably need to change.
 """
 from functools import lru_cache
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# The exact placeholder strings shipped in .env.example. Publicly known, so
+# an unconfigured deployment would let anyone forge an admin JWT
+# (jwt_secret signs it) or log in directly (admin_password) — refused at
+# startup below rather than silently running insecurely.
+_INSECURE_DEFAULT_JWT_SECRET = "change-me-to-a-long-random-string"
+_INSECURE_DEFAULT_ADMIN_PASSWORD = "change-me"
 
 
 class Settings(BaseSettings):
@@ -14,10 +22,32 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+psycopg://ogrownt:ogrownt@localhost:5432/ogrownt"
 
     admin_email: str = "admin@example.com"
-    admin_password: str = "change-me"
-    jwt_secret: str = "change-me-to-a-long-random-string"
+    admin_password: str = _INSECURE_DEFAULT_ADMIN_PASSWORD
+    jwt_secret: str = _INSECURE_DEFAULT_JWT_SECRET
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = 720
+
+    # Origins allowed to call the API from a browser (CORS). Comma-separated.
+    # Defaults to the dashboard's own dev/docker-compose origins — a private
+    # single-user deployment has exactly one legitimate frontend, so "*" here
+    # would only ever help an attacker (any webpage the operator's browser
+    # visits could otherwise read API responses cross-origin).
+    cors_allowed_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
+
+    @model_validator(mode="after")
+    def _reject_insecure_defaults(self) -> "Settings":
+        if self.jwt_secret == _INSECURE_DEFAULT_JWT_SECRET:
+            raise ValueError(
+                "JWT_SECRET is still the placeholder from .env.example — set a real, "
+                "random secret before starting (anyone who knows this value can forge "
+                "an admin token)."
+            )
+        if self.admin_password == _INSECURE_DEFAULT_ADMIN_PASSWORD:
+            raise ValueError(
+                "ADMIN_PASSWORD is still the placeholder from .env.example — set a "
+                "real password before starting."
+            )
+        return self
 
     initial_paper_capital: float = 10000.0
 

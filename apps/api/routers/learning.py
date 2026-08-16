@@ -2,16 +2,27 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from apps.api.deps import get_session
+from apps.api.deps import get_current_admin, get_session
 from apps.api.schemas import MarketMemoryOut, StrategyLearningOut, TradeJournalOut
 from packages.quant.learning.memory import find_similar_contexts
-from packages.shared.models import Asset, MarketMemory, Position, StrategyPerformance, StrategyRow, Trade, TradeJournal
+from packages.shared.models import (
+    AdminUser,
+    Asset,
+    MarketMemory,
+    Position,
+    StrategyPerformance,
+    StrategyRow,
+    Trade,
+    TradeJournal,
+)
 
 router = APIRouter(prefix="/api/learning", tags=["learning"])
 
 
 @router.get("/strategy-performance", response_model=list[StrategyLearningOut])
-def list_strategy_performance(db: Session = Depends(get_session)) -> list[StrategyLearningOut]:
+def list_strategy_performance(
+    db: Session = Depends(get_session), _: AdminUser = Depends(get_current_admin)
+) -> list[StrategyLearningOut]:
     strategies = db.query(StrategyRow).order_by(StrategyRow.code).all()
     results = []
     for strategy in strategies:
@@ -45,7 +56,9 @@ def list_strategy_performance(db: Session = Depends(get_session)) -> list[Strate
 
 
 @router.get("/trade-journal", response_model=list[TradeJournalOut])
-def list_trade_journal(limit: int = 50, db: Session = Depends(get_session)) -> list[TradeJournalOut]:
+def list_trade_journal(
+    limit: int = 50, db: Session = Depends(get_session), _: AdminUser = Depends(get_current_admin)
+) -> list[TradeJournalOut]:
     rows = db.execute(
         select(TradeJournal, Trade, Position, Asset, StrategyRow)
         .join(Trade, Trade.id == TradeJournal.trade_id)
@@ -66,7 +79,9 @@ def list_trade_journal(limit: int = 50, db: Session = Depends(get_session)) -> l
 
 
 @router.get("/memory", response_model=list[MarketMemoryOut])
-def list_market_memory(limit: int = 50, db: Session = Depends(get_session)) -> list[MarketMemoryOut]:
+def list_market_memory(
+    limit: int = 50, db: Session = Depends(get_session), _: AdminUser = Depends(get_current_admin)
+) -> list[MarketMemoryOut]:
     rows = db.execute(
         select(MarketMemory, Asset).outerjoin(Asset, Asset.id == MarketMemory.asset_id).order_by(MarketMemory.ts.desc()).limit(limit)
     ).all()
@@ -83,6 +98,7 @@ def get_similar_contexts(
     direction: str | None = None,
     k: int = 10,
     db: Session = Depends(get_session),
+    _: AdminUser = Depends(get_current_admin),
 ) -> list[MarketMemoryOut]:
     rows = find_similar_contexts(db, regime=regime, pattern_type=pattern_type, direction=direction, k=k)
     asset_ids = {row.asset_id for row in rows if row.asset_id is not None}

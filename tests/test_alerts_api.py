@@ -10,12 +10,18 @@ def _login(client, db_session, email="alertsapi-admin@example.com", password="co
     return resp.json()["access_token"]
 
 
+def test_list_alerts_requires_auth(client, db_session):
+    resp = client.get("/api/alerts")
+    assert resp.status_code == 401
+
+
 def test_list_alerts_returns_recent_first(client, db_session):
     db_session.add(Alert(severity="info", category="learning", message="first"))
     db_session.add(Alert(severity="critical", category="emergency", message="second"))
     db_session.commit()
 
-    resp = client.get("/api/alerts?limit=50")
+    token = _login(client, db_session)
+    resp = client.get("/api/alerts?limit=50", headers={"Authorization": f"Bearer {token}"})
     assert resp.status_code == 200
     messages = [a["message"] for a in resp.json()]
     assert messages.index("second") < messages.index("first")
@@ -26,7 +32,8 @@ def test_list_alerts_filters_by_severity(client, db_session):
     db_session.add(Alert(severity="info", category="learning", message="info-one"))
     db_session.commit()
 
-    resp = client.get("/api/alerts?severity=critical&limit=50")
+    token = _login(client, db_session)
+    resp = client.get("/api/alerts?severity=critical&limit=50", headers={"Authorization": f"Bearer {token}"})
     assert resp.status_code == 200
     messages = {a["message"] for a in resp.json()}
     assert "crit-one" in messages
@@ -38,7 +45,8 @@ def test_list_alerts_filters_by_acknowledged(client, db_session):
     db_session.add(Alert(severity="warning", category="risk", message="seen", acknowledged=True))
     db_session.commit()
 
-    resp = client.get("/api/alerts?acknowledged=false&limit=50")
+    token = _login(client, db_session)
+    resp = client.get("/api/alerts?acknowledged=false&limit=50", headers={"Authorization": f"Bearer {token}"})
     messages = {a["message"] for a in resp.json()}
     assert "unseen" in messages
     assert "seen" not in messages

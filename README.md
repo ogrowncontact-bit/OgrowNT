@@ -4,7 +4,7 @@
 **paper trading only** — no real orders are ever sent. See the full engineering
 specification in [`docs/blueprint/`](docs/blueprint/00-overview.md).
 
-## Status: Phase 7 (Advanced Analytics, Alerts, Optimization)
+## Status: Phase 7 (Advanced Analytics, Alerts, Optimization) + post-Phase-7 security hardening
 
 Per [`docs/blueprint/12-roadmap.md`](docs/blueprint/12-roadmap.md):
 
@@ -80,6 +80,13 @@ Live trading is still out of scope — **every order is `is_paper = true`; no
 broker/exchange adapter is registered; nothing in this repo can send a live order
 or read a real broker/exchange key.**
 
+**Post-Phase-7 security hardening:** an independent security review (see
+`docs/blueprint/12-roadmap.md`'s "Hardening de segurança" section) found and
+fixed 3 real gaps — ~30 read endpoints missing the auth the API spec already
+required, insecure hardcoded default secrets with no startup guard, and
+wildcard CORS. All three are fixed and live-verified; see that section for
+details.
+
 ## Architecture at a glance
 
 ```text
@@ -133,7 +140,9 @@ docs/blueprint/  full technical spec (architecture, DB schema, API, agents,
 ### With Docker (recommended)
 
 ```bash
-cp .env.example .env   # edit ADMIN_EMAIL / ADMIN_PASSWORD / JWT_SECRET
+cp .env.example .env   # edit ADMIN_PASSWORD / JWT_SECRET to real values —
+                        # the app refuses to start on the placeholder
+                        # defaults (packages/shared/settings.py)
                         # optionally set ANTHROPIC_API_KEY to enable real
                         # news interpretation — leave empty and it still
                         # works, just without that one capability
@@ -180,7 +189,10 @@ status per channel in `alerts.meta["_delivery"]`.
 # Backend
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
-cp .env.example .env   # point DATABASE_URL at a local Postgres 16
+cp .env.example .env   # point DATABASE_URL at a local Postgres 16, and set
+                        # real ADMIN_PASSWORD/JWT_SECRET values — every
+                        # component (including `alembic`) refuses to start
+                        # on the placeholder defaults
 alembic upgrade head
 python -m scripts.seed
 uvicorn apps.api.main:app --reload &

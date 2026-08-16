@@ -103,7 +103,10 @@ def create_backtest(
 
 
 @router.get("", response_model=list[BacktestSummaryOut])
-def list_backtests(strategy_id: int | None = None, limit: int = 20, db: Session = Depends(get_session)) -> list[BacktestSummaryOut]:
+def list_backtests(
+    strategy_id: int | None = None, limit: int = 20,
+    db: Session = Depends(get_session), _: AdminUser = Depends(get_current_admin),
+) -> list[BacktestSummaryOut]:
     query = db.query(BacktestRun)
     if strategy_id is not None:
         query = query.filter(BacktestRun.strategy_id == strategy_id)
@@ -112,7 +115,9 @@ def list_backtests(strategy_id: int | None = None, limit: int = 20, db: Session 
 
 
 @router.get("/{run_id}", response_model=BacktestDetailOut)
-def get_backtest(run_id: int, db: Session = Depends(get_session)) -> BacktestDetailOut:
+def get_backtest(
+    run_id: int, db: Session = Depends(get_session), _: AdminUser = Depends(get_current_admin)
+) -> BacktestDetailOut:
     run = db.get(BacktestRun, run_id)
     if run is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Backtest run not found")

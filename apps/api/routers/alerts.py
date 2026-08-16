@@ -18,7 +18,8 @@ router = APIRouter(prefix="/api/alerts", tags=["alerts"])
 
 @router.get("", response_model=list[AlertOut])
 def list_alerts(
-    severity: str | None = None, acknowledged: bool | None = None, limit: int = 50, db: Session = Depends(get_session)
+    severity: str | None = None, acknowledged: bool | None = None, limit: int = 50,
+    db: Session = Depends(get_session), _: AdminUser = Depends(get_current_admin),
 ) -> list[Alert]:
     query = db.query(Alert)
     if severity is not None:
