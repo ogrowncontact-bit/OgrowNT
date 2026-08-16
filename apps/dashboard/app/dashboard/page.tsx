@@ -619,7 +619,7 @@ export default async function DashboardPage() {
             ))}
           </div>
         ) : (
-          <p className="text-xs text-ink-500">No alerts — nothing has needed the admin's attention yet.</p>
+          <p className="text-xs text-ink-500">No alerts — nothing has needed the admin&apos;s attention yet.</p>
         )}
       </section>
 
