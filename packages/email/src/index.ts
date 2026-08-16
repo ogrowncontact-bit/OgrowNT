@@ -4,3 +4,4 @@ export { LocalProvider } from "./localProvider";
 export { renderReportDeliveryEmail } from "./templates/reportDelivery";
 export { renderCheckoutReminderEmail } from "./templates/checkoutReminder";
 export { renderRecommendationNudgeEmail } from "./templates/recommendationNudge";
+export { renderPrivacyConfirmEmail } from "./templates/privacyConfirm";

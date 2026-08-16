@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { FUNNEL_STAGES, getConsentSummary, getFunnelSummary, getQuestionDropoff, getRecentOrders, getRevenueSummary } from "@/lib/admin/analyticsReader";
+import { FUNNEL_STAGES, getConsentSummary, getDeletionRequests, getFunnelSummary, getQuestionDropoff, getRecentOrders, getRevenueSummary } from "@/lib/admin/analyticsReader";
 import { ReengagementRunner } from "@/components/admin/ReengagementRunner";
 
 function formatMoney(cents: number, currency = "EUR") {
@@ -16,11 +16,12 @@ const cardValue = "font-display text-[22px] text-[var(--inner-ink)]";
 
 export default async function AdminAnalyticsPage({ searchParams }: { searchParams: Promise<{ assessmentId?: string }> }) {
   const { assessmentId: requestedAssessmentId } = await searchParams;
-  const [funnel, orders, revenue, consent] = await Promise.all([
+  const [funnel, orders, revenue, consent, deletionRequests] = await Promise.all([
     getFunnelSummary(),
     getRecentOrders(50),
     getRevenueSummary(),
     getConsentSummary(),
+    getDeletionRequests(),
   ]);
 
   const selectedAssessmentId = requestedAssessmentId ?? funnel[0]?.assessmentId;
@@ -192,6 +193,41 @@ export default async function AdminAnalyticsPage({ searchParams }: { searchParam
                   >
                     {o.status}
                   </span>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <h2 className="font-display mb-3 mt-8 text-[18px] text-[var(--inner-ink)]">GDPR erasure requests</h2>
+      <p className="mb-3 text-[13px] text-[var(--inner-ink-soft)]">
+        Self-serve deletions from /privacy — audit trail only, the email is already anonymized by the time it lands
+        here.
+      </p>
+      <div className="overflow-hidden rounded-[var(--inner-radius-lg)] border border-[var(--inner-line)] bg-[var(--inner-card)]">
+        <table className="w-full text-left text-[13px]">
+          <thead>
+            <tr className="border-b border-[var(--inner-line)] text-[var(--inner-muted)]">
+              <th className="px-4 py-3 font-medium">Requested</th>
+              <th className="px-4 py-3 font-medium">Status</th>
+              <th className="px-4 py-3 font-medium">Completed</th>
+            </tr>
+          </thead>
+          <tbody>
+            {deletionRequests.length === 0 && (
+              <tr>
+                <td colSpan={3} className="px-4 py-6 text-center text-[var(--inner-muted)]">
+                  No erasure requests yet.
+                </td>
+              </tr>
+            )}
+            {deletionRequests.map((r) => (
+              <tr key={r.id} className="border-b border-[var(--inner-line)] last:border-0">
+                <td className="whitespace-nowrap px-4 py-3 text-[var(--inner-ink-soft)]">{formatDate(r.requestedAt)}</td>
+                <td className="px-4 py-3 text-[var(--inner-ink)]">{r.status}</td>
+                <td className="whitespace-nowrap px-4 py-3 text-[var(--inner-ink-soft)]">
+                  {r.completedAt ? formatDate(r.completedAt) : "—"}
                 </td>
               </tr>
             ))}

@@ -181,6 +181,22 @@ export async function getAllOrdersForExport(): Promise<OrderExportRow[]> {
   }));
 }
 
+export interface DeletionRequestRow {
+  id: string;
+  status: string;
+  requestedAt: Date;
+  completedAt: Date | null;
+}
+
+/** Compliance audit trail for GDPR Art. 17 erasure requests (see lib/privacy.ts). Never exposes the (now-anonymized) email. */
+export async function getDeletionRequests(limit = 20): Promise<DeletionRequestRow[]> {
+  const rows = await prisma.deletionRequest.findMany({
+    orderBy: { requestedAt: "desc" },
+    take: limit,
+  });
+  return rows.map((r) => ({ id: r.id, status: r.status, requestedAt: r.requestedAt, completedAt: r.completedAt }));
+}
+
 export interface ConsentSummary {
   totalConsented: number;
   totalDeclined: number;
