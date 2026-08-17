@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { Screen, Button, Checkbox } from "@inner/ui";
 
 interface CheckoutFormProps {
@@ -80,6 +81,18 @@ export function CheckoutForm({ slug, assessmentSessionId, priceLabel }: Checkout
         <p className="mt-4 text-xs leading-relaxed text-[var(--inner-muted)]">
           We&apos;ll always send your report to this address regardless of the box above — that&apos;s required to
           deliver what you&apos;re paying for. The box only controls future emails, and you can unsubscribe any time.
+        </p>
+
+        <p className="mt-4 text-xs leading-relaxed text-[var(--inner-muted)]">
+          By continuing you agree to our{" "}
+          <Link href="/terms" className="underline">
+            Terms of Service
+          </Link>{" "}
+          and{" "}
+          <Link href="/privacy-policy" className="underline">
+            Privacy Policy
+          </Link>
+          .
         </p>
       </div>
     </Screen>
