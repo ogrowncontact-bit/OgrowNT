@@ -12,4 +12,7 @@ COPY config ./config
 
 RUN pip install --no-cache-dir -e .
 
+RUN useradd --create-home --uid 1000 appuser && chown -R appuser:appuser /app
+USER appuser
+
 CMD ["python", "-m", "apps.worker.main"]

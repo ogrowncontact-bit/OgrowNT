@@ -16,5 +16,11 @@ COPY scripts ./scripts
 
 RUN pip install --no-cache-dir -e .
 
+# Run as a non-root user — this image is also used unmodified for the
+# `migrate` service (alembic + scripts.seed), neither of which need to write
+# anywhere but Postgres, so no further permission grants are needed.
+RUN useradd --create-home --uid 1000 appuser && chown -R appuser:appuser /app
+USER appuser
+
 EXPOSE 8000
 CMD ["uvicorn", "apps.api.main:app", "--host", "0.0.0.0", "--port", "8000"]

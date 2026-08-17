@@ -152,6 +152,10 @@ docker compose -f infra/docker/docker-compose.yml up --build
 - API: http://localhost:8000 (docs at `/docs`)
 - Dashboard: http://localhost:3000 (redirects to `/login`)
 
+All three images run as a non-root user. `docker compose config` validates,
+but the full `up --build` hasn't been run in this repo's own dev sandbox (no
+Docker daemon available there) — worth a one-time check before relying on it.
+
 The `migrate` service applies Alembic migrations and runs `scripts/seed.py`
 (creates the admin user, seeds ~20 assets across crypto/forex/equities/indices/
 commodities, the initial €10,000 paper portfolio, and registers the 4 Phase 2
@@ -213,10 +217,13 @@ rewrite; see `[tool.ruff]` in `pyproject.toml`), `mypy packages apps scripts`
 (type-checked with the `pydantic.mypy` plugin so FastAPI response models
 type-check correctly), then the full pytest suite (316 tests) against a real
 `postgres:16-alpine` service container, migrated from scratch via `alembic
-upgrade head`; and, separately, the dashboard's `eslint` + `next build`.
-Nothing in CI touches a broker, an exchange, or real capital — it only
-proves the existing test/build/lint/type-check steps that were previously
-run by hand still pass.
+upgrade head`; separately, the dashboard's `eslint` + `next build`; and
+separately again, a plain `docker build` of all three
+`infra/docker/Dockerfile.*` images — the only place those get built at all,
+since this repo's own dev sandbox has no Docker daemon. Nothing in CI
+touches a broker, an exchange, or real capital — it only proves the
+existing test/build/lint/type-check/image-build steps that were previously
+run by hand (or, for the Docker images, not run at all) still pass.
 
 ## Design principles (non-negotiable — see `docs/blueprint/00-overview.md`)
 

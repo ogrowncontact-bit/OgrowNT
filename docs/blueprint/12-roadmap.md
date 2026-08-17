@@ -433,6 +433,36 @@ Nada nesta secção altera comportamento de trading: são apenas correções de
 controlo de acesso e configuração — nenhuma lógica de scoring, risco ou
 execução foi tocada.
 
+## Dev hygiene: lint, type-checking, container hardening (pós-Fase 7) — **status: implementada nesta sessão; ver notas de verificação abaixo**
+
+- [x] **`ruff`** (`pyproject.toml`'s `[tool.ruff]`) adicionado e ligado ao CI
+      (E/F/I/UP/B — bugs reais e higiene de imports, não uma reescrita de
+      estilo). Corrigiu 7 imports não utilizados, um footgun de argumento
+      por omissão mutável num endpoint (`apps/api/routers/strategies.py`'s
+      `restore_strategy`), e um `zip()` sem `strict=`. 316/316 testes
+      continuam a passar
+- [x] **`mypy`** (com o plugin `pydantic.mypy`, para que os modelos de
+      resposta FastAPI construídos a partir de dataclasses via
+      `from_attributes` sejam corretamente verificados) adicionado e ligado
+      ao CI, limpo em 116 ficheiros-fonte. O achado mais importante: o
+      Trade Monitor podia falhar o ciclo inteiro (deixando todas as outras
+      posições abertas sem monitorização até reiniciar) se uma posição
+      referenciasse um `Asset` em falta — corrigido com o mesmo padrão de
+      "saltar com aviso DATA_UNAVAILABLE" já usado para preço em falta.
+      Corrigidos guardas semelhantes noutros pontos (um endpoint que podia
+      devolver 500 numa única linha má, duas ações admin com invariantes
+      cross-função agora explicitamente guardadas) — sem alterar
+      comportamento fora desses casos
+- [~] **Non-root containers**: as três Dockerfiles (`infra/docker/
+      Dockerfile.{api,worker,dashboard}`) foram alteradas para correr como
+      utilizador não-root (`useradd`+`chown`+`USER` nas imagens Python;
+      o utilizador `node` já embutido na imagem `node:20-alpine`) — prática
+      standard de hardening de containers. `docker compose config` continua
+      a validar com sucesso. **Não verificado com um build/run real** (sem
+      daemon Docker disponível nesta sandbox, o mesmo bloqueio documentado
+      na Fase 1) — recomendado correr `docker compose up --build` uma vez
+      antes de confiar nisto em produção.
+
 ## Evolução futura (fora de âmbito até validação completa)
 
 Live brokers, exchanges reais (crypto/forex/ações), ML avançado, deep learning,

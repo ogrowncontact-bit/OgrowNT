@@ -53,3 +53,17 @@ jobs:
       - run: npm ci
       - run: npm run lint
       - run: npm run build
+
+  # Confirms all three images actually build (including the non-root USER
+  # steps) — the project's own dev sandbox has no Docker daemon, so this is
+  # the only place that verifies infra/docker/Dockerfile.* before a real
+  # `docker compose up`. Plain `docker build` (ubuntu-latest runners ship
+  # Docker preinstalled) rather than a build action, so the exact
+  # -f/context semantics match what a developer would run by hand.
+  docker-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -f infra/docker/Dockerfile.api .
+      - run: docker build -f infra/docker/Dockerfile.worker .
+      - run: docker build -f infra/docker/Dockerfile.dashboard apps/dashboard
