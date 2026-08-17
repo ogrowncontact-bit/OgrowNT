@@ -11,11 +11,13 @@
   },
   "scripts": {
     "dev": "pnpm --filter @inner/web dev",
-    "build": "pnpm -r --filter=!@inner/web build && pnpm --filter @inner/web build",
+    "build": "pnpm -r --if-present --filter=!@inner/web build && pnpm --filter @inner/web build",
     "lint": "pnpm -r lint",
     "test": "pnpm -r test",
+    "typecheck": "pnpm -r exec tsc --noEmit",
     "db:generate": "pnpm --filter @inner/db generate",
     "db:migrate": "pnpm --filter @inner/db migrate",
+    "db:migrate:deploy": "pnpm --filter @inner/db exec prisma migrate deploy",
     "db:seed": "pnpm --filter @inner/db seed"
   }
 }

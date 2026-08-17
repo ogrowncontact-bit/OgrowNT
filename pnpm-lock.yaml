@@ -110,9 +110,15 @@ importers:
         specifier: ^6.2.1
         version: 6.19.3(prisma@6.19.3(typescript@5.9.3))(typescript@5.9.3)
     devDependencies:
+      '@inner/assessment-engine':
+        specifier: workspace:*
+        version: link:../assessment-engine
       '@inner/content':
         specifier: workspace:*
         version: link:../content
+      '@types/node':
+        specifier: ^22.10.5
+        version: 22.20.1
       prisma:
         specifier: ^6.2.1
         version: 6.19.3(typescript@5.9.3)
@@ -129,6 +135,9 @@ importers:
         specifier: ^4.0.1
         version: 4.8.0(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
     devDependencies:
+      '@types/node':
+        specifier: ^22.10.5
+        version: 22.20.1
       typescript:
         specifier: ^5.7.3
         version: 5.9.3
@@ -149,6 +158,9 @@ importers:
         specifier: ^1.49.1
         version: 1.62.1
     devDependencies:
+      '@types/node':
+        specifier: ^22.10.5
+        version: 22.20.1
       typescript:
         specifier: ^5.7.3
         version: 5.9.3

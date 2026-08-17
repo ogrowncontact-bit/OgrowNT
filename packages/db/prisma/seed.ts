@@ -99,8 +99,8 @@ async function seedAssessment(assessment: AssessmentConfig) {
       adaptiveRules: {
         create: assessment.adaptiveRules.map((r) => ({
           key: r.key,
-          trigger: r.trigger,
-          action: r.action,
+          trigger: r.trigger as any,
+          action: r.action as any,
           priority: r.priority,
         })),
       },
@@ -109,11 +109,11 @@ async function seedAssessment(assessment: AssessmentConfig) {
           key: p.key,
           name: p.name,
           descriptionTemplate: p.descriptionTemplate,
-          matchingRule: p.matchingRule,
+          matchingRule: p.matchingRule as any,
         })),
       },
       reportTemplate: {
-        create: { sections: assessment.premiumReportStructure },
+        create: { sections: assessment.premiumReportStructure as any },
       },
     },
   });

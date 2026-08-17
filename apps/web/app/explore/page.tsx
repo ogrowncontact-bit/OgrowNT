@@ -5,6 +5,15 @@ import { getAssessmentConfig, listPublishedSlugs } from "@/lib/assessments";
 // The deliberate full-catalog surface — everywhere else in the product stays
 // focused on the single experience a user entered through or was pointed to
 // (docs/ARCHITECTURE.md — Progressive Discovery / Explore Mode).
+//
+// Forced dynamic: this is the one catalog-reading route with a fixed path
+// (every other one is under the open-ended /[slug] segment, which Next.js
+// never prerenders without generateStaticParams) — without this it gets
+// statically prerendered once at build time and silently stops reflecting
+// newly published experiences, breaking the same "publish = live
+// immediately, no deploy" guarantee every other page already has.
+export const dynamic = "force-dynamic";
+
 export default async function ExplorePage() {
   const slugs = await listPublishedSlugs();
   const configs = (await Promise.all(slugs.map((slug) => getAssessmentConfig(slug)))).filter(
