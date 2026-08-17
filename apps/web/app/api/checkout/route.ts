@@ -89,7 +89,7 @@ export async function POST(request: NextRequest) {
     productName: `${config.name} — Personal Report`,
     customerEmail: email,
     successUrl: `${appBaseUrl(request)}/${session.sourceSlug}/session/${assessmentSessionId}/report?checkout=success`,
-    cancelUrl: `${appBaseUrl(request)}/${session.sourceSlug}/session/${assessmentSessionId}/paywall`,
+    cancelUrl: `${appBaseUrl(request)}/${session.sourceSlug}/session/${assessmentSessionId}/paywall?payment=failed`,
   });
 
   await prisma.order.update({ where: { id: order.id }, data: { providerRef: checkoutSession.providerRef } });

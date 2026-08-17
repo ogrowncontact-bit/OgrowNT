@@ -3,7 +3,13 @@
 import { useState } from "react";
 import { Button } from "@inner/ui";
 
-export function MockPaymentForm({ orderId }: { orderId: string }) {
+interface MockPaymentFormProps {
+  orderId: string;
+  /** Where a cancelled/declined payment sends the user back to, same as Stripe's real cancel_url. */
+  cancelUrl: string;
+}
+
+export function MockPaymentForm({ orderId, cancelUrl }: MockPaymentFormProps) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -25,6 +31,9 @@ export function MockPaymentForm({ orderId }: { orderId: string }) {
     <div>
       <Button onClick={handleComplete} disabled={submitting}>
         {submitting ? "Generating your report..." : "Simulate Successful Payment"}
+      </Button>
+      <Button variant="ghost" onClick={() => (window.location.href = cancelUrl)} disabled={submitting} className="mt-2">
+        Simulate Failed / Cancelled Payment
       </Button>
       {error && (
         <p role="alert" className="mt-3 text-sm text-[var(--inner-accent)]">

@@ -5,6 +5,7 @@ import { Screen, Button } from "@inner/ui";
 import { getAssessmentConfig } from "@/lib/assessments";
 import { readAnonymousSessionId } from "@/lib/anonymousSession";
 import { track } from "@/lib/analytics";
+import { ShareResultButton } from "@/components/ShareResultButton";
 
 export default async function ResultPage({ params }: { params: Promise<{ slug: string; id: string }> }) {
   const { slug, id } = await params;
@@ -34,6 +35,12 @@ export default async function ResultPage({ params }: { params: Promise<{ slug: s
   const aiNotes = profileResult.aiSemanticNotes as { insight?: string; aiGenerated?: boolean } | null;
   const insightText = aiNotes?.insight || config.freeResultTemplate.insightIntro;
 
+  const shareTitle = config.shareTemplate?.shareTitleTemplate ?? "I discovered my INNER profile:";
+  const shareText = (config.shareTemplate?.shareTextTemplate ?? "I discovered my INNER profile: {{profileName}}. Discover yours.").replace(
+    "{{profileName}}",
+    primary.name
+  );
+
   await track({ anonymousSessionId, eventName: "free_result_viewed", assessmentId: session.assessmentId });
 
   return (
@@ -60,6 +67,10 @@ export default async function ResultPage({ params }: { params: Promise<{ slug: s
           </svg>
           {lockedInsightCount} more insight{lockedInsightCount === 1 ? "" : "s"} in your full profile
         </p>
+      </div>
+
+      <div className="mt-4">
+        <ShareResultButton shareTitle={shareTitle} shareText={shareText} />
       </div>
     </Screen>
   );

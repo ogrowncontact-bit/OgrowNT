@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@inner/db";
 import { computeResult, nextQuestion, submitAnswer } from "@inner/assessment-engine";
-import { chooseFollowup, generateFreeInsight, interpretOpenAnswer, SUPPORT_MESSAGE } from "@inner/ai";
+import { chooseFollowup, enrichProfileWithAI, generateFreeInsight, interpretOpenAnswer, SUPPORT_MESSAGE } from "@inner/ai";
+import { dimensionPool } from "@inner/content";
 import { getAssessmentConfig } from "@/lib/assessments";
 import { readAnonymousSessionId } from "@/lib/anonymousSession";
 import { reconstructSessionState } from "@/lib/sessionState";
@@ -85,6 +86,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       dimensionNudges: analysis.dimensionNudges,
       chosenFollowupKey: aiChosenFollowupKey,
       aiGenerated: analysis.aiGenerated,
+      confidence: analysis.confidence,
     };
 
     await prisma.openResponse.create({
@@ -127,7 +129,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   });
 
   if (result.isComplete) {
-    const { profileResult, dimensionScores } = computeResult(config, result.state);
+    const { profileResult, dimensionScores, tensions } = computeResult(config, result.state);
 
     // Profile AI only narrates the profile the deterministic matcher already
     // picked (§6) — collected tags come from this session's own open answers.
@@ -140,6 +142,31 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       dimensionScores: Object.fromEntries(Object.entries(dimensionScores).map(([k, v]) => [k, v.normalized])),
       openAnswerTags,
     });
+
+    // REPORT INPUT stage: enriches the already-decided profile/tensions with
+    // themes and narrative insights for the future premium report. Never the
+    // decision-maker — profileResult/tensions above are already final by the
+    // time this runs. Always resolves to *something* structured, AI or not.
+    const enrichment = await enrichProfileWithAI({
+      primaryProfileName: profileResult.primary.name,
+      secondaryProfileNames: profileResult.secondary.map((p) => p.name),
+      dimensions: Object.entries(dimensionScores).map(([key, score]) => ({
+        key,
+        label: dimensionPool.find((d) => d.key === key)?.label ?? key,
+        normalized: score.normalized,
+        confidence: score.confidence,
+      })),
+      tensions,
+      openAnswerThemes: openAnswerTags,
+    });
+
+    const aiSemanticNotes = {
+      insight: generatedInsight?.insight,
+      aiGenerated: generatedInsight ? true : undefined,
+      themes: enrichment.themes,
+      insights: enrichment.insights,
+      enrichmentAiGenerated: enrichment.aiGenerated,
+    };
 
     await prisma.$transaction([
       ...Object.entries(dimensionScores).map(([dimensionKey, score]) =>
@@ -160,13 +187,15 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         update: {
           primaryProfileKey: profileResult.primary.key,
           secondaryProfileKeys: profileResult.secondary.map((p) => p.key),
-          aiSemanticNotes: generatedInsight ? { insight: generatedInsight.insight, aiGenerated: true } : undefined,
+          tensions: tensions as any,
+          aiSemanticNotes: aiSemanticNotes as any,
         },
         create: {
           assessmentSessionId: id,
           primaryProfileKey: profileResult.primary.key,
           secondaryProfileKeys: profileResult.secondary.map((p) => p.key),
-          aiSemanticNotes: generatedInsight ? { insight: generatedInsight.insight, aiGenerated: true } : undefined,
+          tensions: tensions as any,
+          aiSemanticNotes: aiSemanticNotes as any,
         },
       }),
       prisma.assessmentSession.update({ where: { id }, data: { status: "completed", completedAt: new Date() } }),

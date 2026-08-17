@@ -121,6 +121,8 @@ model AssessmentVersion {
   maxQuestions    Int
   aiInfluenceCap  Float      @default(0.15)
   freeResultTemplate Json?   // { headline, insightIntro, lockedInsightsLabel }
+  shareTemplate   Json?      // { shareTitleTemplate, shareTextTemplate }
+  tensionPairs    Json?      // TensionPairDefinition[]
   publishedAt     DateTime?
   createdBy       String?
   createdAt       DateTime   @default(now())
@@ -218,7 +220,8 @@ model Profile {
   key                   String
   name                  String
   descriptionTemplate   String
-  matchingRule          Json              // dimension threshold/range rules
+  matchingRule          Json              // { dimensionRanges, optionalConditions?, excludeConditions? }
+  priority              Int               @default(0)
 
   @@unique([assessmentVersionId, key])
   @@schema("catalog")
@@ -368,6 +371,7 @@ model ProfileResult {
   assessmentSession   AssessmentSession @relation(fields: [assessmentSessionId], references: [id])
   primaryProfileKey   String
   secondaryProfileKeys Json             // string[]
+  tensions            Json?             // TensionResult[] from the deterministic tension engine
   aiSemanticNotes     Json?
   computedAt          DateTime          @default(now())
 

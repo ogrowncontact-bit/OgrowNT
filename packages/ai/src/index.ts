@@ -5,6 +5,8 @@ export { chooseFollowup } from "./questionAI";
 export type { FollowupCandidate, FollowupChoice } from "./questionAI";
 export { generateFreeInsight } from "./profileAI";
 export type { GeneratedInsight } from "./profileAI";
+export { enrichProfileWithAI } from "./profileEnrichmentAI";
+export type { ProfileEnrichment, EnrichedInsight, InsightType, DimensionInput, TensionInput } from "./profileEnrichmentAI";
 export { generateReport } from "./reportAI";
 export type { ReportSectionSpec, GeneratedReportSection } from "./reportAI";
 export { generateRecommendationCopy } from "./recommendationAI";

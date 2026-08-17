@@ -59,6 +59,9 @@ export function CheckoutForm({ slug, assessmentSessionId, priceLabel }: Checkout
       <h1 id="checkout-email-heading" className="font-display text-[26px] leading-snug text-[var(--inner-ink)]">
         Where should we send your report?
       </h1>
+      <p className="mt-3 text-[14px] leading-relaxed text-[var(--inner-ink-soft)]">
+        Your report is generated from your own answers, and delivered privately to this address.
+      </p>
 
       <div className="mt-8">
         <input

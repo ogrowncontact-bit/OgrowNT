@@ -16,8 +16,16 @@ const INCLUDED = [
   "PDF delivered by email",
 ];
 
-export default async function PaywallPage({ params }: { params: Promise<{ slug: string; id: string }> }) {
+export default async function PaywallPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ slug: string; id: string }>;
+  searchParams: Promise<{ payment?: string }>;
+}) {
   const { slug, id } = await params;
+  const { payment } = await searchParams;
+  const paymentFailed = payment === "failed";
 
   const anonymousSessionId = await readAnonymousSessionId();
   if (!anonymousSessionId) redirect(`/${slug}`);
@@ -34,17 +42,36 @@ export default async function PaywallPage({ params }: { params: Promise<{ slug: 
 
   const price = config.pricing.individual;
 
-  await track({ anonymousSessionId, eventName: "paywall_viewed", assessmentId: session.assessmentId });
+  await track({
+    anonymousSessionId,
+    eventName: paymentFailed ? "payment_failed" : "paywall_viewed",
+    assessmentId: session.assessmentId,
+  });
 
   return (
     <Screen
       align="top"
       footer={
         <Link href={`/${slug}/session/${id}/checkout`}>
-          <Button>{price ? `Unlock My Profile — €${(price.amountCents / 100).toFixed(2)}` : "Unlock My Profile"}</Button>
+          <Button>
+            {paymentFailed
+              ? "Try Again"
+              : price
+                ? `Unlock My Profile — €${(price.amountCents / 100).toFixed(2)}`
+                : "Unlock My Profile"}
+          </Button>
         </Link>
       }
     >
+      {paymentFailed && (
+        <div role="alert" className="mb-6 rounded-[var(--inner-radius-md)] border border-[var(--inner-line)] bg-[var(--inner-card)] p-4">
+          <p className="text-[15px] font-medium text-[var(--inner-ink)]">Your payment wasn&apos;t completed.</p>
+          <p className="mt-1 text-[13px] text-[var(--inner-ink-soft)]">
+            Nothing was charged, and your answers are still saved — pick up right where you left off.
+          </p>
+        </div>
+      )}
+
       <p className="mb-3 text-xs font-medium uppercase tracking-[0.2em] text-[var(--inner-muted)]">
         Your Personal Report
       </p>

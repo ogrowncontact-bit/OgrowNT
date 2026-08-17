@@ -1,6 +1,6 @@
 import { decideNextStep } from "./adaptiveRules";
 import { matchProfiles } from "./profileMatcher";
-import { emptyDimensionScores, overallConfidence, recomputeDimensionScores } from "./scoring";
+import { detectTensions, emptyDimensionScores, overallConfidence, recomputeDimensionScores } from "./scoring";
 import type { AssessmentConfig, Question, RecordedAnswer, SessionState } from "./types";
 
 function allQuestions(config: AssessmentConfig): Question[] {
@@ -81,5 +81,6 @@ export function computeResult(config: AssessmentConfig, state: SessionState) {
     profileResult,
     confidence: overallConfidence(state.dimensionScores),
     dimensionScores: state.dimensionScores,
+    tensions: detectTensions(config, state.dimensionScores),
   };
 }

@@ -64,10 +64,12 @@ export interface VersionRow {
   maxQuestions: number;
   aiInfluenceCap: number;
   freeResultTemplate: unknown;
+  shareTemplate: unknown;
+  tensionPairs: unknown;
   dimensions: { weight: number; dimension: { key: string } }[];
   questions: QuestionRow[];
   adaptiveRules: { key: string; trigger: unknown; action: unknown; priority: number }[];
-  profiles: { key: string; name: string; descriptionTemplate: string; matchingRule: unknown }[];
+  profiles: { key: string; name: string; descriptionTemplate: string; matchingRule: unknown; priority: number }[];
   reportTemplate: { sections: unknown } | null;
 }
 
@@ -125,8 +127,11 @@ export function mapVersionToConfig(
       name: p.name,
       descriptionTemplate: p.descriptionTemplate,
       matchingRule: p.matchingRule as unknown as AssessmentConfig["profiles"][number]["matchingRule"],
+      priority: p.priority,
     })),
     freeResultTemplate,
+    shareTemplate: (version.shareTemplate as AssessmentConfig["shareTemplate"] | null) ?? undefined,
+    tensionPairs: (version.tensionPairs as AssessmentConfig["tensionPairs"] | null) ?? undefined,
     premiumReportStructure: (version.reportTemplate?.sections as unknown as AssessmentConfig["premiumReportStructure"]) ?? [],
     recommendedNext: recommendations.map((r) => ({
       assessmentSlug: r.toAssessment.slug,

@@ -22,8 +22,10 @@ export default async function MockCheckoutPage({ params }: { params: Promise<{ o
   const config = await getAssessmentConfig(order.assessmentSession.sourceSlug);
   if (!config) notFound();
 
+  const cancelUrl = `/${order.assessmentSession.sourceSlug}/session/${order.assessmentSessionId}/paywall?payment=failed`;
+
   return (
-    <Screen align="top" footer={<MockPaymentForm orderId={orderId} />}>
+    <Screen align="top" footer={<MockPaymentForm orderId={orderId} cancelUrl={cancelUrl} />}>
       <div className="mb-6 rounded-[var(--inner-radius-md)] border border-[var(--inner-accent)] bg-[var(--inner-card)] p-3 text-center text-[13px] font-medium text-[var(--inner-accent)]">
         TEST MODE — no real payment provider is configured
       </div>

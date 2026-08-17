@@ -51,6 +51,8 @@ export async function completeOrder(orderId: string): Promise<void> {
   const dimensionScores = Object.fromEntries(dimensionScoreRows.map((d) => [d.dimensionKey, d.normalizedScore]));
   const openAnswerTags = openResponses.flatMap((r) => (r.aiTags as OpenResponseAiMeta | null)?.tags ?? []);
 
+  await track({ anonymousSessionId: session.anonymousSessionId, eventName: "report_generation_started", assessmentId: session.assessmentId });
+
   const generated = await generateReport({
     assessmentName: config.name,
     primaryProfileName: primary.name,

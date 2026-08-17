@@ -5,4 +5,6 @@ export interface OpenResponseAiMeta {
   dimensionNudges: Record<string, number>;
   chosenFollowupKey?: string;
   aiGenerated: boolean;
+  /** Response AI's own confidence in this extraction (0..1) — see packages/ai/src/responseAI.ts. */
+  confidence: number;
 }

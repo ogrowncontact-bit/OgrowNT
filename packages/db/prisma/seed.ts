@@ -51,6 +51,8 @@ async function seedAssessment(assessment: AssessmentConfig) {
       maxQuestions: assessment.maxQuestions,
       aiInfluenceCap: assessment.scoringModel.aiInfluenceCap,
       freeResultTemplate: assessment.freeResultTemplate as any,
+      shareTemplate: (assessment.shareTemplate as any) ?? undefined,
+      tensionPairs: (assessment.tensionPairs as any) ?? undefined,
       publishedAt: new Date(),
       dimensions: {
         create: await Promise.all(
@@ -110,6 +112,7 @@ async function seedAssessment(assessment: AssessmentConfig) {
           name: p.name,
           descriptionTemplate: p.descriptionTemplate,
           matchingRule: p.matchingRule as any,
+          priority: p.priority ?? 0,
         })),
       },
       reportTemplate: {

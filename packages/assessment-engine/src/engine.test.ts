@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { startSession, nextQuestion, submitAnswer, computeResult } from "./engine";
 import { recomputeDimensionScores } from "./scoring";
-import type { AssessmentConfig } from "./types";
+import type { AssessmentConfig, RecordedAnswer } from "./types";
 
 const config: AssessmentConfig = {
   slug: "test",
@@ -220,5 +220,57 @@ describe("AI dimension nudges (scoring)", () => {
       },
     ]);
     expect(scores.connection.normalized).toBeCloseTo(65, 5);
+  });
+});
+
+describe("session persistence — replay determinism", () => {
+  // apps/web never stores "current question" as its own field — it reconstructs
+  // a session purely by replaying the stored answer rows back through
+  // submitAnswer (see lib/sessionState.ts). That's only safe if doing so is
+  // deterministic: the same answer sequence must always rebuild the exact
+  // same state and land on the exact same next question, whether computed
+  // live in one pass or replayed one answer at a time after a refresh/return.
+  it("replaying stored answers one at a time reconstructs the same state as the live session", () => {
+    const answersInOrder: { questionKey: string; selectedOptionKeys?: string[]; openText?: string; aiChosenFollowupKey?: string }[] = [
+      { questionKey: "q1", selectedOptionKeys: ["b"] },
+      { questionKey: "q2", selectedOptionKeys: ["b"] },
+      { questionKey: "q3_open", openText: "reflective answer", aiChosenFollowupKey: "ai_followup" },
+    ];
+
+    let live = startSession(config);
+    for (const input of answersInOrder) live = submitAnswer(config, live, input).state;
+
+    // Simulate "user closed the browser and came back" — rebuild from scratch
+    // by replaying the same recorded answers through a fresh session.
+    let replayed = startSession(config);
+    for (const input of answersInOrder) replayed = submitAnswer(config, replayed, input).state;
+
+    // submitAnswer always stamps its own answeredAt at call time (apps/web's
+    // reconstructSessionState passes the real stored timestamp in, but
+    // submitAnswer doesn't accept/use it — see AnswerInput — so it's not
+    // part of the determinism guarantee here). Compare the fields that
+    // actually drive scoring and branching, which is what "replay is safe"
+    // really means.
+    expect(replayed.askedQuestionKeys).toEqual(live.askedQuestionKeys);
+    expect(replayed.dimensionScores).toEqual(live.dimensionScores);
+    expect(replayed.status).toEqual(live.status);
+    expect(nextQuestion(config, replayed)?.key).toBe(nextQuestion(config, live)?.key);
+  });
+
+  it("reconstructed state produces the same completed profile as the original run", () => {
+    let state = startSession(config);
+    const steps: RecordedAnswer[] = [
+      { questionKey: "q1", selectedOptionKeys: ["a"], answeredAt: "" },
+      { questionKey: "followup", selectedOptionKeys: ["a"], answeredAt: "" },
+    ];
+    for (const s of steps) state = submitAnswer(config, state, s).state;
+    const original = computeResult(config, state);
+
+    let rebuilt = startSession(config);
+    for (const s of steps) rebuilt = submitAnswer(config, rebuilt, s).state;
+    const replayedResult = computeResult(config, rebuilt);
+
+    expect(replayedResult.profileResult.primary.key).toBe(original.profileResult.primary.key);
+    expect(replayedResult.dimensionScores).toEqual(original.dimensionScores);
   });
 });

@@ -127,6 +127,8 @@ export async function saveAssessmentDraft(assessmentId: string, config: Assessme
       maxQuestions: config.maxQuestions,
       aiInfluenceCap: config.scoringModel.aiInfluenceCap,
       freeResultTemplate: config.freeResultTemplate as any,
+      shareTemplate: (config.shareTemplate as any) ?? undefined,
+      tensionPairs: (config.tensionPairs as any) ?? undefined,
       publishedAt: null,
       dimensions: { create: dimensionRows },
       questions: {
@@ -174,6 +176,7 @@ export async function saveAssessmentDraft(assessmentId: string, config: Assessme
           name: p.name,
           descriptionTemplate: p.descriptionTemplate,
           matchingRule: p.matchingRule as any,
+          priority: p.priority ?? 0,
         })),
       },
       reportTemplate: { create: { sections: config.premiumReportStructure as any } },

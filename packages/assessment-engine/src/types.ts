@@ -67,8 +67,17 @@ export interface AdaptiveRule {
 }
 
 export interface ProfileMatchingRule {
-  /** All ranges must hold (inclusive) on normalized 0-100 scores for this profile to match. */
+  /**
+   * Required — all ranges must hold (inclusive) on normalized 0-100 scores
+   * for this profile to even be a candidate. Kept as the base/required shape
+   * so every existing assessment's simple matchingRule keeps working
+   * unchanged; optionalConditions/excludeConditions are additive.
+   */
   dimensionRanges: Partial<Record<DimensionKey, [number, number]>>;
+  /** Not gating — each satisfied condition strengthens this profile's rank among other required-matching profiles (distinguishes similar profiles). */
+  optionalConditions?: Partial<Record<DimensionKey, [number, number]>>;
+  /** Disqualifying — if ANY of these ranges hold, this profile is excluded even if dimensionRanges matched. */
+  excludeConditions?: Partial<Record<DimensionKey, [number, number]>>;
 }
 
 export interface ProfileDefinition {
@@ -76,12 +85,52 @@ export interface ProfileDefinition {
   name: string;
   descriptionTemplate: string;
   matchingRule: ProfileMatchingRule;
+  /** Tie-break order when multiple profiles satisfy required conditions with an equal optional-condition count. Higher wins. Defaults to 0. */
+  priority?: number;
 }
 
 export interface FreeResultTemplate {
   headline: string; // e.g. "Your primary pattern is:"
   insightIntro: string;
   lockedInsightsLabel: string; // e.g. "Your answers revealed 3 additional patterns"
+}
+
+export interface ShareTemplate {
+  /** e.g. "I discovered my INNER Love Profile:" */
+  shareTitleTemplate: string;
+  /** May reference {{profileName}} — replaced with the resolved primary profile name. Never includes raw answers or dimension scores. */
+  shareTextTemplate: string;
+}
+
+/**
+ * A named tension between two dimensions that can both run strong at once —
+ * "high independence AND high connection" is a real, meaningful pattern, not
+ * a data error. See docs/ARCHITECTURE.md §6 and scoring.ts's detectTensions.
+ *
+ * Each side is checked against its own threshold in its own direction
+ * (default "gte", i.e. "at least this high") — most tensions are "both
+ * sides run strong" (high independence AND high connection), but some are
+ * naturally "high on one side, low on the other" (high independence AND
+ * *low* tolerance for distance is just as real a coexisting pattern), so
+ * either side can opt into "lte" instead.
+ */
+export interface TensionPairDefinition {
+  key: string;
+  label: string;
+  dimensionA: DimensionKey;
+  dimensionB: DimensionKey;
+  thresholdA: number;
+  thresholdB: number;
+  directionA?: "gte" | "lte";
+  directionB?: "gte" | "lte";
+}
+
+export interface TensionResult {
+  key: string;
+  label: string;
+  dimensions: [DimensionKey, DimensionKey];
+  /** 0..1 — how strongly both sides clear their threshold, not just whether they do. */
+  strength: number;
 }
 
 export interface ReportSection {
@@ -122,6 +171,9 @@ export interface AssessmentConfig {
   };
   profiles: ProfileDefinition[];
   freeResultTemplate: FreeResultTemplate;
+  shareTemplate?: ShareTemplate;
+  /** Configurable pairs the tension engine checks after every answer — optional so existing assessments without an authored set simply detect none. */
+  tensionPairs?: TensionPairDefinition[];
   premiumReportStructure: ReportSection[];
   recommendedNext: RecommendationCandidate[];
   pricing: Record<string, PriceRef>;

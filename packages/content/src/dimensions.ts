@@ -23,4 +23,6 @@ export const dimensionPool: DimensionDefinition[] = [
   { key: "security", label: "Security", description: "Underlying sense of safety in relationships." },
   { key: "curiosity", label: "Curiosity", description: "Interest in exploring the unfamiliar with others." },
   { key: "flexibility", label: "Flexibility", description: "Willingness to adapt expectations to another person." },
+  { key: "affection_expression", label: "Affection Expression", description: "How openly and directly someone shows care once they feel it." },
+  { key: "distance_response", label: "Distance Response", description: "How someone tends to react when a person they're close to becomes less available." },
 ];
