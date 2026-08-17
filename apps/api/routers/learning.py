@@ -104,6 +104,9 @@ def get_similar_contexts(
     asset_ids = {row.asset_id for row in rows if row.asset_id is not None}
     symbols = {a.id: a.symbol for a in db.query(Asset).filter(Asset.id.in_(asset_ids)).all()} if asset_ids else {}
     return [
-        MarketMemoryOut(id=row.id, ts=row.ts, asset_symbol=symbols.get(row.asset_id), context=row.context, outcome=row.outcome)
+        MarketMemoryOut(
+            id=row.id, ts=row.ts, asset_symbol=symbols.get(row.asset_id) if row.asset_id is not None else None,
+            context=row.context, outcome=row.outcome,
+        )
         for row in rows
     ]

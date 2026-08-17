@@ -46,12 +46,23 @@ def _build_user_content(
     )
 
 
-def generate_trade_hypothesis(client: LLMClient, **context: object) -> TradeHypothesis | None:
+def generate_trade_hypothesis(
+    client: LLMClient, *, strategy_code: str, asset_symbol: str, direction: str, regime: str | None,
+    pattern_type: str | None, news_direction: str | None, outcome: str,
+    pnl: float, r_multiple: float | None, exit_reason: str | None,
+) -> TradeHypothesis | None:
     if not client.is_available():
         return None
 
     try:
-        raw = client.complete_json(SYSTEM_PROMPT, _build_user_content(**context))
+        raw = client.complete_json(
+            SYSTEM_PROMPT,
+            _build_user_content(
+                strategy_code=strategy_code, asset_symbol=asset_symbol, direction=direction, regime=regime,
+                pattern_type=pattern_type, news_direction=news_direction, outcome=outcome,
+                pnl=pnl, r_multiple=r_multiple, exit_reason=exit_reason,
+            ),
+        )
     except (LLMUnavailableError, LLMResponseError):
         logger.exception("LLM hypothesis generation failed")
         return None

@@ -6,7 +6,7 @@ Stop is placed beyond the recent swing low/high, target at a fixed R multiple.
 """
 from __future__ import annotations
 
-from packages.quant.strategies.base import AnalysisResult, MarketContext, StrategyBase, StrategySignal
+from packages.quant.strategies.base import AnalysisResult, Direction, MarketContext, StrategyBase, StrategySignal
 
 ENTRY_THRESHOLD = 0.5  # trend_strength magnitude (ATR units) required to act
 RISK_REWARD = 2.0
@@ -42,7 +42,7 @@ class TrendFollowingStrategy(StrategyBase):
         if ts is None:
             return AnalysisResult(direction=None, strength=0.0, rationale={"reason": "no_trend_strength"})
 
-        direction = "long" if ts > 0 else "short"
+        direction: Direction = "long" if ts > 0 else "short"
         strength = min(1.0, abs(ts) / (self.entry_threshold * 4))
         return AnalysisResult(
             direction=direction,

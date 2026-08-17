@@ -104,8 +104,8 @@ def run_research_cycle(db: Session, llm_client: LLMClient) -> dict:
         scopes_seen.add(scope)
         proposed += 1
 
-    for perf in _strategy_candidates(db):
-        strategy = db.get(StrategyRow, perf.strategy_id)
+    for strategy_perf in _strategy_candidates(db):
+        strategy = db.get(StrategyRow, strategy_perf.strategy_id)
         if strategy is None:
             continue
         scope = f"strategy:{strategy.code}"
@@ -114,8 +114,8 @@ def run_research_cycle(db: Session, llm_client: LLMClient) -> dict:
         rule = propose_rule(
             llm_client, scope=scope,
             stats={
-                "sample_size": perf.window_trades, "win_rate": perf.win_rate,
-                "expectancy": perf.expectancy, "worst_regime": perf.worst_regime,
+                "sample_size": strategy_perf.window_trades, "win_rate": strategy_perf.win_rate,
+                "expectancy": strategy_perf.expectancy, "worst_regime": strategy_perf.worst_regime,
             },
         )
         if rule is None:
@@ -123,7 +123,7 @@ def run_research_cycle(db: Session, llm_client: LLMClient) -> dict:
         db.add(
             LearnedRule(
                 scope=scope, condition=rule.condition, conclusion=rule.conclusion,
-                confidence=rule.confidence, sample_size=perf.window_trades, status="candidate",
+                confidence=rule.confidence, sample_size=strategy_perf.window_trades, status="candidate",
             )
         )
         scopes_seen.add(scope)

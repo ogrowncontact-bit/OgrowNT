@@ -134,6 +134,17 @@ def apply_promotion(db: Session, strategy_id: int, *, actor: str, criteria: Prom
         raise ValueError("; ".join(verdict.reasons) or "not eligible for promotion")
 
     strategy = db.get(StrategyRow, strategy_id)
+    if strategy is None:
+        # Unreachable in practice: evaluate_promotion already returned
+        # eligible=False for a missing strategy, which raised above. Guarded
+        # explicitly anyway rather than relying on that cross-function
+        # invariant to hold forever — this mutates lifecycle_stage.
+        raise ValueError("strategy not found")
+    if verdict.next_stage is None:
+        # Unreachable in practice: eligible=True is only ever returned by
+        # evaluate_promotion alongside a real next_stage. Guarded explicitly
+        # for the same reason as the strategy-not-found check above.
+        raise ValueError("no next lifecycle stage to promote to")
     previous_stage = strategy.lifecycle_stage
     strategy.lifecycle_stage = verdict.next_stage
     db.add(strategy)

@@ -1,3 +1,5 @@
+from collections.abc import Sequence
+
 from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -32,7 +34,7 @@ def list_patterns(
 @router.get("/performance", response_model=list[PatternPerformanceOut])
 def list_pattern_performance(
     db: Session = Depends(get_session), _: AdminUser = Depends(get_current_admin)
-) -> list[PatternPerformance]:
+) -> Sequence[PatternPerformance]:
     return (
         db.execute(select(PatternPerformance).order_by(PatternPerformance.sample_size.desc()))
         .scalars()

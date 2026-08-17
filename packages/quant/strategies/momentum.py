@@ -5,7 +5,7 @@ RSI level to catch short-horizon momentum bursts, confirmed by regime.
 """
 from __future__ import annotations
 
-from packages.quant.strategies.base import AnalysisResult, MarketContext, StrategyBase, StrategySignal
+from packages.quant.strategies.base import AnalysisResult, Direction, MarketContext, StrategyBase, StrategySignal
 
 ROC_THRESHOLD = 0.01  # +/-1% over the ROC lookback window to call it momentum
 RSI_BULL = 55.0
@@ -45,7 +45,7 @@ class MomentumStrategy(StrategyBase):
         if not bullish and not bearish:
             return AnalysisResult(direction=None, strength=0.0, rationale={"roc": roc, "rsi": rsi})
 
-        direction = "long" if bullish else "short"
+        direction: Direction = "long" if bullish else "short"
         strength = min(1.0, abs(roc) / (self.roc_threshold * 4))
         return AnalysisResult(direction=direction, strength=strength, rationale={"roc": roc, "rsi": rsi})
 

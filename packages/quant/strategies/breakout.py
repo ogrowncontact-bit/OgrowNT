@@ -6,7 +6,7 @@ above-average volume. Stop sits back inside the broken range.
 from __future__ import annotations
 
 from packages.quant.indicators.core import avg_volume, recent_high, recent_low
-from packages.quant.strategies.base import AnalysisResult, MarketContext, StrategyBase, StrategySignal
+from packages.quant.strategies.base import AnalysisResult, Direction, MarketContext, StrategyBase, StrategySignal
 
 LOOKBACK = 20
 VOLUME_CONFIRMATION_MULT = 1.2  # current volume must exceed this * average
@@ -57,7 +57,7 @@ class BreakoutStrategy(StrategyBase):
                 rationale={"prior_high": prior_high, "prior_low": prior_low, "volume_confirmed": volume_confirmed},
             )
 
-        direction = "long" if breaks_up else "short"
+        direction: Direction = "long" if breaks_up else "short"
         breakout_size = (current.close - prior_high) / prior_high if breaks_up else (prior_low - current.close) / prior_low
         strength = min(1.0, max(0.0, breakout_size) / 0.01)
         return AnalysisResult(

@@ -1,3 +1,6 @@
+import logging
+from collections.abc import Sequence
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -29,6 +32,7 @@ from packages.shared.models import (
 )
 
 router = APIRouter(tags=["trading"])
+logger = logging.getLogger("api.trading")
 
 
 def _position_out(db: Session, position: Position, asset: Asset, strategy: StrategyRow) -> PositionOut:
@@ -70,6 +74,9 @@ def list_positions(
     for position in positions:
         asset = db.get(Asset, position.asset_id)
         strategy = db.get(StrategyRow, position.strategy_id)
+        if asset is None or strategy is None:
+            logger.warning("Skipping position %s: asset or strategy row missing", position.id)
+            continue
         out.append(_position_out(db, position, asset, strategy))
     return out
 
@@ -77,7 +84,7 @@ def list_positions(
 @router.get("/api/orders", response_model=list[OrderOut])
 def list_orders(
     limit: int = 100, db: Session = Depends(get_session), _: AdminUser = Depends(get_current_admin)
-) -> list[Order]:
+) -> Sequence[Order]:
     return db.execute(select(Order).order_by(Order.id.desc()).limit(limit)).scalars().all()
 
 

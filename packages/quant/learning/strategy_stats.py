@@ -122,8 +122,8 @@ def compute_strategy_performance(db: Session, strategy_id: int) -> StrategyPerfo
             continue
         regime_r.setdefault(regime, []).append(t.r_multiple)
     regime_expectancy = {r: sum(vs) / len(vs) for r, vs in regime_r.items() if vs}
-    best_regime = max(regime_expectancy, key=regime_expectancy.get) if regime_expectancy else None
-    worst_regime = min(regime_expectancy, key=regime_expectancy.get) if regime_expectancy else None
+    best_regime = max(regime_expectancy, key=lambda r: regime_expectancy[r]) if regime_expectancy else None
+    worst_regime = min(regime_expectancy, key=lambda r: regime_expectancy[r]) if regime_expectancy else None
 
     perf.win_rate = round(win_rate, 4)
     perf.profit_factor = round(profit_factor, 4) if profit_factor is not None else None

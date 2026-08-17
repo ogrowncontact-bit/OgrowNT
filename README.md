@@ -209,12 +209,14 @@ cd apps/dashboard && npm install && npm run dev
 
 `.github/workflows/ci.yml` runs on every push/PR: `ruff check .` (real bugs —
 unused imports, undefined names, mutable-default footguns — not a style
-rewrite; see `[tool.ruff]` in `pyproject.toml`), then the full pytest suite
-(316 tests) against a real `postgres:16-alpine` service container, migrated
-from scratch via `alembic upgrade head`; and, separately, the dashboard's
-`eslint` + `next build`. Nothing in CI touches a broker, an exchange, or real
-capital — it only proves the existing test/build/lint steps that were
-previously run by hand still pass.
+rewrite; see `[tool.ruff]` in `pyproject.toml`), `mypy packages apps scripts`
+(type-checked with the `pydantic.mypy` plugin so FastAPI response models
+type-check correctly), then the full pytest suite (316 tests) against a real
+`postgres:16-alpine` service container, migrated from scratch via `alembic
+upgrade head`; and, separately, the dashboard's `eslint` + `next build`.
+Nothing in CI touches a broker, an exchange, or real capital — it only
+proves the existing test/build/lint/type-check steps that were previously
+run by hand still pass.
 
 ## Design principles (non-negotiable — see `docs/blueprint/00-overview.md`)
 

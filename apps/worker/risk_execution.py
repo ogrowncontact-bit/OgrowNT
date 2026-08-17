@@ -87,6 +87,13 @@ def maybe_execute(
         logger.info("%s %s REJECTED reason=%s", asset.symbol, strategy.code, verdict.reason)
         return "risk_rejected"
 
+    if verdict.approved_quantity is None:
+        # Unreachable in practice: evaluate_signal only ever leaves
+        # approved_quantity None on the (already-returned-above) rejected
+        # path. Guarded explicitly anyway — this sizes a real order.
+        logger.warning("%s %s approved with no sized quantity — treating as rejected", asset.symbol, strategy.code)
+        return "risk_rejected"
+
     signal_row.status = "approved"
     db.commit()
 

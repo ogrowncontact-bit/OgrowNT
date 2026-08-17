@@ -30,7 +30,7 @@ def ensure_min_history(db: Session, provider: MarketDataProvider, asset: Asset, 
     rows. Returns how many candles were inserted (0 if already sufficient)."""
     count = db.scalar(
         select(func.count()).select_from(OHLCV).where(OHLCV.asset_id == asset.id, OHLCV.timeframe == timeframe)
-    )
+    ) or 0
     if count >= MIN_CANDLES_REQUIRED:
         return 0
 

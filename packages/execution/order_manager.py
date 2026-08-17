@@ -10,13 +10,13 @@ from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
 
-from packages.execution.adapters.base import ExecutionProvider, OrderRequest
+from packages.execution.adapters.base import ExecutionProvider, OrderRequest, Side
 from packages.portfolio.state import get_latest_cash, refresh_snapshot
 from packages.shared.models import Asset, Order, Position, Signal, Trade
 
 
 def open_position(db: Session, provider: ExecutionProvider, *, signal: Signal, asset: Asset, quantity: float) -> Position | None:
-    side = "buy" if signal.direction == "long" else "sell"
+    side: Side = "buy" if signal.direction == "long" else "sell"
     result = provider.submit_order(
         OrderRequest(asset_id=asset.id, symbol=asset.symbol, side=side, order_type="market", qty=quantity)
     )
@@ -68,7 +68,7 @@ def open_position(db: Session, provider: ExecutionProvider, *, signal: Signal, a
 
 
 def close_position(db: Session, provider: ExecutionProvider, position: Position, *, asset: Asset, exit_reason: str) -> Trade | None:
-    side = "sell" if position.direction == "long" else "buy"
+    side: Side = "sell" if position.direction == "long" else "buy"
     result = provider.submit_order(
         OrderRequest(asset_id=asset.id, symbol=asset.symbol, side=side, order_type="market", qty=position.size)
     )

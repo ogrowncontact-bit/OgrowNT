@@ -26,6 +26,8 @@ dependencies = [
 dev = [
     "pytest>=8.3",
     "ruff>=0.16",
+    "mypy>=1.13",
+    "types-PyYAML",
 ]
 
 [tool.setuptools.packages.find]
@@ -56,6 +58,11 @@ ignore = [
 # Depends()/Query()/etc are markers evaluated once at route registration,
 # not per-request mutable defaults — the exact footgun B008 exists to catch.
 extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.Path", "fastapi.Body", "fastapi.Header", "fastapi.Cookie"]
+
+[tool.mypy]
+python_version = "3.11"
+plugins = ["pydantic.mypy"]
+ignore_missing_imports = true
 
 [build-system]
 requires = ["setuptools>=68"]

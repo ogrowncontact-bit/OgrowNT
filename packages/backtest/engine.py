@@ -30,12 +30,13 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field
 from datetime import datetime
+from typing import cast
 
 from sqlalchemy.orm import Session
 
 from packages.backtest.portfolio import EquityPoint, SimPosition, SimTrade, SimulatedPortfolio
 from packages.backtest.risk import evaluate_signal_for_backtest
-from packages.data.connectors.market.base import Candle
+from packages.data.connectors.market.base import Candle, DataQuality
 from packages.execution.fills import simulate_fill
 from packages.quant.indicators.core import MIN_CANDLES_REQUIRED, compute_indicators
 from packages.quant.patterns.detector import detect_all
@@ -96,7 +97,10 @@ def _load_candles(db: Session, asset_id: int, timeframe: str, start_ts: datetime
         .all()
     )
     return [
-        Candle(ts=r.ts, open=r.open, high=r.high, low=r.low, close=r.close, volume=r.volume, data_quality=r.data_quality)
+        Candle(
+            ts=r.ts, open=r.open, high=r.high, low=r.low, close=r.close, volume=r.volume,
+            data_quality=cast(DataQuality, r.data_quality),  # DB CHECK constraint guarantees a valid value
+        )
         for r in rows
     ]
 

@@ -8,7 +8,7 @@ is marked worst-fit for trending/high-vol regimes.
 """
 from __future__ import annotations
 
-from packages.quant.strategies.base import AnalysisResult, MarketContext, StrategyBase, StrategySignal
+from packages.quant.strategies.base import AnalysisResult, Direction, MarketContext, StrategyBase, StrategySignal
 
 RSI_OVERSOLD = 30.0
 RSI_OVERBOUGHT = 70.0
@@ -49,7 +49,7 @@ class MeanReversionStrategy(StrategyBase):
         if not oversold and not overbought:
             return AnalysisResult(direction=None, strength=0.0, rationale={"rsi": rsi, "deviation": deviation})
 
-        direction = "long" if oversold else "short"
+        direction: Direction = "long" if oversold else "short"
         rsi_extremity = (self.rsi_oversold - rsi) if oversold else (rsi - self.rsi_overbought)
         strength = min(1.0, max(0.0, rsi_extremity) / 15.0)
         return AnalysisResult(direction=direction, strength=strength, rationale={"rsi": rsi, "deviation": deviation})

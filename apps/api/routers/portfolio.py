@@ -1,3 +1,5 @@
+from collections.abc import Sequence
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -33,7 +35,7 @@ def get_portfolio(db: Session = Depends(get_session), _: AdminUser = Depends(get
 @router.get("/api/portfolio/history", response_model=list[PortfolioSnapshotOut])
 def get_portfolio_history(
     limit: int = 500, db: Session = Depends(get_session), _: AdminUser = Depends(get_current_admin)
-) -> list[PortfolioSnapshot]:
+) -> Sequence[PortfolioSnapshot]:
     return (
         db.execute(select(PortfolioSnapshot).order_by(PortfolioSnapshot.ts.desc()).limit(limit))
         .scalars()

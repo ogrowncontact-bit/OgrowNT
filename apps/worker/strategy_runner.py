@@ -7,11 +7,12 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timedelta, timezone
+from typing import cast
 
 from sqlalchemy.orm import Session
 
 from apps.worker.risk_execution import maybe_execute
-from packages.data.connectors.market.base import Candle
+from packages.data.connectors.market.base import Candle, DataQuality
 from packages.execution.adapters.base import ExecutionProvider
 from packages.execution.adapters.paper import PaperExecutionProvider
 from packages.quant.indicators.core import MIN_CANDLES_REQUIRED, compute_indicators
@@ -55,7 +56,10 @@ def _load_recent_candles(db: Session, asset_id: int, timeframe: str, limit: int)
     )
     rows.reverse()  # rows arrived newest-first; strategies expect oldest-first
     return [
-        Candle(ts=r.ts, open=r.open, high=r.high, low=r.low, close=r.close, volume=r.volume, data_quality=r.data_quality)
+        Candle(
+            ts=r.ts, open=r.open, high=r.high, low=r.low, close=r.close, volume=r.volume,
+            data_quality=cast(DataQuality, r.data_quality),  # DB CHECK constraint guarantees a valid value
+        )
         for r in rows
     ]
 

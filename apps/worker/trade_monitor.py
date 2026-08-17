@@ -90,14 +90,14 @@ def _record_pattern_performance(db: Session, position: Position, trade: Trade) -
     )
 
 
-def _entry_context(db: Session, position: Position) -> dict:
+def _entry_context(db: Session, position: Position) -> dict[str, str | None]:
     """Best-effort reconstruction of what the strategy knew at entry — the
     same signal/regime/pattern rows Strategy Engine wrote in
     apps/worker/strategy_runner.py. News direction is read back from that
     signal's OpportunityScore.notes (Phase 4 scores the news alignment but
     doesn't persist a separate news_impact_id FK on signals — this is the
     one place that read survives to trade close)."""
-    context = {"regime": None, "pattern_type": None, "news_direction": None}
+    context: dict[str, str | None] = {"regime": None, "pattern_type": None, "news_direction": None}
     if position.signal_id is None:
         return context
     signal = db.get(Signal, position.signal_id)
@@ -207,6 +207,10 @@ def run_trade_monitor_cycle(db: Session, provider: ExecutionProvider, llm_client
             continue
 
         asset = db.get(Asset, position.asset_id)
+        if asset is None:
+            unavailable += 1
+            logger.warning("DATA_UNAVAILABLE closing position %s: asset %s not found", position.id, position.asset_id)
+            continue
         trade = close_position(db, provider, position, asset=asset, exit_reason=exit_reason)
         if trade is not None:
             closed += 1

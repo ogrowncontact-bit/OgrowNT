@@ -61,7 +61,7 @@ def _verdict(base: ParamRun, perturbed: list[ParamRun]) -> StabilityResult:
     if not judged:
         return StabilityResult(base=base, perturbed=perturbed, stable=None, reason="no perturbed run produced any trades — cannot judge stability")
 
-    flips = sum(1 for p in judged if (p.result.expectancy > 0) != base_sign)
+    flips = sum(1 for p in judged if p.result.expectancy is not None and (p.result.expectancy > 0) != base_sign)
     stable = flips == 0
     reason = f"{flips}/{len(judged)} perturbed parameter runs flipped the expectancy sign vs. the base run"
     return StabilityResult(base=base, perturbed=perturbed, stable=stable, reason=reason)
