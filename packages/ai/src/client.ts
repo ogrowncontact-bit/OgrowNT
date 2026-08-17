@@ -1,4 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { reportAiCall } from "./telemetry";
 
 /**
  * Every AI module in this package goes through here, and every call is
@@ -29,6 +30,8 @@ function getClient(): Anthropic | null {
 export type StructuredResult<T> = { ok: true; data: T } | { ok: false; reason: string };
 
 interface CallStructuredParams {
+  /** Which AI module this is (§4 — "questionAI", "responseAI", "profileAI", "reportAI", "recommendationAI"), for cost/latency monitoring (§7). */
+  module: string;
   model: string;
   system: string;
   userMessage: string;
@@ -38,11 +41,16 @@ interface CallStructuredParams {
   maxTokens?: number;
 }
 
-/** One Claude call, forced to answer via a single tool call so the output is structured, not free-text we'd have to parse. */
+/** One Claude call, forced to answer via a single tool call so the output is structured, not free-text we'd have to parse. Every call — including the no-API-key and error paths — is reported via reportAiCall() for cost/latency monitoring. */
 export async function callStructured<T>(params: CallStructuredParams): Promise<StructuredResult<T>> {
   const anthropic = getClient();
-  if (!anthropic) return { ok: false, reason: "AI disabled (no ANTHROPIC_API_KEY)" };
+  if (!anthropic) {
+    const reason = "AI disabled (no ANTHROPIC_API_KEY)";
+    reportAiCall({ module: params.module, model: params.model, latencyMs: 0, inputTokens: null, outputTokens: null, ok: false, errorReason: reason });
+    return { ok: false, reason };
+  }
 
+  const start = Date.now();
   try {
     const response = await anthropic.messages.create({
       model: params.model,
@@ -58,13 +66,22 @@ export async function callStructured<T>(params: CallStructuredParams): Promise<S
       ],
       tool_choice: { type: "tool", name: params.toolName },
     });
+    const latencyMs = Date.now() - start;
+    const inputTokens = response.usage?.input_tokens ?? null;
+    const outputTokens = response.usage?.output_tokens ?? null;
 
     const toolUse = response.content.find((block) => block.type === "tool_use");
     if (!toolUse || toolUse.type !== "tool_use") {
-      return { ok: false, reason: "Model did not return a tool_use block" };
+      const reason = "Model did not return a tool_use block";
+      reportAiCall({ module: params.module, model: params.model, latencyMs, inputTokens, outputTokens, ok: false, errorReason: reason });
+      return { ok: false, reason };
     }
+    reportAiCall({ module: params.module, model: params.model, latencyMs, inputTokens, outputTokens, ok: true, errorReason: null });
     return { ok: true, data: toolUse.input as T };
   } catch (error) {
-    return { ok: false, reason: error instanceof Error ? error.message : "Unknown AI error" };
+    const latencyMs = Date.now() - start;
+    const reason = error instanceof Error ? error.message : "Unknown AI error";
+    reportAiCall({ module: params.module, model: params.model, latencyMs, inputTokens: null, outputTokens: null, ok: false, errorReason: reason });
+    return { ok: false, reason };
   }
 }

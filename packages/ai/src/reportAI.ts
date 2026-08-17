@@ -41,6 +41,7 @@ export async function generateReport(params: GenerateReportParams): Promise<{ se
     .join(", ");
 
   const result = await callStructured<Record<string, string>>({
+    module: "reportAI",
     model: MODELS.quality,
     system:
       "You write a premium, warm, specific personal-reflection report for a self-reflection app. The " +

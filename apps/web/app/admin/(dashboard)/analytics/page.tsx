@@ -1,5 +1,15 @@
 import Link from "next/link";
-import { FUNNEL_STAGES, getConsentSummary, getDeletionRequests, getFunnelSummary, getQuestionDropoff, getRecentOrders, getRevenueSummary } from "@/lib/admin/analyticsReader";
+import {
+  FUNNEL_STAGES,
+  getAiCallStats,
+  getConsentSummary,
+  getDeletionRequests,
+  getFunnelSummary,
+  getQuestionDropoff,
+  getRecentAiFailures,
+  getRecentOrders,
+  getRevenueSummary,
+} from "@/lib/admin/analyticsReader";
 import { ReengagementRunner } from "@/components/admin/ReengagementRunner";
 
 function formatMoney(cents: number, currency = "EUR") {
@@ -16,12 +26,14 @@ const cardValue = "font-display text-[22px] text-[var(--inner-ink)]";
 
 export default async function AdminAnalyticsPage({ searchParams }: { searchParams: Promise<{ assessmentId?: string }> }) {
   const { assessmentId: requestedAssessmentId } = await searchParams;
-  const [funnel, orders, revenue, consent, deletionRequests] = await Promise.all([
+  const [funnel, orders, revenue, consent, deletionRequests, aiStats, aiFailures] = await Promise.all([
     getFunnelSummary(),
     getRecentOrders(50),
     getRevenueSummary(),
     getConsentSummary(),
     getDeletionRequests(),
+    getAiCallStats(),
+    getRecentAiFailures(10),
   ]);
 
   const selectedAssessmentId = requestedAssessmentId ?? funnel[0]?.assessmentId;
@@ -200,7 +212,70 @@ export default async function AdminAnalyticsPage({ searchParams }: { searchParam
         </table>
       </div>
 
-      <h2 className="font-display mb-3 mt-8 text-[18px] text-[var(--inner-ink)]">GDPR erasure requests</h2>
+      <h2 className="font-display mb-3 mt-8 text-[18px] text-[var(--inner-ink)]">AI cost &amp; latency</h2>
+      <p className="mb-3 text-[13px] text-[var(--inner-ink-soft)]">
+        Every Question/Response/Profile/Report/Recommendation AI call, whether or not it succeeded — a "0 ok" module
+        with calls logged usually means ANTHROPIC_API_KEY isn't set and the deterministic fallback is doing the work.
+      </p>
+      <div className="mb-4 overflow-x-auto rounded-[var(--inner-radius-lg)] border border-[var(--inner-line)] bg-[var(--inner-card)]">
+        <table className="w-full text-left text-[13px]">
+          <thead>
+            <tr className="border-b border-[var(--inner-line)] text-[var(--inner-muted)]">
+              <th className="px-4 py-3 font-medium">Module</th>
+              <th className="px-4 py-3 font-medium">Calls</th>
+              <th className="px-4 py-3 font-medium">Ok rate</th>
+              <th className="px-4 py-3 font-medium">Avg latency</th>
+              <th className="px-4 py-3 font-medium">Input tokens</th>
+              <th className="px-4 py-3 font-medium">Output tokens</th>
+            </tr>
+          </thead>
+          <tbody>
+            {aiStats.length === 0 && (
+              <tr>
+                <td colSpan={6} className="px-4 py-6 text-center text-[var(--inner-muted)]">
+                  No AI calls logged yet.
+                </td>
+              </tr>
+            )}
+            {aiStats.map((s) => (
+              <tr key={s.module} className="border-b border-[var(--inner-line)] last:border-0">
+                <td className="px-4 py-3 font-medium text-[var(--inner-ink)]">{s.module}</td>
+                <td className="px-4 py-3 text-[var(--inner-ink-soft)]">{s.totalCalls}</td>
+                <td className="px-4 py-3 text-[var(--inner-ink-soft)]">
+                  {s.okCalls} / {s.totalCalls} ({s.totalCalls > 0 ? Math.round((s.okCalls / s.totalCalls) * 100) : 0}%)
+                </td>
+                <td className="px-4 py-3 text-[var(--inner-ink-soft)]">{s.avgLatencyMs}ms</td>
+                <td className="px-4 py-3 text-[var(--inner-ink-soft)]">{s.totalInputTokens.toLocaleString()}</td>
+                <td className="px-4 py-3 text-[var(--inner-ink-soft)]">{s.totalOutputTokens.toLocaleString()}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {aiFailures.length > 0 && (
+        <div className="mb-8 overflow-hidden rounded-[var(--inner-radius-lg)] border border-[var(--inner-line)] bg-[var(--inner-card)]">
+          <table className="w-full text-left text-[13px]">
+            <thead>
+              <tr className="border-b border-[var(--inner-line)] text-[var(--inner-muted)]">
+                <th className="px-4 py-3 font-medium">Recent failures</th>
+                <th className="px-4 py-3 font-medium">Module</th>
+                <th className="px-4 py-3 font-medium">When</th>
+              </tr>
+            </thead>
+            <tbody>
+              {aiFailures.map((f) => (
+                <tr key={f.id} className="border-b border-[var(--inner-line)] last:border-0">
+                  <td className="px-4 py-3 text-[var(--inner-ink-soft)]">{f.errorReason ?? "Unknown error"}</td>
+                  <td className="px-4 py-3 text-[var(--inner-ink-soft)]">{f.module}</td>
+                  <td className="whitespace-nowrap px-4 py-3 text-[var(--inner-ink-soft)]">{formatDate(f.occurredAt)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <h2 className="font-display mb-3 text-[18px] text-[var(--inner-ink)]">GDPR erasure requests</h2>
       <p className="mb-3 text-[13px] text-[var(--inner-ink-soft)]">
         Self-serve deletions from /privacy — audit trail only, the email is already anonymized by the time it lands
         here.

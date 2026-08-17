@@ -43,6 +43,7 @@ export async function interpretOpenAnswer(params: InterpretParams): Promise<Open
     dimension_nudges: Record<string, number>;
     safety_concern: boolean;
   }>({
+    module: "responseAI",
     model: MODELS.fast,
     system:
       "You analyze one short, personal answer from a self-reflection app about relationship patterns. " +

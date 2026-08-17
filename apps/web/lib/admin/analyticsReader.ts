@@ -211,3 +211,53 @@ export async function getConsentSummary(): Promise<ConsentSummary> {
   ]);
   return { totalConsented: consented, totalDeclined: declined, totalUnsubscribed: unsubscribed };
 }
+
+export interface AiModuleStats {
+  module: string;
+  totalCalls: number;
+  okCalls: number;
+  avgLatencyMs: number;
+  totalInputTokens: number;
+  totalOutputTokens: number;
+}
+
+/** Cost/latency monitoring (§7) — aggregated from AiCallLog, written via packages/ai's onAiCall() hook. */
+export async function getAiCallStats(): Promise<AiModuleStats[]> {
+  const [totals, okCounts] = await Promise.all([
+    prisma.aiCallLog.groupBy({
+      by: ["module"],
+      _count: { _all: true },
+      _avg: { latencyMs: true },
+      _sum: { inputTokens: true, outputTokens: true },
+    }),
+    prisma.aiCallLog.groupBy({ by: ["module"], where: { ok: true }, _count: { _all: true } }),
+  ]);
+  const okByModule = new Map(okCounts.map((r) => [r.module, r._count._all]));
+
+  return totals
+    .map((g) => ({
+      module: g.module,
+      totalCalls: g._count._all,
+      okCalls: okByModule.get(g.module) ?? 0,
+      avgLatencyMs: Math.round(g._avg.latencyMs ?? 0),
+      totalInputTokens: g._sum.inputTokens ?? 0,
+      totalOutputTokens: g._sum.outputTokens ?? 0,
+    }))
+    .sort((a, b) => a.module.localeCompare(b.module));
+}
+
+export interface AiCallFailureRow {
+  id: string;
+  module: string;
+  occurredAt: Date;
+  errorReason: string | null;
+}
+
+export async function getRecentAiFailures(limit = 10): Promise<AiCallFailureRow[]> {
+  const rows = await prisma.aiCallLog.findMany({
+    where: { ok: false },
+    orderBy: { occurredAt: "desc" },
+    take: limit,
+  });
+  return rows.map((r) => ({ id: r.id, module: r.module, occurredAt: r.occurredAt, errorReason: r.errorReason }));
+}

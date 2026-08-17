@@ -11,3 +11,5 @@ export { generateRecommendationCopy } from "./recommendationAI";
 export type { GeneratedRecommendation } from "./recommendationAI";
 export { enforceNonDiagnostic, sanitizeOpeners, findHardBannedTerms } from "./guardrails/nonDiagnosticFilter";
 export { detectSafetyConcern, SUPPORT_MESSAGE } from "./guardrails/safetyFlag";
+export { onAiCall } from "./telemetry";
+export type { AiCallEvent } from "./telemetry";

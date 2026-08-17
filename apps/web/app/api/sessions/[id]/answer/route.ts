@@ -9,6 +9,13 @@ import { encryptText } from "@/lib/security/encryption";
 import { toClientQuestion } from "@/lib/clientQuestion";
 import { track } from "@/lib/analytics";
 import type { OpenResponseAiMeta } from "@/lib/openResponseAiMeta";
+import { ensureAiTelemetryRegistered } from "@/lib/aiTelemetry";
+
+// Registers once per module instance — instrumentation.ts's startup hook runs
+// in a separate module realm from route handlers in Next.js's dev server, so
+// it alone isn't a reliable place to register a handler this file's own
+// callStructured() calls need to see. Idempotent, cheap to call again here.
+ensureAiTelemetryRegistered();
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;

@@ -3,6 +3,11 @@ import { generateRecommendationCopy } from "@inner/ai";
 import { dimensionPool } from "@inner/content/dimensions";
 import type { AssessmentConfig, RecommendationCandidate } from "@inner/assessment-engine";
 import { getAssessmentConfig, listPublishedSlugs } from "./assessments";
+import { ensureAiTelemetryRegistered } from "./aiTelemetry";
+
+// See the comment in app/api/sessions/[id]/answer/route.ts — registered per
+// module realm, not just once globally via instrumentation.ts.
+ensureAiTelemetryRegistered();
 
 const dimensionLabels = Object.fromEntries(dimensionPool.map((d) => [d.key, d.label]));
 

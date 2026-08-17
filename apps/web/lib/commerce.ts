@@ -8,6 +8,11 @@ import { getEmailProvider } from "./email";
 import { storeReportPdf } from "./reportStorage";
 import { track } from "./analytics";
 import type { OpenResponseAiMeta } from "./openResponseAiMeta";
+import { ensureAiTelemetryRegistered } from "./aiTelemetry";
+
+// See the comment in app/api/sessions/[id]/answer/route.ts — registered per
+// module realm, not just once globally via instrumentation.ts.
+ensureAiTelemetryRegistered();
 
 const dimensionLabels = Object.fromEntries(dimensionPool.map((d) => [d.key, d.label]));
 

@@ -28,6 +28,7 @@ export async function generateFreeInsight(params: GenerateInsightParams): Promis
     .join(", ");
 
   const result = await callStructured<{ insight: string }>({
+    module: "profileAI",
     model: MODELS.quality,
     system:
       "You write one short, warm, specific sentence (max 240 characters) for a self-reflection app's free " +

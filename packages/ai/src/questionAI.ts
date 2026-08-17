@@ -31,6 +31,7 @@ export async function chooseFollowup(params: ChooseFollowupParams): Promise<Foll
   }
 
   const result = await callStructured<{ chosen_key: string }>({
+    module: "questionAI",
     model: MODELS.fast,
     system:
       "You decide whether one more follow-up question is worth asking in a short self-reflection " +

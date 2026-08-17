@@ -564,3 +564,19 @@ model AuditLog {
 
   @@schema("admin")
 }
+
+/** Cost/latency monitoring for every AI module call (§7) — written via packages/ai's onAiCall() hook, registered once in apps/web/instrumentation.ts. */
+model AiCallLog {
+  id           String   @id @default(cuid())
+  module       String
+  model        String
+  occurredAt   DateTime @default(now())
+  latencyMs    Int
+  inputTokens  Int?
+  outputTokens Int?
+  ok           Boolean
+  errorReason  String?
+
+  @@index([module, occurredAt])
+  @@schema("admin")
+}

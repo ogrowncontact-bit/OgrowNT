@@ -25,6 +25,7 @@ export async function generateRecommendationCopy(params: GenerateRecommendationP
   if (!isAiEnabled()) return null;
 
   const result = await callStructured<{ bridge_copy: string }>({
+    module: "recommendationAI",
     model: MODELS.fast,
     system:
       "You write one warm, specific sentence bridging a just-completed self-reflection experience to a " +
