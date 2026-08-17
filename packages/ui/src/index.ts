@@ -5,3 +5,4 @@ export { Button } from "./components/Button";
 export { ScaleInput } from "./components/ScaleInput";
 export { OpenTextArea } from "./components/OpenTextArea";
 export { Checkbox } from "./components/Checkbox";
+export { LoadingState } from "./components/LoadingState";

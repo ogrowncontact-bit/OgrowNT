@@ -5,3 +5,4 @@ export { renderReportDeliveryEmail } from "./templates/reportDelivery";
 export { renderCheckoutReminderEmail } from "./templates/checkoutReminder";
 export { renderRecommendationNudgeEmail } from "./templates/recommendationNudge";
 export { renderPrivacyConfirmEmail } from "./templates/privacyConfirm";
+export { renderAccessLinkEmail } from "./templates/accessLink";

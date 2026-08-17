@@ -4,7 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { Screen, Button } from "@inner/ui";
 
-export function SupportRequestForm() {
+export function AccessRequestForm() {
   const [email, setEmail] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [done, setDone] = useState(false);
@@ -15,7 +15,7 @@ export function SupportRequestForm() {
     if (!emailValid || submitting) return;
     setSubmitting(true);
     try {
-      await fetch("/api/support/resend-report", {
+      await fetch("/api/access/request", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email }),
@@ -31,8 +31,8 @@ export function SupportRequestForm() {
       <Screen>
         <h1 className="font-display text-[24px] text-[var(--inner-ink)]">Check your inbox</h1>
         <p className="mt-3 text-[15px] text-[var(--inner-ink-soft)]">
-          If that address has a purchased report on file, we've just resent it — give it a few minutes to arrive,
-          and check spam if it doesn't show up.
+          If that address has purchased reports on file, we&apos;ve sent a link to access them — give it a few
+          minutes to arrive, and check spam if it doesn&apos;t show up.
         </p>
       </Screen>
     );
@@ -42,21 +42,22 @@ export function SupportRequestForm() {
     <Screen
       footer={
         <Button onClick={handleSubmit} disabled={!emailValid || submitting}>
-          {submitting ? "..." : "Resend My Report"}
+          {submitting ? "..." : "Send Access Link"}
         </Button>
       }
     >
-      <h1 className="font-display text-[26px] leading-snug text-[var(--inner-ink)]">Didn't get your report?</h1>
+      <h1 className="font-display text-[26px] leading-snug text-[var(--inner-ink)]">Access your reports</h1>
       <p className="mt-3 text-[15px] leading-relaxed text-[var(--inner-ink-soft)]">
-        Enter the email you paid with and we'll resend your most recent purchased report.
+        New device, or it&apos;s been a while? Enter the email you paid with and we&apos;ll send you a link to every
+        INNER report you&apos;ve purchased.
       </p>
 
       <div className="mt-8">
-        <label htmlFor="support-email" className="sr-only">
+        <label htmlFor="access-email" className="sr-only">
           Email
         </label>
         <input
-          id="support-email"
+          id="access-email"
           type="email"
           inputMode="email"
           autoComplete="email"
@@ -67,9 +68,9 @@ export function SupportRequestForm() {
         />
 
         <p className="mt-4 text-xs leading-relaxed text-[var(--inner-muted)]">
-          Bought more than one report?{" "}
-          <Link href="/access" className="underline">
-            Access all of your reports
+          Only need your most recent report resent to the inbox you&apos;re already checking?{" "}
+          <Link href="/support" className="underline">
+            Use the quicker resend flow
           </Link>{" "}
           instead.
         </p>
