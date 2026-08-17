@@ -11,6 +11,7 @@ import {
   getRevenueSummary,
 } from "@/lib/admin/analyticsReader";
 import { ReengagementRunner } from "@/components/admin/ReengagementRunner";
+import { RefundButton } from "@/components/admin/RefundButton";
 
 function formatMoney(cents: number, currency = "EUR") {
   return new Intl.NumberFormat("en-IE", { style: "currency", currency }).format(cents / 100);
@@ -176,12 +177,13 @@ export default async function AdminAnalyticsPage({ searchParams }: { searchParam
               <th className="px-4 py-3 font-medium">Product</th>
               <th className="px-4 py-3 font-medium">Amount</th>
               <th className="px-4 py-3 font-medium">Status</th>
+              <th className="px-4 py-3 font-medium"></th>
             </tr>
           </thead>
           <tbody>
             {orders.length === 0 && (
               <tr>
-                <td colSpan={6} className="px-4 py-6 text-center text-[var(--inner-muted)]">
+                <td colSpan={7} className="px-4 py-6 text-center text-[var(--inner-muted)]">
                   No orders yet.
                 </td>
               </tr>
@@ -205,6 +207,9 @@ export default async function AdminAnalyticsPage({ searchParams }: { searchParam
                   >
                     {o.status}
                   </span>
+                </td>
+                <td className="whitespace-nowrap px-4 py-3">
+                  {o.status === "paid" && <RefundButton orderId={o.id} amountLabel={formatMoney(o.amountCents, o.currency)} />}
                 </td>
               </tr>
             ))}

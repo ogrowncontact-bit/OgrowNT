@@ -1,5 +1,5 @@
 import Stripe from "stripe";
-import type { CheckoutSession, CreateCheckoutSessionParams, PaymentCompletedEvent, PaymentProvider } from "./types";
+import type { CheckoutSession, CreateCheckoutSessionParams, PaymentCompletedEvent, PaymentProvider, RefundParams, RefundResult } from "./types";
 
 export class StripeProvider implements PaymentProvider {
   readonly name = "stripe";
@@ -40,5 +40,22 @@ export class StripeProvider implements PaymentProvider {
     if (event.type !== "checkout.session.completed") return null;
     const session = event.data.object as Stripe.Checkout.Session;
     return { type: "payment_completed", providerRef: session.id };
+  }
+
+  async refund(params: RefundParams): Promise<RefundResult> {
+    try {
+      const session = await this.stripe.checkout.sessions.retrieve(params.providerRef);
+      const paymentIntentId = typeof session.payment_intent === "string" ? session.payment_intent : session.payment_intent?.id;
+      if (!paymentIntentId) return { ok: false, reason: "Checkout session has no associated payment" };
+
+      const refund = await this.stripe.refunds.create({
+        payment_intent: paymentIntentId,
+        amount: params.amountCents,
+        reason: "requested_by_customer",
+      });
+      return { ok: true, providerRef: refund.id };
+    } catch (error) {
+      return { ok: false, reason: error instanceof Error ? error.message : "Unknown refund error" };
+    }
   }
 }

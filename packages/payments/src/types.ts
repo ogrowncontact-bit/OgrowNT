@@ -24,9 +24,23 @@ export interface PaymentCompletedEvent {
   providerRef: string; // the checkout session id the provider gave us
 }
 
+export interface RefundParams {
+  /** The checkout session id from CheckoutSession.providerRef — providers that need the underlying charge/payment-intent id look it up from this. */
+  providerRef: string;
+  amountCents: number;
+  reason?: string;
+}
+
+export interface RefundResult {
+  ok: boolean;
+  providerRef?: string;
+  reason?: string;
+}
+
 export interface PaymentProvider {
   readonly name: string;
   createCheckoutSession(params: CreateCheckoutSessionParams): Promise<CheckoutSession>;
   /** Verifies and parses a webhook payload. Returns null for events we don't act on. */
   parseWebhookEvent(rawBody: string, signature: string | null): Promise<PaymentCompletedEvent | null>;
+  refund(params: RefundParams): Promise<RefundResult>;
 }
