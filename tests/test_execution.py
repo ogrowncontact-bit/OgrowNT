@@ -3,8 +3,8 @@ from datetime import datetime, timezone
 from packages.execution.adapters.base import OrderRequest
 from packages.execution.adapters.paper import PaperExecutionProvider
 from packages.execution.order_manager import close_position, open_position
-from packages.portfolio.state import get_latest_cash, refresh_snapshot
-from packages.shared.models import OHLCV, Asset, Order, Position, Signal, StrategyRow, Trade
+from packages.portfolio.state import get_latest_cash
+from packages.shared.models import OHLCV, Asset, Order, Signal, StrategyRow, Trade
 
 
 def _asset_with_price(db_session, symbol: str, price: float) -> Asset:

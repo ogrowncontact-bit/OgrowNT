@@ -1,6 +1,11 @@
 from packages.risk.config import (
-    CapitalConfig, DataQualityConfig, LiquidityConfig, LossLimitsConfig,
-    PerTradeConfig, PortfolioLimitsConfig, RiskLimits,
+    CapitalConfig,
+    DataQualityConfig,
+    LiquidityConfig,
+    LossLimitsConfig,
+    PerTradeConfig,
+    PortfolioLimitsConfig,
+    RiskLimits,
 )
 from packages.risk.position_sizing import calculate_position_size
 

@@ -2,7 +2,17 @@ from datetime import datetime, timezone
 
 from apps.api.security import hash_password
 from packages.shared.models import (
-    AdminUser, Asset, MarketRegime, OpportunityScore, Order, Position, RiskCheck, RiskDecision, Signal, StrategyRow, Trade,
+    AdminUser,
+    Asset,
+    MarketRegime,
+    OpportunityScore,
+    Order,
+    Position,
+    RiskCheck,
+    RiskDecision,
+    Signal,
+    StrategyRow,
+    Trade,
 )
 
 
@@ -24,16 +34,26 @@ def _seed_trade(db_session, symbol: str):
     db_session.add(regime)
     db_session.commit()
 
-    signal = Signal(strategy_id=strategy.id, asset_id=asset.id, ts=datetime.now(timezone.utc), direction="long", entry_price=100.0, stop_price=95.0, target_price=115.0, regime_id=regime.id, status="executed")
+    signal = Signal(
+        strategy_id=strategy.id, asset_id=asset.id, ts=datetime.now(timezone.utc), direction="long",
+        entry_price=100.0, stop_price=95.0, target_price=115.0, regime_id=regime.id, status="executed",
+    )
     db_session.add(signal)
     db_session.commit()
 
-    db_session.add(OpportunityScore(signal_id=signal.id, technical=90, pattern=50, regime_fit=100, historical_edge=50, liquidity=80, news=50, risk_reward=70, strategy_performance=50, final_score=85.0, tier="high_quality", notes={}))
+    db_session.add(OpportunityScore(
+        signal_id=signal.id, technical=90, pattern=50, regime_fit=100, historical_edge=50, liquidity=80,
+        news=50, risk_reward=70, strategy_performance=50, final_score=85.0, tier="high_quality", notes={},
+    ))
     db_session.add(RiskCheck(signal_id=signal.id, check_name="risk_reward", passed=True, detail={}))
     db_session.add(RiskDecision(signal_id=signal.id, approved=True, approved_size=1.0, reason="approved", safety_belt_level="normal"))
     db_session.commit()
 
-    position = Position(asset_id=asset.id, strategy_id=strategy.id, signal_id=signal.id, direction="long", entry_price=101.0, current_stop=95.0, target_price=115.0, size=1.0, status="closed", closed_at=datetime.now(timezone.utc), exit_price=110.0, realized_pnl=9.0, exit_reason="target_hit")
+    position = Position(
+        asset_id=asset.id, strategy_id=strategy.id, signal_id=signal.id, direction="long", entry_price=101.0,
+        current_stop=95.0, target_price=115.0, size=1.0, status="closed", closed_at=datetime.now(timezone.utc),
+        exit_price=110.0, realized_pnl=9.0, exit_reason="target_hit",
+    )
     db_session.add(position)
     db_session.commit()
 

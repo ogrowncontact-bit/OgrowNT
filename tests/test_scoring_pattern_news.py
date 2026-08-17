@@ -20,7 +20,8 @@ def _ctx() -> MarketContext:
     return MarketContext(asset_id=1, symbol="TEST", timeframe="1m", candles=candles, indicators=indicators, regime=regime)
 
 
-def _signal_and_analysis(ctx, strategy=TrendFollowingStrategy()):
+def _signal_and_analysis(ctx, strategy=None):
+    strategy = strategy or TrendFollowingStrategy()
     analysis = strategy.analyze(ctx)
     signal = strategy.generate_signal(ctx)
     assert signal is not None

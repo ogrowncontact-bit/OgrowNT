@@ -65,7 +65,7 @@ def _grid(base_params: dict, multipliers: tuple[float, ...]) -> list[dict]:
                 options.append(value)
         value_options.append(options)
 
-    return [dict(zip(keys, values)) for values in itertools.product(*value_options)]
+    return [dict(zip(keys, values, strict=True)) for values in itertools.product(*value_options)]
 
 
 def _pooled_expectancy(wf: WalkForwardResult) -> float | None:

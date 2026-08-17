@@ -52,7 +52,7 @@ def get_strategy_performance(
 @router.post("/{strategy_id}/restore", response_model=StrategyOut)
 def restore_strategy(
     strategy_id: int,
-    payload: StrategyRestoreRequest = StrategyRestoreRequest(),
+    payload: StrategyRestoreRequest | None = None,
     db: Session = Depends(get_session),
     admin: AdminUser = Depends(get_current_admin),
 ) -> StrategyRow:
@@ -60,6 +60,7 @@ def restore_strategy(
     generation (packages/quant/learning/quarantine.py). Never automatic —
     quarantine is a one-way DET safety action; restoring it is always a
     deliberate human decision."""
+    payload = payload or StrategyRestoreRequest()
     try:
         return restore_from_quarantine(db, strategy_id, to_stage=payload.to_stage, actor=admin.email)
     except ValueError as exc:

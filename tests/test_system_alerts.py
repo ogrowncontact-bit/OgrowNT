@@ -2,7 +2,7 @@ from apps.api.security import hash_password
 from packages.portfolio.state import refresh_snapshot
 from packages.risk.monitor import _ALERT_SEVERITY_BY_BELT, update_safety_belt
 from packages.risk.safety_belt import CAUTION, DEFENSIVE, EMERGENCY, KILL_SWITCH, NORMAL
-from packages.shared.models import Alert, AdminUser
+from packages.shared.models import AdminUser, Alert
 
 
 def _login(client, db_session, email="alerts-admin@example.com", password="correct-horse") -> str:

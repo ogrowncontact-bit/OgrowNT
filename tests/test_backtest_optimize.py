@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from packages.backtest.optimize import MAX_COMBINATIONS, optimize_parameters
+from packages.backtest.optimize import optimize_parameters
 from packages.shared.models import OHLCV, Asset
 
 TIMEFRAME = "1m"

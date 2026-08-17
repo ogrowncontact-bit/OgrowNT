@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta, timezone
 
-from packages.backtest.walkforward import MIN_TRADES_FOR_CONSISTENCY_VERDICT, run_walk_forward
+from packages.backtest.walkforward import run_walk_forward
 from packages.quant.strategies import TrendFollowingStrategy
 from packages.shared.models import OHLCV, Asset
 

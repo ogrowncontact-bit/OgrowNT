@@ -16,12 +16,12 @@ natural but separate future addition.
 from datetime import datetime, timezone
 
 from sqlalchemy import (
+    JSON,
     Boolean,
     CheckConstraint,
     DateTime,
     Float,
     ForeignKey,
-    JSON,
     String,
     Text,
     UniqueConstraint,

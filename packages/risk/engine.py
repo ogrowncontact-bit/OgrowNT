@@ -20,7 +20,8 @@ from packages.risk.config import RiskLimits, load_risk_limits
 from packages.risk.correlation_guard import check_correlation_guard
 from packages.risk.position_sizing import calculate_position_size
 from packages.risk.safety_belt import evaluate_safety_belt, policy_for, tier_meets_floor
-from packages.shared.models import RiskCheck, RiskDecision as RiskDecisionRow, SystemState
+from packages.shared.models import RiskCheck, SystemState
+from packages.shared.models import RiskDecision as RiskDecisionRow
 
 
 @dataclass(frozen=True)

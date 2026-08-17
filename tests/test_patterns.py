@@ -10,7 +10,6 @@ from packages.quant.patterns.detector import (
     PATTERN_MOMENTUM,
     PATTERN_REVERSAL,
     PATTERN_TREND,
-    PATTERN_VOLATILITY,
     detect_all,
     detect_anomaly,
     detect_breakout,

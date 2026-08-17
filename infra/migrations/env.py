@@ -3,11 +3,10 @@ from logging.config import fileConfig
 from alembic import context
 from sqlalchemy import engine_from_config, pool
 
-from packages.shared.db import Base
-from packages.shared.settings import get_settings
-
 # Import models so they register on Base.metadata before autogenerate/create_all.
 from packages.shared import models  # noqa: F401
+from packages.shared.db import Base
+from packages.shared.settings import get_settings
 
 config = context.config
 

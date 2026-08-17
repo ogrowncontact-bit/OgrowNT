@@ -33,6 +33,7 @@ jobs:
         with:
           python-version: "3.11"
       - run: pip install -e ".[dev]"
+      - run: ruff check .
       - run: alembic upgrade head
       - run: pytest -q
 

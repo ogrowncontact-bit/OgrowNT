@@ -4,8 +4,22 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from apps.api.routers import (
-    alerts, analytics, assets, auth, backtests, learning, market_data, news, opportunities, patterns,
-    portfolio, research, risk, strategies, system, trading,
+    alerts,
+    analytics,
+    assets,
+    auth,
+    backtests,
+    learning,
+    market_data,
+    news,
+    opportunities,
+    patterns,
+    portfolio,
+    research,
+    risk,
+    strategies,
+    system,
+    trading,
 )
 from packages.shared.logging import configure_logging
 from packages.shared.settings import get_settings

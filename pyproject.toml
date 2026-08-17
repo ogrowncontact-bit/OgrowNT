@@ -25,6 +25,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=8.3",
+    "ruff>=0.16",
 ]
 
 [tool.setuptools.packages.find]
@@ -32,6 +33,29 @@ include = ["apps*", "packages*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 200
+target-version = "py311"
+
+[tool.ruff.lint]
+# E/F: pycodestyle+pyflakes (real bugs — unused imports/vars, undefined
+# names, etc.). I: import sorting. UP: modernize syntax for the pinned
+# Python floor. B: flake8-bugbear common-bug patterns. Deliberately not
+# enabling stricter style-only rule sets (line length is already relaxed
+# above) — this is meant to catch real mistakes, not reformat the codebase.
+select = ["E", "F", "I", "UP", "B"]
+ignore = [
+    # timezone.utc is used consistently across the whole codebase and is
+    # just as correct as datetime.UTC — not worth a wall-to-wall rename.
+    "UP017",
+]
+
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI's own documented pattern: `db: Session = Depends(get_session)`.
+# Depends()/Query()/etc are markers evaluated once at route registration,
+# not per-request mutable defaults — the exact footgun B008 exists to catch.
+extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.Path", "fastapi.Body", "fastapi.Header", "fastapi.Cookie"]
 
 [build-system]
 requires = ["setuptools>=68"]

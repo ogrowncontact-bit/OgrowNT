@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 from packages.portfolio.state import compute_state, get_latest_cash, refresh_snapshot
 from packages.shared.models import OHLCV, Asset, PortfolioSnapshot, Position, StrategyRow

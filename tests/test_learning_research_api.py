@@ -2,8 +2,8 @@ from datetime import datetime, timezone
 
 from apps.api.security import hash_password
 from packages.shared.models import (
-    Asset,
     AdminUser,
+    Asset,
     LearnedRule,
     MarketMemory,
     Position,

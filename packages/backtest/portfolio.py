@@ -11,7 +11,7 @@ position-sizing functions run completely unmodified.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 from packages.portfolio.state import PortfolioState
