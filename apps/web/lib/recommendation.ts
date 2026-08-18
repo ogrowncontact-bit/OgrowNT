@@ -1,9 +1,12 @@
 import { prisma } from "@inner/db";
 import { generateRecommendationCopy } from "@inner/ai";
 import { dimensionPool } from "@inner/content/dimensions";
-import type { AssessmentConfig, RecommendationCandidate } from "@inner/assessment-engine";
+import type { AssessmentConfig } from "@inner/assessment-engine";
 import { getAssessmentConfig, listPublishedSlugs } from "./assessments";
 import { ensureAiTelemetryRegistered } from "./aiTelemetry";
+import { matchesCondition } from "./conditionMatching";
+
+export { matchesCondition } from "./conditionMatching";
 
 // See the comment in app/api/sessions/[id]/answer/route.ts — registered per
 // module realm, not just once globally via instrumentation.ts.
@@ -16,14 +19,6 @@ export interface Recommendation {
   name: string;
   hook: string;
   bridgeCopy: string;
-}
-
-function matchesCondition(condition: RecommendationCandidate["condition"], scores: Record<string, number>): boolean {
-  return Object.entries(condition.dimensionRanges).every(([dimKey, range]) => {
-    if (!range) return true;
-    const score = scores[dimKey] ?? 50;
-    return score >= range[0] && score <= range[1];
-  });
 }
 
 /**
