@@ -1,6 +1,7 @@
 from packages.quant.scoring.config import ScoringConfig, load_scoring_config
 from packages.quant.scoring.engine import OpportunityScore, ScoringInputs, compute_score, tier_for
-from packages.quant.scoring.inputs import build_scoring_inputs
+from packages.quant.scoring.evidence import EvidenceItem, build_evidence
+from packages.quant.scoring.inputs import build_scoring_inputs, compute_opportunity_confidence
 
 __all__ = [
     "ScoringConfig",
@@ -10,4 +11,7 @@ __all__ = [
     "compute_score",
     "tier_for",
     "build_scoring_inputs",
+    "compute_opportunity_confidence",
+    "EvidenceItem",
+    "build_evidence",
 ]

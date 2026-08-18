@@ -117,6 +117,21 @@ def recent_low(candles: list[Candle], lookback: int = 20) -> float | None:
     return min(c.low for c in candles[-lookback:])
 
 
+_DATA_QUALITY_WEIGHT = {"high": 1.0, "degraded": 0.5, "unavailable": 0.0}
+
+
+def data_quality_confidence(candles: list[Candle]) -> float:
+    """0.0-1.0: how much the candles behind a reading can be trusted, as
+    opposed to how strong the reading itself is (packages/quant/patterns's
+    strength vs confidence distinction, docs/blueprint's "no hallucinated
+    data" rule applied to detector inputs rather than storage). Reused by
+    the Pattern Engine and the Opportunity Scoring Engine's confidence
+    component so both agree on what "trustworthy inputs" means."""
+    if not candles:
+        return 0.0
+    return sum(_DATA_QUALITY_WEIGHT.get(c.data_quality, 0.0) for c in candles) / len(candles)
+
+
 @dataclass(frozen=True)
 class IndicatorSet:
     close: float

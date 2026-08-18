@@ -19,11 +19,12 @@ from packages.quant.indicators.core import MIN_CANDLES_REQUIRED, compute_indicat
 from packages.quant.learning.strategy_stats import MIN_TRADES_FOR_HEALTH_SCORE
 from packages.quant.patterns.detector import PatternDetection, detect_all
 from packages.quant.regime.classifier import NewsSignal, classify_regime_with_news
-from packages.quant.scoring import build_scoring_inputs, compute_score
+from packages.quant.scoring import build_scoring_inputs, compute_opportunity_confidence, compute_score
 from packages.quant.strategies import ALL_STRATEGIES, MarketContext, Strategy
 from packages.shared.models import (
     OHLCV,
     Asset,
+    MarketEvent,
     MarketMemory,
     MarketRegime,
     NewsImpact,
@@ -84,7 +85,7 @@ def _persist_patterns(db: Session, asset: Asset, ts, detections: list[PatternDet
         row = Pattern(
             asset_id=asset.id, timeframe=TIMEFRAME, ts=ts, pattern_type=detection.pattern_type,
             pattern_class=detection.pattern_class, direction=detection.direction,
-            strength=detection.strength, meta=detection.metadata,
+            strength=detection.strength, confidence=detection.confidence, meta=detection.metadata,
         )
         db.add(row)
         persisted.append((detection, row))
@@ -216,6 +217,9 @@ def run_strategy_cycle(
                 strategy_health_score=strategy_health_score,
             )
             score = compute_score(inputs)
+            confidence, confidence_notes = compute_opportunity_confidence(
+                ctx, [d for d, _ in persisted_patterns], signal.direction, pattern_expectancy, strategy_expectancy
+            )
             db.add(
                 OpportunityScore(
                     signal_id=signal_row.id,
@@ -233,9 +237,25 @@ def run_strategy_cycle(
                     drawdown_penalty=score.drawdown_penalty_points,
                     final_score=score.final_score,
                     tier=score.tier,
-                    notes=inputs.notes,
+                    confidence=confidence,
+                    notes={**inputs.notes, "confidence": confidence_notes},
                 )
             )
+            # Prompt 3 §26 — a genuine opportunity (anything above 'ignore')
+            # is worth a MarketEvent so the dashboard's Recent Market Events
+            # ticker (Prompt 2) surfaces it too, not just the Opportunities table.
+            if score.tier != "ignore":
+                db.add(
+                    MarketEvent(
+                        asset_id=asset.id, event_type="OPPORTUNITY_CREATED", timeframe=TIMEFRAME,
+                        severity="HIGH" if score.tier in ("high_quality", "exceptional") else "MEDIUM",
+                        price=signal.entry_price, volume=None, confidence=confidence / 100,
+                        meta={
+                            "strategy": strategy.code, "direction": signal.direction,
+                            "tier": score.tier, "final_score": score.final_score, "signal_id": signal_row.id,
+                        },
+                    )
+                )
             db.add(
                 MarketMemory(
                     ts=candles[-1].ts,

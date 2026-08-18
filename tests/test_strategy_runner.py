@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 
 from apps.worker.strategy_runner import run_strategy_cycle
 from packages.quant.strategies import ALL_STRATEGIES
-from packages.shared.models import OHLCV, Asset, MarketRegime, OpportunityScore, Signal, StrategyRow
+from packages.shared.models import OHLCV, Asset, MarketEvent, MarketRegime, OpportunityScore, Pattern, Signal, StrategyRow
 
 
 def _seed_strategies(db_session):
@@ -65,6 +65,50 @@ def test_strategy_cycle_creates_signals_and_scores_for_trending_asset(db_session
     scores = db_session.query(OpportunityScore).join(Signal).filter(Signal.asset_id == asset.id).all()
     assert len(scores) == len(signals)
     assert all(0 <= s.final_score <= 100 for s in scores)
+
+
+def test_strategy_cycle_computes_confidence_distinct_from_score(db_session):
+    asset = Asset(symbol="RUNNERCONF", asset_class="crypto", is_active=True)
+    db_session.add(asset)
+    db_session.commit()
+    _seed_strategies(db_session)
+    _seed_trending_ohlcv(db_session, asset, step=0.6)
+
+    run_strategy_cycle(db_session)
+
+    scores = db_session.query(OpportunityScore).join(Signal).filter(Signal.asset_id == asset.id).all()
+    assert scores
+    for score in scores:
+        assert 0 <= score.confidence <= 100
+        # Fresh mock OHLCV is all data_quality="high" and this fixture's
+        # regime read is confident -- confidence should read meaningfully
+        # above the "no real signal" floor, not just a placeholder default.
+        assert score.confidence > 50.0
+        assert "confidence" in score.notes  # components audit trail (Prompt 3 §17)
+
+    patterns = db_session.query(Pattern).filter(Pattern.asset_id == asset.id).all()
+    if patterns:  # not every cycle detects a pattern for every strategy/asset
+        assert all(0.0 <= p.confidence <= 1.0 for p in patterns)
+        assert all(p.confidence == 1.0 for p in patterns)  # all-high-quality candles
+
+
+def test_strategy_cycle_emits_opportunity_created_event_for_real_opportunities(db_session):
+    asset = Asset(symbol="RUNNEREVT", asset_class="crypto", is_active=True)
+    db_session.add(asset)
+    db_session.commit()
+    _seed_strategies(db_session)
+    _seed_trending_ohlcv(db_session, asset, step=0.6)
+
+    run_strategy_cycle(db_session)
+
+    scores = db_session.query(OpportunityScore).join(Signal).filter(Signal.asset_id == asset.id).all()
+    non_ignore = [s for s in scores if s.tier != "ignore"]
+    events = db_session.query(MarketEvent).filter(
+        MarketEvent.asset_id == asset.id, MarketEvent.event_type == "OPPORTUNITY_CREATED"
+    ).all()
+    assert len(events) == len(non_ignore)
+    if events:
+        assert events[0].meta["tier"] in ("watch", "possible", "high_quality", "exceptional")
 
 
 def test_strategy_cycle_skips_assets_with_insufficient_history(db_session):

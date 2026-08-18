@@ -51,6 +51,15 @@ class StrategySignal:
         return reward / risk
 
 
+@dataclass(frozen=True)
+class RiskProfile:
+    family: str
+    typical_risk_reward: float
+    best_regimes: frozenset[str]
+    worst_regimes: frozenset[str]
+    notes: str = ""
+
+
 class Strategy(Protocol):
     code: str
     name: str
@@ -84,6 +93,15 @@ class Strategy(Protocol):
             return 0.0
         return 0.5
 
+    def get_risk_profile(self) -> RiskProfile:
+        """Static, declarative risk characteristics for this strategy —
+        Prompt 3 §5/§14. Informational only: the Risk Engine
+        (packages/risk) is what actually sizes/gates a position; this is
+        what the dashboard's "why" panel and the Risk Engine's own future
+        per-strategy tuning read, not a second source of truth for sizing.
+        """
+        ...
+
 
 class StrategyBase:
     """Concrete base implementing the parts of Strategy that are the same for
@@ -108,3 +126,15 @@ class StrategyBase:
 
     def calculate_expected_value(self, ctx: MarketContext, analysis: AnalysisResult) -> float:
         return analysis.strength * self.regime_fit(ctx.regime.regime)
+
+    def get_risk_profile(self) -> RiskProfile:
+        # Every concrete strategy already takes risk_reward as a constructor
+        # parameter (Phase 6's parameter-stability refactor) -- reused here
+        # rather than declaring a second, possibly-drifting copy of the
+        # same number.
+        return RiskProfile(
+            family=self.family,
+            typical_risk_reward=getattr(self, "risk_reward", 2.0),
+            best_regimes=self.best_regimes,
+            worst_regimes=self.worst_regimes,
+        )

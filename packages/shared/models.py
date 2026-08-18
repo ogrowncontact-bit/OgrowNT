@@ -102,6 +102,13 @@ class MarketEvent(Base):
     themselves. INVALID_MARKET_DATA is included alongside the 7 scanner
     event types (docs/blueprint's "PROMPT 2" spec §7/§10) so both flow
     through one table/API/dashboard panel instead of two side-channels.
+    OPPORTUNITY_CREATED (Prompt 3 §26) is emitted by
+    apps/worker/strategy_runner.py for signals scoring above 'ignore' —
+    PATTERN_DETECTED/REGIME_DETECTED/SIGNAL_CREATED are deliberately not
+    emitted here: every strategy/asset pair is scored every cycle (most
+    'ignore'-tier), so mirroring each one as a MarketEvent would mostly be
+    noise on top of the patterns/market_regimes/signals tables that already
+    record every one of them.
     """
 
     __tablename__ = "market_events"
@@ -109,7 +116,7 @@ class MarketEvent(Base):
         CheckConstraint(
             "event_type IN ('PRICE_MOVEMENT','VOLUME_SPIKE','VOLATILITY_SPIKE',"
             "'BREAKOUT_CANDIDATE','MOMENTUM_CHANGE','TREND_CHANGE','ANOMALY',"
-            "'INVALID_MARKET_DATA')",
+            "'INVALID_MARKET_DATA','OPPORTUNITY_CREATED')",
             name="ck_market_events_event_type",
         ),
         CheckConstraint("severity IN ('LOW','MEDIUM','HIGH','CRITICAL')", name="ck_market_events_severity"),
@@ -309,6 +316,12 @@ class OpportunityScore(Base):
     drawdown_penalty: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
     final_score: Mapped[float] = mapped_column(Float, nullable=False)
     tier: Mapped[str] = mapped_column(String, nullable=False)
+    # Prompt 3 §17/§20: shown separately from final_score, never as a
+    # synonym for it. 0-100 — how much the inputs behind this score can be
+    # trusted (data quality, regime confidence, aligned-pattern confidence,
+    # whether historical_edge had a real sample), not how good the score is.
+    # packages/quant/scoring/inputs.py's compute_opportunity_confidence().
+    confidence: Mapped[float] = mapped_column(Float, default=50.0, nullable=False)
     notes: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
@@ -507,6 +520,11 @@ class Pattern(Base):
     pattern_class: Mapped[str] = mapped_column(String, nullable=False)
     direction: Mapped[str | None] = mapped_column(String)
     strength: Mapped[float] = mapped_column(Float, nullable=False)
+    # How strong the pattern is vs. how trustworthy its inputs are (Prompt 3
+    # §4 — never conflated). packages/quant/indicators/core.py's
+    # data_quality_confidence(); 1.0 for pre-existing rows via the migration
+    # default, since Phase 1-4 candles were already high-quality by construction.
+    confidence: Mapped[float] = mapped_column(Float, default=1.0, nullable=False)
     meta: Mapped[dict] = mapped_column(JSON, default=dict)
 
     asset: Mapped["Asset"] = relationship()

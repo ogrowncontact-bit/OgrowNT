@@ -713,6 +713,111 @@ qualquer lógica de execução — os eventos do Scanner são candidatos
 crus para o Pattern/Strategy Engine (já existentes desde a Fase 2/4)
 consumirem no futuro, exactamente como o PROMPT 2 pede.
 
+## "PROMPT 3" — Pattern Engine + Strategy Engine + Opportunity Scoring (pós-Fase 7) — **status: implementada e validada nesta sessão**
+
+O "PROMPT 3" pede Pattern Engine, Strategy Engine, Signal Engine, Regime
+Engine e Opportunity Engine — todos já existentes desde as Fases reais 2/4
+deste repositório (4 estratégias plugáveis com `analyze()`/
+`generate_signal()`/`calculate_expected_value()`/`regime_fit()`, 7
+detectores de padrão, Regime Engine com 9 regimes incluindo
+panic/euphoria/transition, Opportunity Scoring com 8 componentes
+ponderados + 4 penalizações, tudo já configurável em YAML). Analisado o
+spec ponto a ponto (secções 1-30) contra o código real, os gaps genuínos
+encontrados foram:
+
+- [x] **Confidence separado de strength** (§3-4, "não confundir os dois")
+      — `PatternDetection`/`Pattern` (migração `0010`) ganharam um campo
+      `confidence` novo, distinto de `strength`: strength mede a magnitude
+      do padrão, confidence mede quão fiáveis são os candles por trás dele
+      (`packages/quant/indicators/core.py`'s `data_quality_confidence()`,
+      reutilizado — não uma segunda implementação). Um padrão com strength
+      alto sobre dados degradados agora mostra confidence baixo, sem alterar
+      o strength
+- [x] **CONFIRMED_BREAKOUT vs POSSIBLE_BREAKOUT** (§8) — `detect_breakout`
+      deixou de devolver `None` quando o volume não confirma; agora devolve
+      um breakout `POSSIBLE_BREAKOUT` com strength limitado
+      (`BREAKOUT_POSSIBLE_STRENGTH_CAP`), distinto do `CONFIRMED_BREAKOUT`
+      original. `FAILED_BREAKOUT` já existia como o padrão `reversal`
+      separado — agora com o mesmo rótulo `breakout_state` em metadata para
+      os três estados serem consultáveis uniformemente
+- [x] **`get_risk_profile()`** (§5) — o único dos 4 métodos pedidos que
+      faltava (`analyze`/`generate_signal`/`calculate_expected_value` já
+      existiam com esses nomes exatos). Reutiliza os atributos já
+      declarados de cada estratégia (`family`, `risk_reward` do construtor,
+      `best_regimes`/`worst_regimes` — o mesmo conceito de
+      `preferred_regimes`/`avoided_regimes` do §14, já influenciando o
+      score via `regime_fit()`, nunca bloqueando sozinho)
+- [x] **Confidence da Opportunity, separado do score** (§17/§20) —
+      `OpportunityScore.confidence` (migração `0010`), 0-100, mostrado à
+      parte de `final_score` em toda a API/dashboard. Calculado
+      (`packages/quant/scoring/inputs.py`'s
+      `compute_opportunity_confidence()`) como a média de 4 sinais já reais
+      — qualidade dos dados, confiança do regime, confidence do padrão
+      alinhado, se `historical_edge` teve amostra real — nunca um número
+      novo inventado
+- [x] **`INSUFFICIENT_HISTORY` explícito** (§18) — antes ficava
+      silenciosamente dobrado num score neutro (50); agora
+      `notes["historical_edge"]["insufficient_history"]` é um booleano
+      explícito, usado tanto para reduzir a confidence como para gerar um
+      aviso estruturado no painel "why"
+- [x] **"WHY THIS OPPORTUNITY EXISTS"** (§22-23) — `/api/opportunities/
+      {id}` e `/api/trades/{id}/why` ganharam um campo `evidence`:
+      `packages/quant/scoring/evidence.py`'s `build_evidence()`, uma função
+      pura e determinística que lê os componentes do score já calculados
+      (technical, pattern, regime_fit, historical_edge, risk_reward,
+      liquidity, news, volatility_penalty) e produz confirmações (✓) ou
+      avisos (⚠) — nunca o raciocínio privado de um modelo, exatamente como
+      o spec pede. Dashboard: cada linha da tabela "Top Opportunities" é
+      clicável (`components/OpportunityRow.tsx`) e expande este painel
+      inline
+- [x] **Event pipeline** (§26) — `OPPORTUNITY_CREATED` juntou-se aos 8
+      `event_type`s já existentes do MarketEvent (Prompt 2), emitido por
+      `apps/worker/strategy_runner.py` para todo o sinal com tier acima de
+      "ignore" — para que o painel "Recent Market Events" do dashboard
+      também mostre oportunidades reais, não só eventos de mercado crus.
+      `PATTERN_DETECTED`/`REGIME_DETECTED`/`SIGNAL_CREATED` foram
+      deliberadamente não implementados como eventos: cada
+      estratégia/ativo é pontuado a cada ciclo (a maioria tier "ignore"),
+      pelo que espelhar cada um como MarketEvent seria sobretudo ruído por
+      cima das tabelas `patterns`/`market_regimes`/`signals` que já os
+      registam todos
+- [x] **Divergências deliberadamente não alteradas** — nomenclatura: as 5
+      bandas de score já existentes (`ignore`/`watch`/`possible`/
+      `high_quality`/`exceptional`, cortes em config/scoring_weights.yaml)
+      não foram renomeadas para as 6 do §17 (`NO EDGE`/`WEAK`/`WATCH`/
+      `GOOD`/`HIGH QUALITY`/`EXCEPTIONAL`) nem os estados do Signal
+      (`pending`/`scored`/`risk_rejected`/`approved`/`executed`/`expired`)
+      para os do §11/§21 — seriam apenas renomeações cosméticas espalhadas
+      por dezenas de ficheiros (dashboard, config, migrações, testes) sem
+      alterar comportamento algum, o oposto do "não destrua... sem
+      necessidade" já estabelecido nesta sessão
+- [x] 35 novos testes automatizados (417/417 no total da suite): confidence
+      de padrão separado de strength e a degradar com dados degradados (2),
+      diferenciação de breakout confirmado/possível (1, substituindo o
+      teste antigo que assumia `None`), `get_risk_profile()` incluindo o
+      exemplo exato do §14 (Momentum evita `ranging`) (3), confidence da
+      opportunity — 6 cenários incluindo dados degradados e padrão
+      conflitante a não contribuir (6), geração de evidência — 19 cenários
+      cobrindo cada componente confirm/warning (19), integração real do
+      ciclo do worker confirmando confidence >50 e eventos
+      `OPPORTUNITY_CREATED` emitidos exatamente para os sinais não-"ignore"
+      (2), API — confidence separado do score, evidência confirma/avisa
+      consoante os componentes (4)
+- [x] **verificado ao vivo** contra Postgres real: ciclo real do worker
+      criou sinais reais com confidence genuinamente calculado (85%,
+      distinto do score 73.91) e um evento `OPPORTUNITY_CREATED` real
+      ligado ao `signal_id` correto; `/api/opportunities/{id}` devolveu
+      evidência real ("✓ Technical setup strong (short)", "✓ Momentum
+      pattern confirmed", "⚠ Volume below average..."); dashboard testado
+      num browser real (Playwright/Chromium, build de produção) — coluna
+      Confidence visível, clique numa linha expande o painel "why" com os
+      checkmarks/avisos reais, segundo clique recolhe. `ruff`/`mypy`/`npm
+      run lint`/`npm run build` limpos
+
+Nenhuma `Opportunity` executa uma `Order` nesta fase (§29) — nada neste
+trabalho toca `packages/execution`; o pipeline continua a terminar em
+`OpportunityScore` persistido, exatamente como antes.
+
 ## Evolução futura (fora de âmbito até validação completa)
 
 Live brokers, exchanges reais (crypto/forex/ações), ML avançado, deep learning,

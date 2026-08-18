@@ -39,7 +39,7 @@ def test_pattern_neutral_when_none_detected():
 def test_pattern_boosts_score_when_aligned():
     ctx = _ctx()
     strategy, analysis, signal = _signal_and_analysis(ctx)  # signal.direction == "long"
-    aligned = PatternDetection("momentum", CLASS_TECHNICAL, "bullish", 1.0, {})
+    aligned = PatternDetection("momentum", CLASS_TECHNICAL, "bullish", 1.0, 1.0, {})
     inputs = build_scoring_inputs(ctx, strategy, analysis, signal, patterns=[aligned], news_signals=[])
     assert inputs.pattern == 100.0
     assert inputs.notes["pattern"]["aligned"] is True
@@ -48,7 +48,7 @@ def test_pattern_boosts_score_when_aligned():
 def test_pattern_penalizes_score_when_conflicting():
     ctx = _ctx()
     strategy, analysis, signal = _signal_and_analysis(ctx)  # long signal
-    conflicting = PatternDetection("mean_reversion", CLASS_TECHNICAL, "bearish", 1.0, {})
+    conflicting = PatternDetection("mean_reversion", CLASS_TECHNICAL, "bearish", 1.0, 1.0, {})
     inputs = build_scoring_inputs(ctx, strategy, analysis, signal, patterns=[conflicting], news_signals=[])
     assert inputs.pattern == 0.0
     assert inputs.notes["pattern"]["aligned"] is False
@@ -57,7 +57,7 @@ def test_pattern_penalizes_score_when_conflicting():
 def test_neutral_direction_pattern_does_not_move_score():
     ctx = _ctx()
     strategy, analysis, signal = _signal_and_analysis(ctx)
-    neutral = PatternDetection("volatility", "statistical", "neutral", 1.0, {})
+    neutral = PatternDetection("volatility", "statistical", "neutral", 1.0, 1.0, {})
     inputs = build_scoring_inputs(ctx, strategy, analysis, signal, patterns=[neutral], news_signals=[])
     assert inputs.pattern == 50.0
 
@@ -101,7 +101,11 @@ def test_historical_edge_neutral_when_no_learning_data():
     strategy, analysis, signal = _signal_and_analysis(ctx)
     inputs = build_scoring_inputs(ctx, strategy, analysis, signal, patterns=[], news_signals=[])
     assert inputs.historical_edge == 50.0
-    assert inputs.notes["historical_edge"] == {"pattern_expectancy": None, "strategy_expectancy": None}
+    # Prompt 3 §18: no sample yet is flagged explicitly (INSUFFICIENT_HISTORY),
+    # not just silently folded into a neutral score.
+    assert inputs.notes["historical_edge"] == {
+        "pattern_expectancy": None, "strategy_expectancy": None, "insufficient_history": True,
+    }
 
 
 def test_historical_edge_rises_with_positive_expectancy():

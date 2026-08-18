@@ -25,7 +25,7 @@ def list_patterns(
         PatternOut(
             id=pattern.id, asset_symbol=asset.symbol, timeframe=pattern.timeframe, ts=pattern.ts,
             pattern_type=pattern.pattern_type, pattern_class=pattern.pattern_class,
-            direction=pattern.direction, strength=pattern.strength,
+            direction=pattern.direction, strength=pattern.strength, confidence=pattern.confidence,
         )
         for pattern, asset in rows
     ]

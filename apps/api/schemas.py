@@ -133,6 +133,9 @@ class OpportunityOut(BaseModel):
     risk_reward: float
     regime: str
     final_score: float
+    # 0-100: how much the score's inputs can be trusted, shown separately
+    # from final_score per Prompt 3 §17 — never a synonym for it.
+    confidence: float
     tier: str
     ts: datetime
 
@@ -151,8 +154,14 @@ class ScoreBreakdown(BaseModel):
     execution_cost_penalty: float
     drawdown_penalty: float
     final_score: float
+    confidence: float
     tier: str
     notes: dict
+
+
+class EvidenceItemOut(BaseModel):
+    kind: str  # "confirm" | "warning"
+    text: str
 
 
 class OpportunityDetailOut(BaseModel):
@@ -170,6 +179,9 @@ class OpportunityDetailOut(BaseModel):
     status: str
     ts: datetime
     score: ScoreBreakdown
+    # Prompt 3 §23 — "WHY THIS OPPORTUNITY EXISTS": structured, deterministic
+    # justifications only, never the model's private reasoning.
+    evidence: list[EvidenceItemOut]
 
 
 # --- Phase 3 -----------------------------------------------------------
@@ -295,6 +307,7 @@ class PatternOut(BaseModel):
     pattern_class: str
     direction: str | None
     strength: float
+    confidence: float
 
 
 class PatternPerformanceOut(BaseModel):

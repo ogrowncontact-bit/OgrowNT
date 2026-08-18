@@ -4,7 +4,7 @@
 **paper trading only** — no real orders are ever sent. See the full engineering
 specification in [`docs/blueprint/`](docs/blueprint/00-overview.md).
 
-## Status: Phase 7 (Advanced Analytics, Alerts, Optimization) + post-Phase-7 security hardening + Supervisor 24/7 + Market Data Engine + Scanner
+## Status: Phase 7 (Advanced Analytics, Alerts, Optimization) + post-Phase-7 security hardening + Supervisor 24/7 + Market Data Engine + Scanner + Pattern/Strategy/Opportunity confidence & evidence
 
 Per [`docs/blueprint/12-roadmap.md`](docs/blueprint/12-roadmap.md):
 
@@ -152,6 +152,29 @@ Postgres (proving continuous operation), and both new dashboard panels
 render real data in a live browser test. See
 `docs/blueprint/12-roadmap.md`'s "PROMPT 2" section for details.
 
+**Pattern/Strategy/Opportunity confidence & evidence.** The Pattern Engine,
+Strategy Engine, and Opportunity Scoring Engine already existed from this
+repo's real Phase 2/4; this pass closed the gaps a point-by-point spec
+review found. Patterns now carry `confidence` (data-quality trustworthiness)
+separate from `strength` (magnitude) — never conflated. `detect_breakout`
+differentiates CONFIRMED_BREAKOUT from POSSIBLE_BREAKOUT instead of
+silently dropping unconfirmed ones. Every strategy gained
+`get_risk_profile()`. Opportunities now carry their own `confidence`
+(`packages/quant/scoring/inputs.py`'s `compute_opportunity_confidence()` —
+data quality, regime confidence, aligned-pattern confidence, whether
+`historical_edge` had a real sample), shown separately from `final_score`
+everywhere, with an explicit `insufficient_history` flag instead of a
+silent neutral score. `/api/opportunities/{id}` now returns structured
+`evidence` (`packages/quant/scoring/evidence.py` — deterministic
+confirm/warning items from already-computed score components, never a
+model's private reasoning), and the dashboard's Top Opportunities table is
+click-to-expand into a "why this opportunity exists" panel. A real
+strategy-cycle also now emits an `OPPORTUNITY_CREATED` MarketEvent for
+every signal scoring above "ignore". Live-verified against real Postgres
+and a real browser click-through. See `docs/blueprint/12-roadmap.md`'s
+"PROMPT 3" section for details, including which spec divergences (tier/
+signal-status naming) were deliberately left alone as cosmetic-only.
+
 ## Architecture at a glance
 
 ```text
@@ -280,7 +303,7 @@ cd apps/dashboard && npm install && npm run dev
 unused imports, undefined names, mutable-default footguns — not a style
 rewrite; see `[tool.ruff]` in `pyproject.toml`), `mypy packages apps scripts`
 (type-checked with the `pydantic.mypy` plugin so FastAPI response models
-type-check correctly), then the full pytest suite (382 tests) against a real
+type-check correctly), then the full pytest suite (417 tests) against a real
 `postgres:16-alpine` service container, migrated from scratch via `alembic
 upgrade head`; separately, the dashboard's `eslint` + `next build`; and
 separately again, a plain `docker build` of all three

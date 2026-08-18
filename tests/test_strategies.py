@@ -5,6 +5,7 @@ from packages.data.connectors.market.base import Candle
 from packages.quant.indicators.core import compute_indicators
 from packages.quant.regime.classifier import classify_regime
 from packages.quant.strategies import (
+    ALL_STRATEGIES,
     BreakoutStrategy,
     MarketContext,
     MeanReversionStrategy,
@@ -108,3 +109,28 @@ def test_strategy_regime_fit_matches_declared_sets():
     assert strategy.regime_fit("trending_bull") == 1.0
     assert strategy.regime_fit("ranging") == 0.0
     assert strategy.regime_fit("unknown") == 0.5
+
+
+def test_get_risk_profile_matches_strategy_declared_regimes():
+    # Prompt 3 §5/§14: preferred_regimes/avoided_regimes, exposed via
+    # get_risk_profile() rather than a second, possibly-drifting field.
+    for strategy in ALL_STRATEGIES:
+        profile = strategy.get_risk_profile()
+        assert profile.family == strategy.family
+        assert profile.best_regimes == strategy.best_regimes
+        assert profile.worst_regimes == strategy.worst_regimes
+        assert profile.typical_risk_reward > 0
+
+
+def test_get_risk_profile_reuses_the_strategys_own_configured_risk_reward():
+    strategy = TrendFollowingStrategy(risk_reward=3.3)
+    assert strategy.get_risk_profile().typical_risk_reward == 3.3
+
+
+def test_momentum_avoids_ranging_per_spec_example():
+    # Prompt 3 §14's own worked example: Momentum prefers
+    # trending_bull/trending_bear, avoids ranging.
+    profile = MomentumStrategy().get_risk_profile()
+    assert "trending_bull" in profile.best_regimes
+    assert "trending_bear" in profile.best_regimes
+    assert "ranging" in profile.worst_regimes

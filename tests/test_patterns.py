@@ -4,6 +4,9 @@ from datetime import datetime, timedelta, timezone
 from packages.data.connectors.market.base import Candle
 from packages.quant.indicators.core import compute_indicators
 from packages.quant.patterns.detector import (
+    BREAKOUT_POSSIBLE_STRENGTH_CAP,
+    BREAKOUT_STATE_CONFIRMED,
+    BREAKOUT_STATE_POSSIBLE,
     PATTERN_ANOMALY,
     PATTERN_BREAKOUT,
     PATTERN_MEAN_REVERSION,
@@ -54,15 +57,56 @@ def test_detect_trend_none_when_flat():
     assert detect_trend(candles, compute_indicators(candles)) is None
 
 
-def test_detect_breakout_requires_volume_confirmation():
+def test_pattern_confidence_is_separate_from_strength():
+    # Prompt 3 §4: "Não confundir os dois" -- a strong trend on all-high-quality
+    # data should read high on both, but the two numbers are never the same
+    # measurement (strength is magnitude, confidence is data trustworthiness).
+    candles = _trend_candles(step=0.6)
+    result = detect_trend(candles, compute_indicators(candles))
+    assert result is not None
+    assert result.confidence == 1.0  # every candle here is data_quality="high"
+    assert 0.0 <= result.strength <= 1.0
+
+
+def test_pattern_confidence_degrades_with_degraded_candles():
+    high_quality = _trend_candles(step=0.6)
+    degraded = [
+        Candle(ts=c.ts, open=c.open, high=c.high, low=c.low, close=c.close, volume=c.volume, data_quality="degraded")
+        for c in high_quality
+    ]
+    high_result = detect_trend(high_quality, compute_indicators(high_quality))
+    degraded_result = detect_trend(degraded, compute_indicators(degraded))
+    assert high_result is not None
+    assert degraded_result is not None
+    # Same price series -> same strength; only confidence should move.
+    assert degraded_result.strength == high_result.strength
+    assert degraded_result.confidence < high_result.confidence
+
+
+def test_detect_breakout_differentiates_confirmed_from_possible():
+    # Prompt 3 §8: a breakout without volume confirmation is still real
+    # evidence (POSSIBLE_BREAKOUT), just weaker than a volume-confirmed one
+    # (CONFIRMED_BREAKOUT) -- neither should be silently dropped to None.
     candles = _trend_candles(step=0.6, volume_spike_at_end=False)
     no_spike = detect_breakout(candles, compute_indicators(candles))
     candles_spike = _trend_candles(step=0.6, volume_spike_at_end=True)
     spike = detect_breakout(candles_spike, compute_indicators(candles_spike))
-    assert no_spike is None
+
+    assert no_spike is not None
+    assert no_spike.pattern_type == PATTERN_BREAKOUT
+    assert no_spike.metadata["breakout_state"] == BREAKOUT_STATE_POSSIBLE
+    assert no_spike.metadata["volume_confirmed"] is False
+
     assert spike is not None
     assert spike.pattern_type == PATTERN_BREAKOUT
     assert spike.direction == "bullish"
+    assert spike.metadata["breakout_state"] == BREAKOUT_STATE_CONFIRMED
+    assert spike.metadata["volume_confirmed"] is True
+
+    # An unconfirmed breakout's strength is capped well below what the raw
+    # price move alone would produce -- weaker evidence, not just a
+    # different label.
+    assert no_spike.strength <= BREAKOUT_POSSIBLE_STRENGTH_CAP
 
 
 def test_detect_reversal_on_failed_breakout():

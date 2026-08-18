@@ -29,6 +29,7 @@ import { StrategyActionButton } from "@/components/StrategyActionButton";
 import { LogoutButton } from "@/components/LogoutButton";
 import { KillSwitchButton } from "@/components/KillSwitchButton";
 import { RunBacktestForm } from "@/components/RunBacktestForm";
+import { OpportunityRow } from "@/components/OpportunityRow";
 import { EquitySparkline } from "@/components/EquitySparkline";
 
 export const dynamic = "force-dynamic";
@@ -241,30 +242,13 @@ export default async function DashboardPage() {
                   <th className="pb-2 pr-3 font-normal">Regime</th>
                   <th className="pb-2 pr-3 font-normal">R:R</th>
                   <th className="pb-2 pr-3 font-normal">Score</th>
+                  <th className="pb-2 pr-3 font-normal">Confidence</th>
                   <th className="pb-2 font-normal">Tier</th>
                 </tr>
               </thead>
               <tbody>
                 {opportunities.map((o) => (
-                  <tr key={o.signal_id} className="border-t border-base-700/60 hover:bg-base-800">
-                    <td className="py-1.5 pr-3 text-ink-100">{o.asset_symbol}</td>
-                    <td className="py-1.5 pr-3 text-ink-300">{o.strategy_name}</td>
-                    <td
-                      className={`py-1.5 pr-3 font-medium uppercase ${
-                        o.direction === "long" ? "text-signal-green" : "text-signal-red"
-                      }`}
-                    >
-                      {o.direction}
-                    </td>
-                    <td className="py-1.5 pr-3">
-                      <RegimeBadge regime={o.regime} />
-                    </td>
-                    <td className="py-1.5 pr-3 text-ink-300">{o.risk_reward.toFixed(2)}</td>
-                    <td className="py-1.5 pr-3 text-ink-100">{o.final_score.toFixed(1)}</td>
-                    <td className="py-1.5">
-                      <TierBadge tier={o.tier} />
-                    </td>
-                  </tr>
+                  <OpportunityRow key={o.signal_id} opportunity={o} />
                 ))}
               </tbody>
             </table>

@@ -70,8 +70,15 @@ export type Opportunity = {
   risk_reward: number;
   regime: string;
   final_score: number;
+  confidence: number;
   tier: string;
   ts: string;
+};
+export type EvidenceItem = { kind: "confirm" | "warning"; text: string };
+export type OpportunityDetail = Opportunity & {
+  regime_confidence: number;
+  status: string;
+  evidence: EvidenceItem[];
 };
 export type Regime = {
   asset_symbol: string;
@@ -265,6 +272,8 @@ export const getMarketEvents = (token: string, limit = 10) => apiFetch<MarketEve
 export const getPositions = (token: string, statusFilter: "open" | "closed" = "open") =>
   apiFetch<Position[]>(`/api/positions?status_filter=${statusFilter}`, token);
 export const getOpportunities = (token: string, limit = 10) => apiFetch<Opportunity[]>(`/api/opportunities?limit=${limit}`, token);
+export const getOpportunityDetail = (token: string, signalId: number) =>
+  apiFetch<OpportunityDetail>(`/api/opportunities/${signalId}`, token);
 export const getRegimes = (token: string) => apiFetch<Regime[]>("/api/regime", token);
 export const getTrades = (token: string, limit = 10) => apiFetch<Trade[]>(`/api/trades?limit=${limit}`, token);
 export const getNews = (token: string, limit = 10) => apiFetch<NewsEvent[]>(`/api/news?limit=${limit}`, token);

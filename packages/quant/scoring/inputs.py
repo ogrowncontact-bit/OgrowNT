@@ -23,10 +23,21 @@ already-vetted expectancy/score into a 0-100 component.
 """
 from __future__ import annotations
 
+from packages.quant.indicators.core import data_quality_confidence
 from packages.quant.patterns.detector import PatternDetection
 from packages.quant.regime.classifier import REGIME_HIGH_VOLATILITY, NewsSignal
 from packages.quant.scoring.engine import ScoringInputs
 from packages.quant.strategies.base import AnalysisResult, MarketContext, Strategy, StrategySignal
+
+# Default confidence.pattern_confidence when no pattern aligned with the
+# signal direction -- "no supporting pattern" is a scoring fact (already
+# reflected in the neutral 50 pattern score), not a confidence problem, so
+# this stays a fixed neutral rather than 0.0.
+_NO_ALIGNED_PATTERN_CONFIDENCE = 0.6
+# confidence.history_confidence when neither pattern nor strategy expectancy
+# had a real sample -- Prompt 3 §18's INSUFFICIENT_HISTORY, expressed as a
+# reduced confidence rather than a fabricated number.
+_INSUFFICIENT_HISTORY_CONFIDENCE = 0.4
 
 TARGET_RISK_REWARD_FOR_FULL_SCORE = 3.0
 _IMPACT_WEIGHT = {"low": 0.3, "medium": 0.6, "high": 1.0}
@@ -138,7 +149,51 @@ def build_scoring_inputs(
         notes={
             "pattern": pattern_note,
             "news": news_note,
-            "historical_edge": {"pattern_expectancy": pattern_expectancy, "strategy_expectancy": strategy_expectancy},
+            "historical_edge": {
+                "pattern_expectancy": pattern_expectancy,
+                "strategy_expectancy": strategy_expectancy,
+                # Prompt 3 §18: explicit, not just a silently neutral score.
+                "insufficient_history": pattern_expectancy is None and strategy_expectancy is None,
+            },
             "strategy_performance": {"health_score": strategy_health_score},
         },
     )
+
+
+def compute_opportunity_confidence(
+    ctx: MarketContext,
+    patterns: list[PatternDetection],
+    signal_direction: str,
+    pattern_expectancy: float | None,
+    strategy_expectancy: float | None,
+) -> tuple[float, dict]:
+    """0-100: how much the inputs behind this Opportunity's score can be
+    trusted -- shown separately from final_score, never as a proxy for it
+    (Prompt 3 §17/§20 "Nunca tratar score como probabilidade real").
+
+    Deliberately a small, auditable average of four already-real signals
+    (data quality, regime confidence, the best aligned pattern's own
+    confidence, whether historical_edge had a real sample) rather than a
+    fabricated single number -- every component here is something another
+    part of the system already computed, not a new opinion.
+    """
+    quality_confidence = data_quality_confidence(ctx.candles)
+    regime_confidence = ctx.regime.confidence
+
+    aligned = [p for p in patterns if _alignment(signal_direction, p.direction) == 1]
+    pattern_confidence = max((p.confidence for p in aligned), default=_NO_ALIGNED_PATTERN_CONFIDENCE)
+
+    insufficient_history = pattern_expectancy is None and strategy_expectancy is None
+    history_confidence = _INSUFFICIENT_HISTORY_CONFIDENCE if insufficient_history else 1.0
+
+    components = {
+        "data_quality": round(quality_confidence, 3),
+        "regime": round(regime_confidence, 3),
+        "pattern": round(pattern_confidence, 3),
+        "history": round(history_confidence, 3),
+    }
+    overall = sum(components.values()) / len(components)
+    return round(max(0.0, min(100.0, overall * 100)), 2), {
+        "components": components,
+        "insufficient_history": insufficient_history,
+    }

@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from apps.api.deps import get_current_admin, get_session
 from apps.api.schemas import (
+    EvidenceItemOut,
     OpportunityDetailOut,
     OrderOut,
     PositionOut,
@@ -16,6 +17,7 @@ from apps.api.schemas import (
     TradeOut,
     TradeWhyOut,
 )
+from packages.quant.scoring import build_evidence
 from packages.shared.market_data import get_latest_close
 from packages.shared.models import (
     AdminUser,
@@ -141,10 +143,18 @@ def get_trade_why(
         if signal and score and regime:
             risk = abs(signal.entry_price - signal.stop_price)
             reward = abs(signal.target_price - signal.entry_price) if signal.target_price is not None else 0.0
+            rr = reward / risk if risk else 0.0
+            evidence = build_evidence(
+                direction=signal.direction, technical=score.technical, pattern=score.pattern,
+                regime=regime.regime, regime_fit=score.regime_fit, regime_confidence=regime.confidence,
+                historical_edge=score.historical_edge, liquidity=score.liquidity, news=score.news,
+                risk_reward=score.risk_reward, risk_reward_ratio=rr,
+                volatility_penalty=score.volatility_penalty, notes=score.notes,
+            )
             opportunity_out = OpportunityDetailOut(
                 signal_id=signal.id, asset_symbol=asset.symbol, strategy_code=strategy.code, strategy_name=strategy.name,
                 direction=signal.direction, entry_price=signal.entry_price, stop_price=signal.stop_price,
-                target_price=signal.target_price, risk_reward=(reward / risk if risk else 0.0),
+                target_price=signal.target_price, risk_reward=rr,
                 regime=regime.regime, regime_confidence=regime.confidence, status=signal.status, ts=signal.ts,
                 score=ScoreBreakdown(
                     technical=score.technical, pattern=score.pattern, regime_fit=score.regime_fit,
@@ -152,8 +162,9 @@ def get_trade_why(
                     risk_reward=score.risk_reward, strategy_performance=score.strategy_performance,
                     volatility_penalty=score.volatility_penalty, correlation_penalty=score.correlation_penalty,
                     execution_cost_penalty=score.execution_cost_penalty, drawdown_penalty=score.drawdown_penalty,
-                    final_score=score.final_score, tier=score.tier, notes=score.notes,
+                    final_score=score.final_score, confidence=score.confidence, tier=score.tier, notes=score.notes,
                 ),
+                evidence=[EvidenceItemOut(kind=e.kind, text=e.text) for e in evidence],
             )
 
         decision = db.query(RiskDecision).filter(RiskDecision.signal_id == position.signal_id).first()
