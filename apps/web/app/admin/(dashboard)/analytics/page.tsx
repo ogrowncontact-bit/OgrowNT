@@ -10,6 +10,8 @@ import {
   getRecentOrders,
   getRevenueSummary,
 } from "@/lib/admin/analyticsReader";
+import { getGlobalSegments, getPerAssessmentSegments } from "@/lib/admin/segmentsReader";
+import { getExperimentResults } from "@/lib/admin/experimentsReader";
 import { ReengagementRunner } from "@/components/admin/ReengagementRunner";
 import { RefundButton } from "@/components/admin/RefundButton";
 
@@ -25,17 +27,29 @@ const card = "rounded-[var(--inner-radius-lg)] border border-[var(--inner-line)]
 const cardLabel = "text-[12px] text-[var(--inner-muted)]";
 const cardValue = "font-display text-[22px] text-[var(--inner-ink)]";
 
-export default async function AdminAnalyticsPage({ searchParams }: { searchParams: Promise<{ assessmentId?: string }> }) {
-  const { assessmentId: requestedAssessmentId } = await searchParams;
-  const [funnel, orders, revenue, consent, deletionRequests, aiStats, aiFailures] = await Promise.all([
-    getFunnelSummary(),
-    getRecentOrders(50),
-    getRevenueSummary(),
-    getConsentSummary(),
-    getDeletionRequests(),
-    getAiCallStats(),
-    getRecentAiFailures(10),
-  ]);
+export default async function AdminAnalyticsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ assessmentId?: string; from?: string; to?: string }>;
+}) {
+  const { assessmentId: requestedAssessmentId, from, to } = await searchParams;
+  const dateRange = {
+    from: from ? new Date(`${from}T00:00:00.000Z`) : undefined,
+    to: to ? new Date(`${to}T23:59:59.999Z`) : undefined,
+  };
+  const [funnel, orders, revenue, consent, deletionRequests, aiStats, aiFailures, globalSegments, perAssessmentSegments, experimentResults] =
+    await Promise.all([
+      getFunnelSummary(dateRange),
+      getRecentOrders(50),
+      getRevenueSummary(),
+      getConsentSummary(),
+      getDeletionRequests(),
+      getAiCallStats(),
+      getRecentAiFailures(10),
+      getGlobalSegments(),
+      getPerAssessmentSegments(),
+      getExperimentResults(),
+    ]);
 
   const selectedAssessmentId = requestedAssessmentId ?? funnel[0]?.assessmentId;
   const dropoff = selectedAssessmentId ? await getQuestionDropoff(selectedAssessmentId) : null;
@@ -66,17 +80,67 @@ export default async function AdminAnalyticsPage({ searchParams }: { searchParam
         </div>
       </div>
 
+      <div className="mb-8 grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <div className={card}>
+          <p className={cardLabel}>Avg order value</p>
+          <p className={cardValue}>{formatMoney(revenue.averageOrderValueCents)}</p>
+        </div>
+        <div className={card}>
+          <p className={cardLabel}>Revenue / visitor</p>
+          <p className={cardValue}>{formatMoney(revenue.revenuePerVisitorCents)}</p>
+        </div>
+        <div className={card}>
+          <p className={cardLabel}>Revenue / assessment start</p>
+          <p className={cardValue}>{formatMoney(revenue.revenuePerAssessmentStartCents)}</p>
+        </div>
+        <div className={card}>
+          <p className={cardLabel}>Revenue / completed assessment</p>
+          <p className={cardValue}>{formatMoney(revenue.revenuePerCompletedAssessmentCents)}</p>
+        </div>
+      </div>
+
       <ReengagementRunner />
 
-      <h2 className="font-display mb-3 text-[18px] text-[var(--inner-ink)]">Funnel by experience</h2>
+      <div className="mb-6 flex items-center justify-between">
+        <h2 className="font-display text-[18px] text-[var(--inner-ink)]">Funnel by experience</h2>
+        <form method="GET" className="flex items-center gap-2 text-[12px] text-[var(--inner-ink-soft)]">
+          <label htmlFor="analytics-from">From</label>
+          <input
+            id="analytics-from"
+            type="date"
+            name="from"
+            defaultValue={from ?? ""}
+            className="rounded-[var(--inner-radius-md)] border border-[var(--inner-line)] bg-[var(--inner-card)] px-2 py-1"
+          />
+          <label htmlFor="analytics-to">To</label>
+          <input
+            id="analytics-to"
+            type="date"
+            name="to"
+            defaultValue={to ?? ""}
+            className="rounded-[var(--inner-radius-md)] border border-[var(--inner-line)] bg-[var(--inner-card)] px-2 py-1"
+          />
+          <button type="submit" className="rounded-[var(--inner-radius-md)] border border-[var(--inner-line)] px-3 py-1">
+            Apply
+          </button>
+          {(from || to) && (
+            <a href="/admin/analytics" className="text-[var(--inner-accent)] underline underline-offset-2">
+              Clear
+            </a>
+          )}
+        </form>
+      </div>
       <p className="mb-3 text-[13px] text-[var(--inner-ink-soft)]">
-        Event counts only — no answer content is ever included here.
+        Event counts only — no answer content is ever included here. Ranked by revenue. Funnel counts and revenue
+        respect the date range above; the cards, drop-off, segments, and experiments below are all-time.
       </p>
       <div className="mb-8 overflow-x-auto rounded-[var(--inner-radius-lg)] border border-[var(--inner-line)] bg-[var(--inner-card)]">
         <table className="w-full text-left text-[13px]">
           <thead>
             <tr className="border-b border-[var(--inner-line)] text-[var(--inner-muted)]">
               <th className="whitespace-nowrap px-4 py-3 font-medium">Experience</th>
+              <th className="whitespace-nowrap px-4 py-3 font-medium">Revenue</th>
+              <th className="whitespace-nowrap px-4 py-3 font-medium">Conversion</th>
               {FUNNEL_STAGES.map((stage) => (
                 <th key={stage.key} className="whitespace-nowrap px-4 py-3 font-medium">
                   {stage.label}
@@ -85,19 +149,30 @@ export default async function AdminAnalyticsPage({ searchParams }: { searchParam
             </tr>
           </thead>
           <tbody>
-            {funnel.map((row) => {
+            {[...funnel].sort((a, b) => b.revenueCents - a.revenueCents).map((row) => {
               const top = row.counts.landing_view ?? 0;
               return (
                 <tr key={row.assessmentId} className="border-b border-[var(--inner-line)] last:border-0">
                   <td className="whitespace-nowrap px-4 py-3 font-medium text-[var(--inner-ink)]">/{row.slug}</td>
-                  {FUNNEL_STAGES.map((stage) => {
+                  <td className="whitespace-nowrap px-4 py-3 text-[var(--inner-ink-soft)]">{formatMoney(row.revenueCents)}</td>
+                  <td className="whitespace-nowrap px-4 py-3 text-[var(--inner-ink-soft)]">{row.conversionPct}%</td>
+                  {FUNNEL_STAGES.map((stage, i) => {
                     const count = row.counts[stage.key] ?? 0;
-                    const pct = top > 0 ? Math.round((count / top) * 100) : null;
+                    const pctOfLanding = top > 0 ? Math.round((count / top) * 100) : null;
+                    const prevCount = i > 0 ? (row.counts[FUNNEL_STAGES[i - 1].key] ?? 0) : null;
+                    const pctOfPrev = prevCount && prevCount > 0 ? Math.round((count / prevCount) * 100) : null;
                     return (
                       <td key={stage.key} className="whitespace-nowrap px-4 py-3 text-[var(--inner-ink-soft)]">
                         {count}
-                        {pct !== null && stage.key !== "landing_view" && (
-                          <span className="ml-1 text-[11px] text-[var(--inner-muted)]">({pct}%)</span>
+                        {pctOfPrev !== null && (
+                          <span className="ml-1 text-[11px] text-[var(--inner-muted)]" title="of the previous step">
+                            ({pctOfPrev}% step)
+                          </span>
+                        )}
+                        {pctOfLanding !== null && stage.key !== "landing_view" && (
+                          <span className="ml-1 text-[11px] text-[var(--inner-muted)]" title="of landing views">
+                            ({pctOfLanding}% total)
+                          </span>
                         )}
                       </td>
                     );
@@ -157,6 +232,75 @@ export default async function AdminAnalyticsPage({ searchParams }: { searchParam
           </table>
         )}
       </div>
+
+      <h2 className="font-display mb-3 text-[18px] text-[var(--inner-ink)]">Segments</h2>
+      <p className="mb-3 text-[13px] text-[var(--inner-ink-soft)]">
+        Behavior-based only — never derived from assessment answers, profile results, or report content.
+      </p>
+      <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-3">
+        {globalSegments.map((s) => (
+          <div key={s.key} className={card}>
+            <p className={cardLabel}>{s.label}</p>
+            <p className={cardValue}>{s.size}</p>
+          </div>
+        ))}
+      </div>
+      <div className="mb-8 overflow-x-auto rounded-[var(--inner-radius-lg)] border border-[var(--inner-line)] bg-[var(--inner-card)]">
+        <table className="w-full text-left text-[13px]">
+          <thead>
+            <tr className="border-b border-[var(--inner-line)] text-[var(--inner-muted)]">
+              <th className="px-4 py-3 font-medium">Experience</th>
+              <th className="px-4 py-3 font-medium">Completed segment</th>
+              <th className="px-4 py-3 font-medium">Purchased segment</th>
+            </tr>
+          </thead>
+          <tbody>
+            {perAssessmentSegments.map((s) => (
+              <tr key={s.slug} className="border-b border-[var(--inner-line)] last:border-0">
+                <td className="px-4 py-3 font-medium text-[var(--inner-ink)]">/{s.slug}</td>
+                <td className="px-4 py-3 text-[var(--inner-ink-soft)]">
+                  {s.slug.toUpperCase().replace(/-/g, "_")}_COMPLETED — {s.completed}
+                </td>
+                <td className="px-4 py-3 text-[var(--inner-ink-soft)]">
+                  {s.slug.toUpperCase().replace(/-/g, "_")}_PURCHASED — {s.purchased}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <h2 className="font-display mb-3 text-[18px] text-[var(--inner-ink)]">Experiments</h2>
+      {experimentResults.length === 0 ? (
+        <p className="mb-8 text-[13px] text-[var(--inner-ink-soft)]">
+          No experiments running — the A/B foundation (lib/experiments.ts) is ready, nothing is configured yet.
+        </p>
+      ) : (
+        <div className="mb-8 overflow-x-auto rounded-[var(--inner-radius-lg)] border border-[var(--inner-line)] bg-[var(--inner-card)]">
+          <table className="w-full text-left text-[13px]">
+            <thead>
+              <tr className="border-b border-[var(--inner-line)] text-[var(--inner-muted)]">
+                <th className="px-4 py-3 font-medium">Experiment</th>
+                <th className="px-4 py-3 font-medium">Variant</th>
+                <th className="px-4 py-3 font-medium">Exposed</th>
+                <th className="px-4 py-3 font-medium">Converted</th>
+                <th className="px-4 py-3 font-medium">Conversion</th>
+              </tr>
+            </thead>
+            <tbody>
+              {experimentResults.map((r) => (
+                <tr key={`${r.experimentId}-${r.variant}`} className="border-b border-[var(--inner-line)] last:border-0">
+                  <td className="px-4 py-3 font-medium text-[var(--inner-ink)]">{r.experimentId}</td>
+                  <td className="px-4 py-3 text-[var(--inner-ink-soft)]">{r.variant}</td>
+                  <td className="px-4 py-3 text-[var(--inner-ink-soft)]">{r.exposed}</td>
+                  <td className="px-4 py-3 text-[var(--inner-ink-soft)]">{r.converted}</td>
+                  <td className="px-4 py-3 text-[var(--inner-ink-soft)]">{r.conversionPct}%</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       <div className="mb-3 flex items-center justify-between">
         <h2 className="font-display text-[18px] text-[var(--inner-ink)]">Recent orders</h2>

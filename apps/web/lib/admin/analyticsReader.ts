@@ -16,6 +16,8 @@ export const FUNNEL_STAGES = [
   { key: "paywall_viewed", label: "Paywall viewed" },
   { key: "checkout_started", label: "Checkout started" },
   { key: "payment_completed", label: "Purchased" },
+  { key: "report_viewed", label: "Report viewed" },
+  { key: "recommendation_viewed", label: "Next discovery shown" },
 ] as const;
 
 export interface FunnelRow {
@@ -23,16 +25,31 @@ export interface FunnelRow {
   slug: string;
   name: string;
   counts: Partial<Record<(typeof FUNNEL_STAGES)[number]["key"], number>>;
+  revenueCents: number;
+  conversionPct: number;
 }
 
-export async function getFunnelSummary(): Promise<FunnelRow[]> {
-  const [assessments, grouped] = await Promise.all([
+export interface DateRange {
+  from?: Date;
+  to?: Date;
+}
+
+export async function getFunnelSummary(range?: DateRange): Promise<FunnelRow[]> {
+  const occurredAt = range?.from || range?.to ? { gte: range?.from, lte: range?.to } : undefined;
+
+  const [assessments, grouped, paidByPrice, prices] = await Promise.all([
     prisma.assessment.findMany({ orderBy: { name: "asc" } }),
     prisma.event.groupBy({
       by: ["assessmentId", "eventName"],
       _count: { _all: true },
-      where: { assessmentId: { not: null } },
+      where: { assessmentId: { not: null }, ...(occurredAt ? { occurredAt } : {}) },
     }),
+    prisma.order.groupBy({
+      by: ["priceId"],
+      where: { status: "paid", ...(occurredAt ? { paidAt: occurredAt } : {}) },
+      _sum: { amountCents: true },
+    }),
+    prisma.price.findMany({ select: { id: true, assessmentId: true } }),
   ]);
 
   const countsByAssessment = new Map<string, FunnelRow["counts"]>();
@@ -43,12 +60,27 @@ export async function getFunnelSummary(): Promise<FunnelRow[]> {
     countsByAssessment.set(g.assessmentId, bucket);
   }
 
-  return assessments.map((a) => ({
-    assessmentId: a.id,
-    slug: a.slug,
-    name: a.name,
-    counts: countsByAssessment.get(a.id) ?? {},
-  }));
+  const priceToAssessment = new Map(prices.map((p) => [p.id, p.assessmentId]));
+  const revenueByAssessment = new Map<string, number>();
+  for (const p of paidByPrice) {
+    const assessmentId = priceToAssessment.get(p.priceId);
+    if (!assessmentId) continue;
+    revenueByAssessment.set(assessmentId, (revenueByAssessment.get(assessmentId) ?? 0) + (p._sum.amountCents ?? 0));
+  }
+
+  return assessments.map((a) => {
+    const counts = countsByAssessment.get(a.id) ?? {};
+    const landing = counts.landing_view ?? 0;
+    const purchased = counts.payment_completed ?? 0;
+    return {
+      assessmentId: a.id,
+      slug: a.slug,
+      name: a.name,
+      counts,
+      revenueCents: revenueByAssessment.get(a.id) ?? 0,
+      conversionPct: landing > 0 ? Math.round((purchased / landing) * 1000) / 10 : 0,
+    };
+  });
 }
 
 export interface OrderRow {
@@ -85,18 +117,34 @@ export interface RevenueSummary {
   paidCount: number;
   refundedCents: number;
   refundedCount: number;
+  averageOrderValueCents: number;
+  revenuePerVisitorCents: number;
+  revenuePerAssessmentStartCents: number;
+  revenuePerCompletedAssessmentCents: number;
 }
 
 export async function getRevenueSummary(): Promise<RevenueSummary> {
-  const [paidAgg, refundAgg] = await Promise.all([
+  const [paidAgg, refundAgg, visitorCount, startedCount, completedCount] = await Promise.all([
     prisma.order.aggregate({ where: { status: "paid" }, _sum: { amountCents: true }, _count: { _all: true } }),
     prisma.refund.aggregate({ _sum: { amountCents: true }, _count: { _all: true } }),
+    // "Visitor" = a distinct anonymous session that ever landed — the closest proxy we have to unique traffic without a separate pageview table.
+    prisma.anonymousSession.count(),
+    prisma.assessmentSession.count(),
+    prisma.assessmentSession.count({ where: { status: "completed" } }),
   ]);
+
+  const totalPaidCents = paidAgg._sum.amountCents ?? 0;
+  const paidCount = paidAgg._count._all;
+
   return {
-    totalPaidCents: paidAgg._sum.amountCents ?? 0,
-    paidCount: paidAgg._count._all,
+    totalPaidCents,
+    paidCount,
     refundedCents: refundAgg._sum.amountCents ?? 0,
     refundedCount: refundAgg._count._all,
+    averageOrderValueCents: paidCount > 0 ? Math.round(totalPaidCents / paidCount) : 0,
+    revenuePerVisitorCents: visitorCount > 0 ? Math.round(totalPaidCents / visitorCount) : 0,
+    revenuePerAssessmentStartCents: startedCount > 0 ? Math.round(totalPaidCents / startedCount) : 0,
+    revenuePerCompletedAssessmentCents: completedCount > 0 ? Math.round(totalPaidCents / completedCount) : 0,
   };
 }
 

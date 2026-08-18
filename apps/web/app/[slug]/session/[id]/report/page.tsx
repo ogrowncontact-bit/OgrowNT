@@ -8,6 +8,7 @@ import { readAccessUserId } from "@/lib/access";
 import { selectRecommendation } from "@/lib/recommendation";
 import { track } from "@/lib/analytics";
 import { ReportPolling } from "@/components/ReportPolling";
+import { RecommendationLink } from "@/components/RecommendationLink";
 
 export const metadata = { robots: { index: false, follow: false } };
 
@@ -97,7 +98,7 @@ export default async function ReportPage({ params }: { params: Promise<{ slug: s
           title="Your INNER profile is being created."
           body="Your report will be delivered to your email — this page will update on its own."
         />
-        {recommendation && <RecommendationCard recommendation={recommendation} />}
+        {recommendation && <RecommendationCard recommendation={recommendation} fromAssessmentId={session.assessmentId} />}
         <ReportPolling />
       </Screen>
     );
@@ -139,7 +140,7 @@ export default async function ReportPage({ params }: { params: Promise<{ slug: s
         ))}
       </div>
 
-      {recommendation && <RecommendationCard recommendation={recommendation} />}
+      {recommendation && <RecommendationCard recommendation={recommendation} fromAssessmentId={session.assessmentId} />}
 
       <p className="mb-12 text-center">
         <Link href="/explore" className="text-[13px] text-[var(--inner-muted)] underline underline-offset-4">
@@ -150,17 +151,25 @@ export default async function ReportPage({ params }: { params: Promise<{ slug: s
   );
 }
 
-function RecommendationCard({ recommendation }: { recommendation: NonNullable<Awaited<ReturnType<typeof selectRecommendation>>> }) {
+function RecommendationCard({
+  recommendation,
+  fromAssessmentId,
+}: {
+  recommendation: NonNullable<Awaited<ReturnType<typeof selectRecommendation>>>;
+  fromAssessmentId: string;
+}) {
   return (
     <div className="mb-12 mt-12 rounded-[var(--inner-radius-lg)] border border-[var(--inner-line)] bg-[var(--inner-card)] p-6">
       <p className="mb-2 text-xs font-medium uppercase tracking-[0.2em] text-[var(--inner-muted)]">Next discovery</p>
       <p className="text-[15px] leading-relaxed text-[var(--inner-ink-soft)]">{recommendation.bridgeCopy}</p>
-      <Link
+      <RecommendationLink
         href={`/${recommendation.slug}`}
+        fromAssessmentId={fromAssessmentId}
+        toSlug={recommendation.slug}
         className="mt-4 inline-block rounded-[var(--inner-radius-md)] bg-[var(--inner-accent)] px-5 py-3 text-[14px] font-medium text-[var(--inner-accent-contrast)]"
       >
         Explore {recommendation.name} →
-      </Link>
+      </RecommendationLink>
     </div>
   );
 }

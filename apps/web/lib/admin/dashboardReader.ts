@@ -8,15 +8,18 @@ export interface DashboardOverview {
   totalPaidOrders: number;
   totalRevenueCents: number;
   completionToPaidConversionPct: number;
+  pendingOrders: number;
 }
 
 export async function getDashboardOverview(): Promise<DashboardOverview> {
-  const [totalAssessments, publishedAssessments, totalStartedSessions, totalCompletedSessions, paidAgg] = await Promise.all([
+  const [totalAssessments, publishedAssessments, totalStartedSessions, totalCompletedSessions, paidAgg, pendingOrders] = await Promise.all([
     prisma.assessment.count(),
     prisma.assessment.count({ where: { status: "published" } }),
     prisma.assessmentSession.count(),
     prisma.assessmentSession.count({ where: { status: "completed" } }),
     prisma.order.aggregate({ where: { status: "paid" }, _sum: { amountCents: true }, _count: { _all: true } }),
+    // An order can sit "pending" if a webhook never lands (or a mock-payment click never completes) — worth an operator's attention if this creeps up.
+    prisma.order.count({ where: { status: "pending" } }),
   ]);
 
   const totalPaidOrders = paidAgg._count._all;
@@ -30,6 +33,7 @@ export async function getDashboardOverview(): Promise<DashboardOverview> {
     totalPaidOrders,
     totalRevenueCents,
     completionToPaidConversionPct: totalCompletedSessions > 0 ? Math.round((totalPaidOrders / totalCompletedSessions) * 1000) / 10 : 0,
+    pendingOrders,
   };
 }
 
@@ -106,6 +110,44 @@ export async function getTopAcquisitionSources(limit = 5): Promise<TopSourceRow[
       source: g.utmSource ?? "(direct)",
       sessions: g._count._all,
       paidOrders: paidBySource.get(g.utmSource ?? "(direct)") ?? 0,
+    }))
+    .sort((a, b) => b.sessions - a.sessions)
+    .slice(0, limit);
+}
+
+export interface TopCampaignRow {
+  source: string;
+  campaign: string;
+  sessions: number;
+  paidOrders: number;
+}
+
+/** Same first-touch attribution as getTopAcquisitionSources, grouped one level deeper — source is often not enough to tell two creatives or audiences apart. */
+export async function getTopCampaigns(limit = 8): Promise<TopCampaignRow[]> {
+  const grouped = await prisma.anonymousSession.groupBy({
+    by: ["utmSource", "utmCampaign"],
+    where: { utmCampaign: { not: null } },
+    _count: { _all: true },
+  });
+
+  const paidSessions = await prisma.order.findMany({
+    where: { status: "paid" },
+    select: { assessmentSession: { select: { anonymousSession: { select: { utmSource: true, utmCampaign: true } } } } },
+  });
+  const paidByKey = new Map<string, number>();
+  for (const o of paidSessions) {
+    const { utmSource, utmCampaign } = o.assessmentSession.anonymousSession;
+    if (!utmCampaign) continue;
+    const key = `${utmSource ?? "(direct)"}::${utmCampaign}`;
+    paidByKey.set(key, (paidByKey.get(key) ?? 0) + 1);
+  }
+
+  return grouped
+    .map((g) => ({
+      source: g.utmSource ?? "(direct)",
+      campaign: g.utmCampaign as string,
+      sessions: g._count._all,
+      paidOrders: paidByKey.get(`${g.utmSource ?? "(direct)"}::${g.utmCampaign}`) ?? 0,
     }))
     .sort((a, b) => b.sessions - a.sessions)
     .slice(0, limit);

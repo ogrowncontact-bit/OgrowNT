@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { getDashboardOverview, getTopAcquisitionSources, getTopAssessments, getTopRecommendations } from "@/lib/admin/dashboardReader";
+import { getDashboardOverview, getTopAcquisitionSources, getTopAssessments, getTopCampaigns, getTopRecommendations } from "@/lib/admin/dashboardReader";
 import { getReportStatusCounts } from "@/lib/admin/reportsReader";
 
 function formatMoney(cents: number, currency = "EUR") {
@@ -14,11 +14,12 @@ const sectionCard = "overflow-x-auto rounded-[var(--inner-radius-lg)] border bor
 export const dynamic = "force-dynamic";
 
 export default async function AdminHomePage() {
-  const [overview, reportCounts, topAssessments, topSources, topRecommendations] = await Promise.all([
+  const [overview, reportCounts, topAssessments, topSources, topCampaigns, topRecommendations] = await Promise.all([
     getDashboardOverview(),
     getReportStatusCounts(),
     getTopAssessments(5),
     getTopAcquisitionSources(5),
+    getTopCampaigns(5),
     getTopRecommendations(5),
   ]);
 
@@ -48,7 +49,7 @@ export default async function AdminHomePage() {
         </div>
       </div>
 
-      <div className="mb-8 grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <div className="mb-8 grid grid-cols-2 gap-3 sm:grid-cols-5">
         <div className={card}>
           <p className={cardLabel}>Reports ready</p>
           <p className={cardValue}>{reportCounts.ready}</p>
@@ -60,6 +61,10 @@ export default async function AdminHomePage() {
         <div className={card}>
           <p className={cardLabel}>Email failed</p>
           <p className={`${cardValue} ${reportCounts.emailFailed > 0 ? "text-[var(--inner-accent)]" : ""}`}>{reportCounts.emailFailed}</p>
+        </div>
+        <div className={card}>
+          <p className={cardLabel}>Payments pending</p>
+          <p className={`${cardValue} ${overview.pendingOrders > 0 ? "text-[var(--inner-accent)]" : ""}`}>{overview.pendingOrders}</p>
         </div>
         <Link href="/admin/reports" className={`${card} flex items-center justify-center hover:border-[var(--inner-accent-soft)]`}>
           <p className="text-[13px] text-[var(--inner-ink-soft)]">View all reports →</p>
@@ -115,6 +120,34 @@ export default async function AdminHomePage() {
           </div>
         </div>
       </div>
+
+      {topCampaigns.length > 0 && (
+        <div className="mb-8">
+          <h2 className="font-display mb-3 text-[16px] text-[var(--inner-ink)]">Top campaigns</h2>
+          <div className={sectionCard}>
+            <table className="w-full text-left text-[13px]">
+              <thead>
+                <tr className="border-b border-[var(--inner-line)] text-[var(--inner-muted)]">
+                  <th className="px-4 py-3 font-medium">Source</th>
+                  <th className="px-4 py-3 font-medium">Campaign</th>
+                  <th className="px-4 py-3 font-medium">Sessions</th>
+                  <th className="px-4 py-3 font-medium">Paid</th>
+                </tr>
+              </thead>
+              <tbody>
+                {topCampaigns.map((c) => (
+                  <tr key={`${c.source}-${c.campaign}`} className="border-b border-[var(--inner-line)] last:border-0">
+                    <td className="px-4 py-3 font-medium text-[var(--inner-ink)]">{c.source}</td>
+                    <td className="px-4 py-3 text-[var(--inner-ink-soft)]">{c.campaign}</td>
+                    <td className="px-4 py-3 text-[var(--inner-ink-soft)]">{c.sessions}</td>
+                    <td className="px-4 py-3 text-[var(--inner-ink-soft)]">{c.paidOrders}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       <h2 className="font-display mb-3 text-[16px] text-[var(--inner-ink)]">Top recommendation edges</h2>
       <p className="mb-3 text-[13px] text-[var(--inner-ink-soft)]">
