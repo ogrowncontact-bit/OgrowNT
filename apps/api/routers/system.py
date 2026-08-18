@@ -12,6 +12,8 @@ from packages.llm.client import LLMClient
 from packages.risk.config import CONFIG_PATH as RISK_CONFIG_PATH
 from packages.risk.config import load_risk_limits
 from packages.shared.models import AdminUser, Alert, AuditLog, SystemState
+from packages.shared.settings import get_settings
+from packages.shared.worker_health import is_heartbeat_stale
 
 router = APIRouter(prefix="/api/system", tags=["system"])
 
@@ -54,6 +56,24 @@ def health(db: Session = Depends(get_session)) -> HealthResponse:
     except Exception as exc:  # noqa: BLE001
         components.append(ComponentHealth(name="news_feed", status="red", detail=str(exc)))
 
+    try:
+        state = db.get(SystemState, True)
+        heartbeat = state.worker_last_heartbeat if state else None
+        stale = is_heartbeat_stale(heartbeat, scan_interval_seconds=get_settings().scan_interval_seconds)
+        components.append(
+            ComponentHealth(
+                name="worker",
+                status="red" if stale else "green",
+                detail=(
+                    "no heartbeat recorded yet — is the worker process running?"
+                    if heartbeat is None
+                    else f"last heartbeat {heartbeat.isoformat()}"
+                ),
+            )
+        )
+    except Exception as exc:  # noqa: BLE001
+        components.append(ComponentHealth(name="worker", status="red", detail=str(exc)))
+
     # LLM interpretation is a real, optional capability — "not configured" is
     # a valid dev-mode state (paper trading works fine without it, scoring
     # just keeps the "news" component neutral), so it's yellow, not red, and
@@ -66,9 +86,6 @@ def health(db: Session = Depends(get_session)) -> HealthResponse:
             detail=None if llm_available else "ANTHROPIC_API_KEY not set — news ingested but not interpreted",
         )
     )
-
-    # Learning engine (Phase 5) is intentionally omitted here rather than
-    # faked as green: it doesn't exist yet.
 
     overall = "degraded" if any(c.status == "red" for c in components) else "green"
     return HealthResponse(overall=overall, components=components)

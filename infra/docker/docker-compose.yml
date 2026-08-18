@@ -9,6 +9,7 @@
 services:
   postgres:
     image: postgres:16-alpine
+    restart: unless-stopped
     environment:
       POSTGRES_USER: ogrownt
       POSTGRES_PASSWORD: ogrownt
@@ -43,6 +44,7 @@ services:
       context: ../..
       dockerfile: infra/docker/Dockerfile.api
     command: uvicorn apps.api.main:app --host 0.0.0.0 --port 8000
+    restart: unless-stopped
     ports:
       - "8000:8000"
     env_file:
@@ -53,10 +55,15 @@ services:
       migrate:
         condition: service_completed_successfully
 
+  # The 24/7 loop — restart: unless-stopped matters most here: if this
+  # process dies, every open (paper) position stops being monitored for
+  # stop/target hits until something brings it back. apps/worker/supervisor.py's
+  # heartbeat is what lets /api/system/health notice if it ever does.
   worker:
     build:
       context: ../..
       dockerfile: infra/docker/Dockerfile.worker
+    restart: unless-stopped
     env_file:
       - ../../.env
     environment:
@@ -69,6 +76,7 @@ services:
     build:
       context: ../../apps/dashboard
       dockerfile: ../../infra/docker/Dockerfile.dashboard
+    restart: unless-stopped
     ports:
       - "3000:3000"
     environment:

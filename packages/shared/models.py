@@ -116,6 +116,13 @@ class SystemState(Base):
     trading_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
     updated_reason: Mapped[str | None] = mapped_column(Text)
+    # Written once per full loop iteration by
+    # packages/shared/worker_health.record_heartbeat (called from
+    # apps/worker/main.py) — lets /api/system/health honestly report whether
+    # the 24/7 loop is actually alive, instead of only checking components
+    # (database, market data, ...) that could all be green while the worker
+    # process itself is dead or stuck.
+    worker_last_heartbeat: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class Alert(Base):

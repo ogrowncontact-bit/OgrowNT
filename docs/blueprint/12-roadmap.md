@@ -463,6 +463,63 @@ execução foi tocada.
       na Fase 1) — recomendado correr `docker compose up --build` uma vez
       antes de confiar nisto em produção.
 
+## Supervisor 24/7 (pós-Fase 7) — **status: implementada e validada nesta sessão**
+
+O worker (`apps/worker/main.py`) já corria em loop desde a Fase 1, mas com
+um único `try/except` a envolver o ciclo inteiro e sem nenhuma forma de
+`/api/system/health` saber se o processo em si estava vivo — o mesmo
+princípio de "no hallucinated data" que já se aplicava a preços/notícias em
+falta (`docs/blueprint/00-overview.md`) não se aplicava à própria saúde do
+worker: todos os outros componentes podiam reportar verde com o loop 24/7
+morto ou preso. Corrigido com três primitivas concretas, deliberadamente sem
+reescrever o loop numa framework de orquestração (`docs/blueprint/
+01-repo-structure.md`'s "O que não existe e porquê" continua válido — nada
+de "Master Agent" de dispatch):
+
+- [x] **Heartbeat** (`packages/shared/worker_health.py`,
+      `SystemState.worker_last_heartbeat`, migração `0008`) — escrito uma vez
+      por iteração completa do loop, independentemente do resultado de cada
+      cadência. `/api/system/health` reporta o componente `worker` como
+      `red` (`overall: degraded`) se não houver heartbeat ou se estiver mais
+      velho que `max(3 × scan_interval_seconds, 180s)`, `green` caso
+      contrário — vive em `packages/shared` (não em `apps/worker`) para que
+      `apps/api` continue a nunca importar de `apps/worker`, o mesmo padrão
+      já usado por `packages/shared/market_data.py`
+- [x] **Isolamento por cadência** (`apps/worker/main.py`) — as 5 cadências do
+      loop (scan+monitor+safety-belt, news, strategy, research,
+      alert-delivery) passaram a ter cada uma o seu próprio `try/except`; uma
+      falha numa cadência (ex.: notícias) já não impede as outras de
+      correrem nesse mesmo ciclo nem mata o processo
+- [x] **Alerta em falhas consecutivas** (`apps/worker/supervisor.py`'s
+      `CadenceFailureTracker`) — 1 falha isolada é normal (já fica no log);
+      3 falhas consecutivas na mesma cadência geram um `Alert`
+      (`category=system`, `severity=warning`) através do pipeline de entrega
+      já existente (Fase 7), exatamente uma vez por streak (não repete a
+      cada falha subsequente; uma cadência que recupera e volta a falhar
+      gera um novo alerta)
+- [x] **`restart: unless-stopped`** adicionado a `postgres`/`api`/`worker`/
+      `dashboard` em `infra/docker/docker-compose.yml` (o serviço `migrate`,
+      one-shot, fica deliberadamente sem)
+- [x] 13 novos/atualizados testes automatizados (333/333 no total da suite,
+      confirmado após esta alteração) cobrindo `record_heartbeat`/
+      `is_heartbeat_stale` (incluindo o piso de 180s com
+      `scan_interval_seconds` muito curto) e `CadenceFailureTracker`
+      (threshold exato, não-repetição, reset em sucesso, contadores
+      independentes por cadência)
+- [x] **verificado ao vivo** contra Postgres real: `/api/system/health`
+      reportou `worker: red` ("no heartbeat recorded yet") antes do worker
+      arrancar; após arrancar o processo real (`python -m apps.worker.main`)
+      e completar um ciclo real, passou a `worker: green` ("last heartbeat
+      2026-08-18T11:33:39+00:00"); um segundo ciclo real, ~60s depois,
+      avançou o heartbeat para 11:34:40 — confirma que o mecanismo reflete
+      liveness contínua, não uma escrita única. Dashboard renderiza o novo
+      componente `worker` sem nenhuma alteração de código (mapeia
+      genericamente sobre `health.components`)
+
+Nada nesta secção altera lógica de scoring, risco ou execução — apenas
+observabilidade do próprio processo 24/7 e isolamento de falhas entre
+cadências.
+
 ## Evolução futura (fora de âmbito até validação completa)
 
 Live brokers, exchanges reais (crypto/forex/ações), ML avançado, deep learning,

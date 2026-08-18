@@ -23,6 +23,15 @@ Runs three independent cadences (docs/blueprint/05-event-flow.md §Cadência):
   configured (apps/worker/alerts.py) — short by default since alerts
   (kill switch, safety belt changes) are time-sensitive.
 
+Each cadence above runs in its own try/except (apps/worker/supervisor.py's
+CadenceFailureTracker) — one cadence failing doesn't skip the others in the
+same iteration, and a cadence that fails CONSECUTIVE_FAILURE_ALERT_THRESHOLD
+times in a row raises an Alert instead of only logging. A heartbeat is
+written once per iteration regardless of any cadence's outcome, so
+/api/system/health can honestly report whether this loop is actually alive
+(docs/blueprint/00-overview.md's "no hallucinated data" applies to the
+worker's own liveness too).
+
 Nothing here ever reads a real broker/exchange key or sends a live order —
 see docs/blueprint/12-roadmap.md, live trading is explicitly out of scope
 until a strategy is validated out-of-sample (Fase 6+).
@@ -37,6 +46,7 @@ from apps.worker.history import backfill_active_assets
 from apps.worker.news_agent import run_news_cycle
 from apps.worker.scanner import run_scan_cycle
 from apps.worker.strategy_runner import run_strategy_cycle
+from apps.worker.supervisor import CadenceFailureTracker
 from apps.worker.trade_monitor import run_trade_monitor_cycle
 from packages.data.connectors.market.factory import get_market_data_provider
 from packages.data.connectors.news.factory import get_news_provider
@@ -48,6 +58,7 @@ from packages.risk.monitor import update_safety_belt
 from packages.shared.db import SessionLocal
 from packages.shared.logging import configure_logging
 from packages.shared.settings import get_settings
+from packages.shared.worker_health import record_heartbeat
 
 logger = configure_logging("worker")
 
@@ -96,36 +107,67 @@ def main() -> None:
     last_strategy_run = 0.0
     last_research_run = 0.0
     last_alert_delivery_run = 0.0
+    tracker = CadenceFailureTracker()
 
     while _running:
         cycle_start = time.monotonic()
         db = SessionLocal()
+        # Paper execution provider — never a real broker/exchange adapter.
+        # Built outside any cadence's try/except so a scan/monitor failure
+        # can't leave later cadences in this same iteration without one.
+        exec_provider = PaperExecutionProvider(db)
         try:
-            run_scan_cycle(db, provider)
-
-            # Paper execution provider — never a real broker/exchange adapter.
-            exec_provider = PaperExecutionProvider(db)
-            run_trade_monitor_cycle(db, exec_provider, llm_client)
-            update_safety_belt(db)
+            try:
+                run_scan_cycle(db, provider)
+                run_trade_monitor_cycle(db, exec_provider, llm_client)
+                update_safety_belt(db)
+                tracker.record_success("scan_monitor")
+            except Exception as exc:  # noqa: BLE001 - isolate this cadence, keep the others running
+                logger.exception("scan_monitor cadence failed")
+                tracker.record_failure(db, "scan_monitor", str(exc))
 
             if cycle_start - last_news_run >= settings.news_interval_seconds:
-                run_news_cycle(db, news_provider, llm_client)
+                try:
+                    run_news_cycle(db, news_provider, llm_client)
+                    tracker.record_success("news")
+                except Exception as exc:  # noqa: BLE001
+                    logger.exception("news cadence failed")
+                    tracker.record_failure(db, "news", str(exc))
                 last_news_run = cycle_start
 
             if cycle_start - last_strategy_run >= settings.strategy_interval_seconds:
-                backfill_active_assets(db, provider)
-                run_strategy_cycle(db, provider=exec_provider)
+                try:
+                    backfill_active_assets(db, provider)
+                    run_strategy_cycle(db, provider=exec_provider)
+                    tracker.record_success("strategy")
+                except Exception as exc:  # noqa: BLE001
+                    logger.exception("strategy cadence failed")
+                    tracker.record_failure(db, "strategy", str(exc))
                 last_strategy_run = cycle_start
 
             if cycle_start - last_research_run >= settings.research_interval_seconds:
-                run_research_cycle(db, llm_client)
+                try:
+                    run_research_cycle(db, llm_client)
+                    tracker.record_success("research")
+                except Exception as exc:  # noqa: BLE001
+                    logger.exception("research cadence failed")
+                    tracker.record_failure(db, "research", str(exc))
                 last_research_run = cycle_start
 
             if cycle_start - last_alert_delivery_run >= settings.alert_delivery_interval_seconds:
-                run_alert_delivery_cycle(db, dispatcher)
+                try:
+                    run_alert_delivery_cycle(db, dispatcher)
+                    tracker.record_success("alert_delivery")
+                except Exception as exc:  # noqa: BLE001
+                    logger.exception("alert_delivery cadence failed")
+                    tracker.record_failure(db, "alert_delivery", str(exc))
                 last_alert_delivery_run = cycle_start
-        except Exception:  # noqa: BLE001 - never let one bad cycle kill the loop
-            logger.exception("Worker cycle failed")
+
+            # Written regardless of any cadence's outcome above — this proves
+            # the loop itself is alive, not that everything succeeded.
+            record_heartbeat(db)
+        except Exception:  # noqa: BLE001 - never let anything kill the outer loop
+            logger.exception("Worker cycle failed outside cadence isolation")
         finally:
             db.close()
 

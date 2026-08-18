@@ -4,7 +4,7 @@
 **paper trading only** — no real orders are ever sent. See the full engineering
 specification in [`docs/blueprint/`](docs/blueprint/00-overview.md).
 
-## Status: Phase 7 (Advanced Analytics, Alerts, Optimization) + post-Phase-7 security hardening
+## Status: Phase 7 (Advanced Analytics, Alerts, Optimization) + post-Phase-7 security hardening + Supervisor 24/7
 
 Per [`docs/blueprint/12-roadmap.md`](docs/blueprint/12-roadmap.md):
 
@@ -86,6 +86,17 @@ fixed 3 real gaps — ~30 read endpoints missing the auth the API spec already
 required, insecure hardcoded default secrets with no startup guard, and
 wildcard CORS. All three are fixed and live-verified; see that section for
 details.
+
+**Post-Phase-7 Supervisor 24/7:** the worker loop's own liveness is now
+honestly observable — a heartbeat (`packages/shared/worker_health.py`)
+written once per full loop iteration, `/api/system/health`'s new `worker`
+component reporting `red`/`green` off that heartbeat's staleness, per-cadence
+try/except isolation so one failing cadence (e.g. news) can't stop the
+others, and a threshold-based `Alert` when a cadence fails 3 times in a row.
+Docker Compose's long-running services now carry `restart: unless-stopped`.
+Live-verified: health flips red→green as a real worker process starts, and
+the heartbeat advances across two consecutive real cycles. See
+`docs/blueprint/12-roadmap.md`'s "Supervisor 24/7" section for details.
 
 ## Architecture at a glance
 
@@ -215,7 +226,7 @@ cd apps/dashboard && npm install && npm run dev
 unused imports, undefined names, mutable-default footguns — not a style
 rewrite; see `[tool.ruff]` in `pyproject.toml`), `mypy packages apps scripts`
 (type-checked with the `pydantic.mypy` plugin so FastAPI response models
-type-check correctly), then the full pytest suite (316 tests) against a real
+type-check correctly), then the full pytest suite (333 tests) against a real
 `postgres:16-alpine` service container, migrated from scratch via `alembic
 upgrade head`; separately, the dashboard's `eslint` + `next build`; and
 separately again, a plain `docker build` of all three
