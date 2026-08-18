@@ -23,6 +23,7 @@ import { RegimeBadge } from "@/components/RegimeBadge";
 import { TierBadge } from "@/components/TierBadge";
 import { LifecycleBadge } from "@/components/LifecycleBadge";
 import { LogoutButton } from "@/components/LogoutButton";
+import { KillSwitchButton } from "@/components/KillSwitchButton";
 import { EquitySparkline } from "@/components/EquitySparkline";
 
 export const dynamic = "force-dynamic";
@@ -104,9 +105,12 @@ export default async function DashboardPage() {
           <p className="text-[11px] uppercase tracking-wider text-ink-500">Risk State</p>
           <RiskBadge level={status?.safety_belt_level ?? portfolio?.safety_belt_level ?? "normal"} />
         </div>
-        <p className="text-xs text-ink-500">
-          Trading enabled: {status?.trading_enabled === false ? "no (kill switch)" : "yes"}
-        </p>
+        <div className="flex items-center justify-between">
+          <p className="text-xs text-ink-500">
+            Trading enabled: {status?.trading_enabled === false ? "no (kill switch)" : "yes"}
+          </p>
+          <KillSwitchButton tradingEnabled={status?.trading_enabled !== false} />
+        </div>
       </section>
 
       <section className="mb-6 rounded-lg border border-base-700 bg-base-900 p-4">

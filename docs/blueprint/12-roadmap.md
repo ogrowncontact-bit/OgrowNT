@@ -520,6 +520,38 @@ Nada nesta secção altera lógica de scoring, risco ou execução — apenas
 observabilidade do próprio processo 24/7 e isolamento de falhas entre
 cadências.
 
+## Dashboard: kill switch acionável (pós-Fase 7) — **status: implementada e validada nesta sessão**
+
+O dashboard (`apps/dashboard`) era inteiramente read-only: `POST
+/api/system/kill-switch` e `/kill-switch/release` já existiam na API desde a
+Fase 3, mas o operador só os conseguia acionar via `curl` com um Bearer
+token manual — nenhum botão na única superfície que realmente olha 24/7.
+Para um sistema autónomo (mesmo em paper trading), o controlo de segurança
+mais crítico não podia depender de abrir um terminal.
+
+- [x] `components/KillSwitchButton.tsx` (client component) na secção "Risk
+      State" — mostra "Pull kill switch" quando `trading_enabled=true`,
+      "Release kill switch" quando `false`, com `window.confirm` antes de
+      agir (ação de alto impacto, confirmação explícita)
+- [x] `app/api/kill-switch/route.ts` — segue exatamente o padrão já existente
+      de `app/api/logout/route.ts`: lê o cookie `httpOnly` no servidor e
+      reencaminha para a API real com o Bearer token; o browser nunca vê o
+      token
+- [x] `lib/api.ts`'s `setKillSwitch()` adicionado ao lado das restantes
+      funções de fetch, mesmo padrão de tipagem/tratamento de erro
+- [x] **verificado ao vivo num browser real** (Playwright contra Chromium,
+      dashboard em build de produção + API real + Postgres real): login →
+      "Pull kill switch" → confirmar → dashboard mostra "Trading enabled: no
+      (kill switch)" e o botão troca para "Release kill switch" → clicar →
+      volta a "Trading enabled: yes". Confirmado que os cliques reais
+      escreveram `Alert` (`critical`/`info`, categoria `emergency`) e
+      `AuditLog` (`kill_switch_triggered`/`kill_switch_released`) genuínos na
+      base de dados, não apenas estado local do React. `npm run lint` e
+      `npm run build` limpos
+
+Nada nesta secção adiciona lógica nova de risco — expõe uma ação que já
+existia e já era auditada, apenas antes inacessível sem a API diretamente.
+
 ## Evolução futura (fora de âmbito até validação completa)
 
 Live brokers, exchanges reais (crypto/forex/ações), ML avançado, deep learning,

@@ -241,6 +241,17 @@ export const getPromotionCheck = (token: string, strategyId: number) =>
 export const getAlerts = (token: string, limit = 10) => apiFetch<SystemAlert[]>(`/api/alerts?limit=${limit}`, token);
 export const getAnalyticsOverview = (token: string) => apiFetch<AnalyticsOverview>("/api/analytics/overview", token);
 
+export async function setKillSwitch(token: string, action: "trigger" | "release") {
+  const path = action === "trigger" ? "/api/system/kill-switch" : "/api/system/kill-switch/release";
+  const res = await fetch(`${API_URL}${path}`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  if (!res.ok) return null;
+  return (await res.json()) as SystemStatus;
+}
+
 export async function login(email: string, password: string) {
   const res = await fetch(`${API_URL}/api/auth/login`, {
     method: "POST",

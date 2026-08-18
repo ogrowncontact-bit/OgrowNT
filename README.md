@@ -98,6 +98,17 @@ Live-verified: health flips red→green as a real worker process starts, and
 the heartbeat advances across two consecutive real cycles. See
 `docs/blueprint/12-roadmap.md`'s "Supervisor 24/7" section for details.
 
+**Dashboard: kill switch button.** The dashboard was previously read-only —
+`/api/system/kill-switch` and `/kill-switch/release` existed since Phase 3
+but had no UI, so pulling the kill switch meant a manual `curl` with a
+Bearer token. The Risk State panel now has a confirm-gated button wired
+through a server-side proxy route (`app/api/kill-switch/route.ts`, same
+pattern as the existing logout route — the token stays in an httpOnly
+cookie, never reaches the browser). Verified end-to-end with a real
+Chromium browser against the production build: trigger → dashboard reflects
+disabled state → release → back to enabled, with real `Alert`/`AuditLog`
+rows written by each click. See `docs/blueprint/12-roadmap.md` for details.
+
 ## Architecture at a glance
 
 ```text
