@@ -4,7 +4,7 @@
 **paper trading only** — no real orders are ever sent. See the full engineering
 specification in [`docs/blueprint/`](docs/blueprint/00-overview.md).
 
-## Status: Phase 7 (Advanced Analytics, Alerts, Optimization) + post-Phase-7 security hardening + Supervisor 24/7
+## Status: Phase 7 (Advanced Analytics, Alerts, Optimization) + post-Phase-7 security hardening + Supervisor 24/7 + Market Data Engine + Scanner
 
 Per [`docs/blueprint/12-roadmap.md`](docs/blueprint/12-roadmap.md):
 
@@ -126,6 +126,31 @@ promotion readiness but had no button for `POST /api/strategies/{id}/restore`
 a real strategy into quarantine and clicking Restore in a real browser:
 `StrategyRow.lifecycle_stage` flipped to `paper` and a real `AuditLog` row
 was written, confirmed directly in Postgres.
+
+**Market Data Engine + Market Scanner.** Structured candle validation
+(`packages/data/validation.py` — OHLC coherence, timeframe-scaled
+staleness, absurd single-bar moves), a 0-100 data-quality score
+(`packages/data/quality.py`, distinct from the existing
+high/degraded/unavailable tag), and a Market Scanner
+(`packages/quant/market/events.py`) that turns each candle into
+`PRICE_MOVEMENT`/`VOLUME_SPIKE`/`VOLATILITY_SPIKE`/`BREAKOUT_CANDIDATE`/
+`MOMENTUM_CHANGE`/`TREND_CHANGE`/`ANOMALY`/`INVALID_MARKET_DATA` candidates
+(never trade signals) — deliberately distinct from the existing Pattern
+Engine, which classifies setups for scoring rather than doing raw
+real-time surveillance. `apps/worker/scanner.py` now isolates each asset in
+its own try/except and debounces market-condition alerts
+(`apps/worker/market_alerts.py`). New `/api/market/*` endpoints
+(`overview`, `assets`, `{symbol}`, `{symbol}/ohlcv`, `events`,
+`data-quality`) and two new dashboard panels — Market Overview (with an
+explicit `DATA SOURCE: MOCK`/`LIVE MARKET DATA` banner, never mixed
+silently) and Recent Market Events. No real Crypto/Forex/Stock provider
+adapters were added — no real market-data credentials exist in this
+environment, and an untestable stub adapter would be worse than the
+existing honest `MockMarketDataProvider` fallback. Live-verified: two
+consecutive real worker cycles produced 17 and 18 real events against real
+Postgres (proving continuous operation), and both new dashboard panels
+render real data in a live browser test. See
+`docs/blueprint/12-roadmap.md`'s "PROMPT 2" section for details.
 
 ## Architecture at a glance
 
@@ -255,7 +280,7 @@ cd apps/dashboard && npm install && npm run dev
 unused imports, undefined names, mutable-default footguns — not a style
 rewrite; see `[tool.ruff]` in `pyproject.toml`), `mypy packages apps scripts`
 (type-checked with the `pydantic.mypy` plugin so FastAPI response models
-type-check correctly), then the full pytest suite (333 tests) against a real
+type-check correctly), then the full pytest suite (382 tests) against a real
 `postgres:16-alpine` service container, migrated from scratch via `alembic
 upgrade head`; separately, the dashboard's `eslint` + `next build`; and
 separately again, a plain `docker build` of all three

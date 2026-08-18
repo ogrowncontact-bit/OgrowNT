@@ -43,6 +43,7 @@ import time
 
 from apps.worker.alerts import run_alert_delivery_cycle
 from apps.worker.history import backfill_active_assets
+from apps.worker.market_alerts import MarketAlertTracker
 from apps.worker.news_agent import run_news_cycle
 from apps.worker.scanner import run_scan_cycle
 from apps.worker.strategy_runner import run_strategy_cycle
@@ -108,6 +109,7 @@ def main() -> None:
     last_research_run = 0.0
     last_alert_delivery_run = 0.0
     tracker = CadenceFailureTracker()
+    market_alert_tracker = MarketAlertTracker()
 
     while _running:
         cycle_start = time.monotonic()
@@ -118,7 +120,7 @@ def main() -> None:
         exec_provider = PaperExecutionProvider(db)
         try:
             try:
-                run_scan_cycle(db, provider)
+                run_scan_cycle(db, provider, market_alert_tracker)
                 run_trade_monitor_cycle(db, exec_provider, llm_client)
                 update_safety_belt(db)
                 tracker.record_success("scan_monitor")

@@ -9,6 +9,7 @@ that uses them:
   Phase 4: news events/impact, patterns, pattern performance
   Phase 5: strategy performance/health, trade journal, learned rules, market memory
   Phase 6: backtest runs
+  Post-Phase-7 ("Prompt 2" market data engine): market_events
 macro_events (from the blueprint schema) is not yet implemented — out of
 scope for every phase planned so far; a macro economic calendar is a
 natural but separate future addition.
@@ -94,6 +95,40 @@ class OHLCV(Base):
     asset: Mapped["Asset"] = relationship()
 
 
+class MarketEvent(Base):
+    """Raw market-surveillance events (packages/quant/market/events.py,
+    written by apps/worker/scanner.py every scan cycle) — candidates for the
+    Pattern/Strategy Engines to later consume, never trades or signals
+    themselves. INVALID_MARKET_DATA is included alongside the 7 scanner
+    event types (docs/blueprint's "PROMPT 2" spec §7/§10) so both flow
+    through one table/API/dashboard panel instead of two side-channels.
+    """
+
+    __tablename__ = "market_events"
+    __table_args__ = (
+        CheckConstraint(
+            "event_type IN ('PRICE_MOVEMENT','VOLUME_SPIKE','VOLATILITY_SPIKE',"
+            "'BREAKOUT_CANDIDATE','MOMENTUM_CHANGE','TREND_CHANGE','ANOMALY',"
+            "'INVALID_MARKET_DATA')",
+            name="ck_market_events_event_type",
+        ),
+        CheckConstraint("severity IN ('LOW','MEDIUM','HIGH','CRITICAL')", name="ck_market_events_severity"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    asset_id: Mapped[int] = mapped_column(ForeignKey("assets.id"), nullable=False, index=True)
+    event_type: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    timeframe: Mapped[str] = mapped_column(String, nullable=False)
+    severity: Mapped[str] = mapped_column(String, nullable=False)
+    price: Mapped[float | None] = mapped_column(Float)
+    volume: Mapped[float | None] = mapped_column(Float)
+    confidence: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    meta: Mapped[dict] = mapped_column(JSON, default=dict)
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, nullable=False, index=True)
+
+    asset: Mapped["Asset"] = relationship()
+
+
 class PortfolioSnapshot(Base):
     __tablename__ = "portfolio_snapshots"
 
@@ -130,7 +165,7 @@ class Alert(Base):
     __table_args__ = (
         CheckConstraint("severity IN ('info','warning','critical')", name="ck_alerts_severity"),
         CheckConstraint(
-            "category IN ('trade','risk','loss','emergency','learning','system')",
+            "category IN ('trade','risk','loss','emergency','learning','system','market')",
             name="ck_alerts_category",
         ),
     )

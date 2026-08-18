@@ -514,3 +514,53 @@ class AnalyticsOverviewOut(BaseModel):
     tier_distribution: dict[str, int]
     pattern_leaderboard: list[PatternLeaderboardEntryOut]
     regime_distribution: dict[str, int]
+
+
+# --- Prompt 2: market data engine + scanner ----------------------------
+
+
+class DataSourceOut(BaseModel):
+    """Shown verbatim on the dashboard so mock and real data are never
+    mistaken for each other (Prompt 2 §4)."""
+
+    provider: str
+    is_live: bool
+
+
+class MarketAssetOverviewOut(BaseModel):
+    symbol: str
+    asset_class: str
+    price: float | None
+    pct_change: float | None
+    volatility: float | None
+    volume: float | None
+    trend: str | None
+    data_quality_score: int | None
+    data_quality_status: str | None
+    last_update: datetime | None
+
+
+class MarketOverviewOut(BaseModel):
+    data_source: DataSourceOut
+    assets: list[MarketAssetOverviewOut]
+
+
+class MarketEventOut(BaseModel):
+    id: int
+    asset_symbol: str
+    event_type: str
+    timeframe: str
+    severity: str
+    price: float | None
+    volume: float | None
+    confidence: float
+    meta: dict
+    ts: datetime
+
+
+class DataQualityOut(BaseModel):
+    symbol: str
+    quality_score: int
+    status: str
+    components: dict[str, float]
+    detail: str | None = None

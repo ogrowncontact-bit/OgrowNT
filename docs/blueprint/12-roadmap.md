@@ -615,6 +615,104 @@ Com isto, as três ações administrativas que só existiam via API desde
 fases anteriores (kill switch, lançar backtest, restaurar/promover
 estratégia) estão todas agora acessíveis a partir do dashboard.
 
+## "PROMPT 2" — Market Data Engine + Market Scanner (pós-Fase 7) — **status: implementada e validada nesta sessão**
+
+O utilizador enviou o "PROMPT 2" do guião de bootstrap original (Market
+Data Engine + Scanner), o mesmo em que o "PROMPT 1" já tinha sido
+respondido com "continuar a partir daqui" em vez de reconstruir. A maior
+parte do que o PROMPT 2 pede já existia desde a Fase 1/2 real deste
+repositório (`MarketDataProvider`, `MockMarketDataProvider`, armazenamento
+OHLCV com `timeframe` já a suportar `1m/5m/15m/1h/4h/1D/1W`, e a biblioteca
+de indicadores `packages/quant/indicators`). O que faltava genuinamente —
+validação estruturada, um score de qualidade numérico, um Market Scanner
+que gera eventos reais, e a superfície `/api/market/*` + painéis de
+dashboard correspondentes — foi implementado nesta sessão:
+
+- [x] **Validação de candles** (`packages/data/validation.py`) —
+      `validate_candle()` verifica timestamp válido/não-futuro, coerência
+      OHLC (`high>=open/close`, `low<=open/close`), preço/volume
+      não-negativos, staleness (escalado ao timeframe, com piso de 300s —
+      mesmo padrão do heartbeat do worker) e um salto de preço absurdo
+      (>50% num único candle) vs. o close anterior. Um candle inválido
+      nunca é armazenado; gera um `MarketEvent` `INVALID_MARKET_DATA` e um
+      `Alert` `category=market` (debounced)
+- [x] **Data Quality Score 0-100** (`packages/data/quality.py`) — combina
+      freshness, completeness, consistency (vs. o `data_quality`
+      "high/degraded/unavailable" já existente), source availability e
+      timestamp accuracy; abaixo de
+      `market_data_quality_unsafe_threshold` (config, omissão 50) o status
+      é `DATA_UNSAFE`. Deliberadamente não persistido — recalculado a
+      partir dos dados já em disco, para nunca poder ficar desatualizado
+- [x] **Market Scanner** (`packages/quant/market/events.py`) — 7
+      detectores puros sobre uma janela de candles, reutilizando a
+      biblioteca de indicadores já existente (não uma reimplementação):
+      `PRICE_MOVEMENT`, `VOLUME_SPIKE`, `VOLATILITY_SPIKE`,
+      `BREAKOUT_CANDIDATE`, `MOMENTUM_CHANGE`, `TREND_CHANGE`, `ANOMALY` —
+      cada um com severidade `LOW/MEDIUM/HIGH/CRITICAL` por magnitude e
+      confiança 0-1. Deliberadamente distinto do Pattern Engine (Fase 4,
+      `packages/quant/patterns`): vigilância crua e imediata para um
+      ticker do dashboard, não classificação estatística de setups para o
+      Scoring Engine — os dois não se substituem
+- [x] **`MarketEvent`** (migração `0009`) — tabela nova com
+      `event_type`/`severity`/`price`/`volume`/`confidence`/`meta`,
+      índices em `asset_id`/`event_type`/`ts`; `Alert.category` alargado
+      para incluir `market` (feed desligado, dados obsoletos, evento de
+      severidade alta — `apps/worker/market_alerts.py`'s
+      `MarketAlertTracker`, debounce de 15 min por chave, mesmo padrão do
+      `CadenceFailureTracker` da Fase Supervisor 24/7)
+- [x] **`apps/worker/scanner.py` reescrito** — cada ativo tem o seu
+      próprio `try/except` (falha de provider num símbolo não pára o
+      lote); `provider.is_connected()` verificado antes de qualquer fetch;
+      candle inválido nunca chega a `OHLCV`; após armazenar um candle
+      válido, corre o Scanner e persiste os `MarketEvent`s resultantes
+- [x] **`/api/market/*`** (`apps/api/routers/market.py`) — `overview`
+      (preço/variação/volatilidade/volume/tendência/qualidade por ativo +
+      `data_source`), `assets`, `{symbol}`, `{symbol}/ohlcv`, `events`
+      (filtros `symbol`/`event_type`/`severity`, paginado), `data-quality`.
+      Todos admin-gated como o resto da API. Distinto do
+      `/api/market-data/{asset_id}` já existente (por id interno, Fase 1)
+- [x] **Dashboard**: painel "Market Overview" (tabela `Asset | Price |
+      Change | Volatility | Volume | Data Quality` + banner `DATA SOURCE:
+      MOCK`/`LIVE MARKET DATA`, nunca omitido) e painel "Recent Market
+      Events" (símbolo, tipo, severidade colorida, tempo relativo)
+- [x] **Fonte real de dados — decisão deliberada**: o PROMPT 2 pede
+      adapters separados (`CryptoMarketDataProvider`/
+      `ForexMarketDataProvider`/`StockMarketDataProvider`) por trás da
+      mesma interface. A interface e o padrão de factory já existem
+      (`packages/data/connectors/market/factory.py`) com um TODO explícito
+      desde a Fase 1. Não foram criados adapters reais nesta sessão:
+      nenhuma credencial de mercado real está configurada neste ambiente
+      (`MARKET_DATA_PROVIDER=mock`), e um adapter que não pode ser testado
+      contra uma conta real seria exactamente o tipo de "implementação
+      pela metade" que este projeto evita — pior do que não o ter, porque
+      convida a assumir que funciona. `MockMarketDataProvider` continua a
+      ser a escolha correta enquanto isso for verdade, tal como o próprio
+      PROMPT 2 pede ("Se não houver [credenciais]: usar
+      MockMarketDataProvider")
+- [x] 49 novos testes automatizados (382/382 no total da suite): validação
+      (13, incluindo cada violação OHLC, staleness escalado por timeframe,
+      salto absurdo), quality score (7), detecção de eventos (10 —
+      construindo sequências de candles que provam cada um dos 7 tipos,
+      incluindo o caso "mercado normal → zero eventos"), debounce de
+      alertas (5), cenários do scanner — dados inválidos, dados obsoletos,
+      falha do provider a meio do lote, provider desligado, debounce
+      através de vários ciclos (6), endpoints API incluindo 401 sem token
+      e 404 para símbolo desconhecido (9)
+- [x] **verificado ao vivo** contra Postgres real: worker real a correr
+      dois ciclos consecutivos gerou 17 e depois 18 eventos reais (34→50
+      acumulados, prova de operação contínua, não um fluke); `/api/market/
+      overview`, `/{symbol}/ohlcv`, `/events`, `/data-quality` devolveram
+      números reais (`data_source: {provider: mock, is_live: false}`,
+      scores de qualidade 97-100 a subir com cada novo candle); dashboard
+      testado num browser real (Playwright/Chromium, build de produção) —
+      ambos os painéis novos renderizam dados reais dos 22 ativos.
+      `ruff`/`mypy`/`npm run lint`/`npm run build` limpos
+
+Nada nesta secção implementa estratégias, sinais de compra/venda, ou
+qualquer lógica de execução — os eventos do Scanner são candidatos
+crus para o Pattern/Strategy Engine (já existentes desde a Fase 2/4)
+consumirem no futuro, exactamente como o PROMPT 2 pede.
+
 ## Evolução futura (fora de âmbito até validação completa)
 
 Live brokers, exchanges reais (crypto/forex/ações), ML avançado, deep learning,

@@ -6,6 +6,8 @@ import {
   getBacktests,
   getHealth,
   getLearnedRules,
+  getMarketEvents,
+  getMarketOverview,
   getNews,
   getOpportunities,
   getPortfolio,
@@ -34,11 +36,32 @@ export const dynamic = "force-dynamic";
 const eur = (n: number) =>
   new Intl.NumberFormat("en-IE", { style: "currency", currency: "EUR" }).format(n);
 
+function timeAgo(iso: string): string {
+  const seconds = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
+  if (seconds < 60) return "just now";
+  if (seconds < 3600) return `${Math.floor(seconds / 60)} minutes ago`;
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)} hours ago`;
+  return `${Math.floor(seconds / 86400)} days ago`;
+}
+
+const SEVERITY_COLOR: Record<string, string> = {
+  CRITICAL: "text-signal-red",
+  HIGH: "text-signal-red",
+  MEDIUM: "text-signal-yellow",
+  LOW: "text-ink-500",
+};
+
+const QUALITY_COLOR: Record<string, string> = {
+  GOOD: "text-signal-green",
+  DEGRADED: "text-signal-yellow",
+  DATA_UNSAFE: "text-signal-red",
+};
+
 export default async function DashboardPage() {
   const cookieStore = await cookies();
   const token = cookieStore.get("ogrownt_token")?.value ?? "";
 
-  const [health, status, portfolio, assets, positions, opportunities, regimes, trades, news, strategyLearning, tradeJournal, learnedRules, alerts, strategies] =
+  const [health, status, portfolio, assets, positions, opportunities, regimes, trades, news, strategyLearning, tradeJournal, learnedRules, alerts, strategies, marketOverview, marketEvents] =
     await Promise.all([
       getHealth(),
       getSystemStatus(token),
@@ -54,6 +77,8 @@ export default async function DashboardPage() {
       getLearnedRules(token, 6),
       getAlerts(token, 8),
       getStrategies(token),
+      getMarketOverview(token),
+      getMarketEvents(token, 8),
     ]);
 
   const [backtests, promotionChecks, analytics] = await Promise.all([
@@ -115,6 +140,90 @@ export default async function DashboardPage() {
           </p>
           <KillSwitchButton tradingEnabled={status?.trading_enabled !== false} />
         </div>
+      </section>
+
+      <section className="mb-6 rounded-lg border border-base-700 bg-base-900 p-4">
+        <div className="mb-3 flex items-center justify-between">
+          <p className="text-[11px] uppercase tracking-wider text-ink-500">
+            Market Overview {marketOverview ? `(${marketOverview.assets.length})` : ""}
+          </p>
+          {marketOverview && (
+            <span
+              className={`text-[10px] uppercase tracking-wide ${
+                marketOverview.data_source.is_live ? "text-signal-green" : "text-ink-500"
+              }`}
+              title="Prompt 2 §4 — mock and real data are never mixed without this label"
+            >
+              DATA SOURCE: {marketOverview.data_source.is_live ? "LIVE MARKET DATA" : "MOCK"}
+            </span>
+          )}
+        </div>
+        {marketOverview && marketOverview.assets.length > 0 ? (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead>
+                <tr className="text-ink-500">
+                  <th className="pb-2 pr-3 font-normal">Asset</th>
+                  <th className="pb-2 pr-3 font-normal">Price</th>
+                  <th className="pb-2 pr-3 font-normal">Change</th>
+                  <th className="pb-2 pr-3 font-normal">Volatility</th>
+                  <th className="pb-2 pr-3 font-normal">Volume</th>
+                  <th className="pb-2 font-normal">Data Quality</th>
+                </tr>
+              </thead>
+              <tbody>
+                {marketOverview.assets.map((a) => (
+                  <tr key={a.symbol} className="border-t border-base-700/60 hover:bg-base-800">
+                    <td className="py-1.5 pr-3 text-ink-100">{a.symbol}</td>
+                    <td className="py-1.5 pr-3 text-ink-300">{a.price !== null ? a.price.toFixed(4) : "—"}</td>
+                    <td
+                      className={`py-1.5 pr-3 ${
+                        (a.pct_change ?? 0) > 0 ? "text-signal-green" : (a.pct_change ?? 0) < 0 ? "text-signal-red" : "text-ink-300"
+                      }`}
+                    >
+                      {a.pct_change !== null ? `${(a.pct_change * 100).toFixed(2)}%` : "—"}
+                    </td>
+                    <td className="py-1.5 pr-3 text-ink-300">
+                      {a.volatility !== null ? `${(a.volatility * 100).toFixed(2)}%` : "—"}
+                    </td>
+                    <td className="py-1.5 pr-3 text-ink-300">{a.volume !== null ? a.volume.toFixed(1) : "—"}</td>
+                    <td className={`py-1.5 ${QUALITY_COLOR[a.data_quality_status ?? ""] ?? "text-ink-500"}`}>
+                      {a.data_quality_score !== null ? `${a.data_quality_score} (${a.data_quality_status})` : "—"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <p className="text-xs text-ink-500">No assets monitored yet.</p>
+        )}
+      </section>
+
+      <section className="mb-6 rounded-lg border border-base-700 bg-base-900 p-4">
+        <p className="mb-3 text-[11px] uppercase tracking-wider text-ink-500">
+          Recent Market Events {marketEvents ? `(${marketEvents.length})` : ""}
+        </p>
+        {marketEvents && marketEvents.length > 0 ? (
+          <div className="space-y-2">
+            {marketEvents.map((e) => (
+              <div key={e.id} className="rounded border border-base-700 px-2 py-1.5 text-xs">
+                <div className="flex items-center justify-between">
+                  <span className="text-ink-100">{e.asset_symbol}</span>
+                  <span className="text-ink-500">{timeAgo(e.ts)}</span>
+                </div>
+                <div className="mt-1 flex items-center justify-between">
+                  <span className="text-ink-300">{e.event_type.replaceAll("_", " ")}</span>
+                  <span className={`text-[10px] uppercase tracking-wide ${SEVERITY_COLOR[e.severity] ?? "text-ink-500"}`}>
+                    {e.severity}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-xs text-ink-500">No market events detected yet.</p>
+        )}
       </section>
 
       <section className="mb-6 rounded-lg border border-base-700 bg-base-900 p-4">

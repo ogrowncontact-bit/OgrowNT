@@ -32,6 +32,32 @@ export type Strategy = {
   version: string;
   lifecycle_stage: string;
 };
+export type DataSource = { provider: string; is_live: boolean };
+export type MarketAssetOverview = {
+  symbol: string;
+  asset_class: string;
+  price: number | null;
+  pct_change: number | null;
+  volatility: number | null;
+  volume: number | null;
+  trend: string | null;
+  data_quality_score: number | null;
+  data_quality_status: string | null;
+  last_update: string | null;
+};
+export type MarketOverview = { data_source: DataSource; assets: MarketAssetOverview[] };
+export type MarketEvent = {
+  id: number;
+  asset_symbol: string;
+  event_type: string;
+  timeframe: string;
+  severity: string;
+  price: number | null;
+  volume: number | null;
+  confidence: number;
+  meta: Record<string, unknown>;
+  ts: string;
+};
 export type Opportunity = {
   signal_id: number;
   asset_symbol: string;
@@ -234,6 +260,8 @@ export const getSystemStatus = (token: string) => apiFetch<SystemStatus>("/api/s
 export const getPortfolio = (token: string) => apiFetch<Portfolio>("/api/portfolio", token);
 export const getAssets = (token: string) => apiFetch<Asset[]>("/api/assets", token);
 export const getStrategies = (token: string) => apiFetch<Strategy[]>("/api/strategies", token);
+export const getMarketOverview = (token: string) => apiFetch<MarketOverview>("/api/market/overview", token);
+export const getMarketEvents = (token: string, limit = 10) => apiFetch<MarketEvent[]>(`/api/market/events?limit=${limit}`, token);
 export const getPositions = (token: string, statusFilter: "open" | "closed" = "open") =>
   apiFetch<Position[]>(`/api/positions?status_filter=${statusFilter}`, token);
 export const getOpportunities = (token: string, limit = 10) => apiFetch<Opportunity[]>(`/api/opportunities?limit=${limit}`, token);

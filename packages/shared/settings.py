@@ -53,6 +53,9 @@ class Settings(BaseSettings):
 
     market_data_provider: str = "mock"
     scan_interval_seconds: int = 60
+    # Below this 0-100 score (packages/data/quality.py), /api/market/data-quality
+    # and the dashboard mark an asset DATA_UNSAFE rather than silently degraded.
+    market_data_quality_unsafe_threshold: int = 50
     # Strategy evaluation cadence — docs/blueprint/05-event-flow.md §Cadência (15 min).
     strategy_interval_seconds: int = 900
 

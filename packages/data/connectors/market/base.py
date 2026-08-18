@@ -17,6 +17,20 @@ from typing import Literal, Protocol
 
 DataQuality = Literal["high", "degraded", "unavailable"]
 
+# Matches packages/shared/models.py's OHLCV.timeframe CHECK constraint.
+# Used wherever "how old is too old" needs to scale with the bar size
+# (packages/data/validation.py, packages/data/quality.py) instead of a
+# single hardcoded staleness window for every timeframe.
+TIMEFRAME_SECONDS: dict[str, int] = {
+    "1m": 60,
+    "5m": 5 * 60,
+    "15m": 15 * 60,
+    "1h": 60 * 60,
+    "4h": 4 * 60 * 60,
+    "1D": 24 * 60 * 60,
+    "1W": 7 * 24 * 60 * 60,
+}
+
 
 @dataclass(frozen=True)
 class Candle:

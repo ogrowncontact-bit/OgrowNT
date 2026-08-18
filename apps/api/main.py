@@ -10,6 +10,7 @@ from apps.api.routers import (
     auth,
     backtests,
     learning,
+    market,
     market_data,
     news,
     opportunities,
@@ -56,6 +57,7 @@ app.include_router(auth.router)
 app.include_router(system.router)
 app.include_router(assets.router)
 app.include_router(market_data.router)
+app.include_router(market.router)
 app.include_router(portfolio.router)
 app.include_router(strategies.router)
 app.include_router(opportunities.router)
