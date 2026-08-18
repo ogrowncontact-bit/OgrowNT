@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@inner/db";
+import { SUPPORTED_REPORT_LANGUAGES } from "@inner/ai";
 import { getAssessmentConfig } from "@/lib/assessments";
 import { readAnonymousSessionId } from "@/lib/anonymousSession";
 import { getPaymentProvider } from "@/lib/payments";
@@ -7,6 +8,15 @@ import { track } from "@/lib/analytics";
 
 function appBaseUrl(request: NextRequest): string {
   return process.env.APP_BASE_URL ?? request.nextUrl.origin;
+}
+
+/** Explicit selection (future language switcher) wins over Accept-Language; falls back to English rather than guessing. */
+function resolveReportLanguage(explicit: string | undefined, acceptLanguageHeader: string | null): string {
+  const supported = SUPPORTED_REPORT_LANGUAGES as readonly string[];
+  if (explicit && supported.includes(explicit)) return explicit;
+
+  const candidates = (acceptLanguageHeader ?? "").split(",").map((part) => part.trim().split(";")[0]?.slice(0, 2).toLowerCase());
+  return candidates.find((c) => c && supported.includes(c)) ?? "en";
 }
 
 export async function POST(request: NextRequest) {
@@ -70,6 +80,8 @@ export async function POST(request: NextRequest) {
   });
   if (!price) return NextResponse.json({ error: "No active price for this assessment" }, { status: 500 });
 
+  const language = resolveReportLanguage(body?.language as string | undefined, request.headers.get("accept-language"));
+
   const order = await prisma.order.create({
     data: {
       userId: user.id,
@@ -79,6 +91,7 @@ export async function POST(request: NextRequest) {
       currency: price.currency,
       status: "pending",
       provider: getPaymentProvider().name,
+      language,
     },
   });
 

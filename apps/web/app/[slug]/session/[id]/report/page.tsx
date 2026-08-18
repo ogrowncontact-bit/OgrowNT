@@ -39,7 +39,32 @@ export default async function ReportPage({ params }: { params: Promise<{ slug: s
   if (!config) notFound();
 
   const entitlement = await prisma.entitlement.findFirst({ where: { assessmentSessionId: id } });
-  if (!entitlement) redirect(`/${slug}/session/${id}/paywall`);
+  if (!entitlement) {
+    // No entitlement yet doesn't necessarily mean "never paid" — report
+    // generation can fail *after* payment succeeds (an entitlement is only
+    // ever created on the success path, see lib/commerce.ts). Redirecting a
+    // paying customer back to the paywall would wrongly ask them to pay
+    // again, so check for a durable failure record first.
+    const failedReport = await prisma.report.findFirst({ where: { assessmentSessionId: id, status: "failed" } });
+    if (failedReport) {
+      return (
+        <Screen align="top">
+          <LoadingState
+            eyebrow="One moment"
+            title="We hit a problem preparing your report."
+            body="Your payment went through — nothing was lost. We're on it, and this page will update automatically. If it's still stuck in a few minutes, contact support and we'll sort it out."
+          />
+          <p className="mt-6">
+            <Link href="/support" className="text-[13px] text-[var(--inner-muted)] underline underline-offset-4">
+              Contact support
+            </Link>
+          </p>
+          <ReportPolling />
+        </Screen>
+      );
+    }
+    redirect(`/${slug}/session/${id}/paywall`);
+  }
 
   // Computed from the assessment itself, not the report — available as soon as the
   // free result is, independent of whether report generation has finished.

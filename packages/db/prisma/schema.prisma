@@ -392,6 +392,15 @@ enum OrderStatus {
   @@schema("commerce")
 }
 
+enum ReportStatus {
+  pending
+  generating
+  ready
+  failed
+
+  @@schema("commerce")
+}
+
 model Order {
   id                  String            @id @default(cuid())
   userId              String
@@ -405,6 +414,8 @@ model Order {
   status              OrderStatus       @default(pending)
   provider             String
   providerRef          String?
+  /** ISO 639-1, captured at checkout (explicit selection or Accept-Language) — the report is generated in this language. */
+  language             String           @default("en")
   createdAt            DateTime         @default(now())
   paidAt                DateTime?
 
@@ -435,11 +446,18 @@ model Report {
   id                  String            @id @default(cuid())
   assessmentSessionId String
   assessmentSession   AssessmentSession @relation(fields: [assessmentSessionId], references: [id])
-  orderId             String
+  orderId             String            @unique
   order               Order             @relation(fields: [orderId], references: [id])
   templateVersion     Int
-  content             Json              // assembled section-by-section report, source of truth
+  status              ReportStatus      @default(ready)
+  /** null content is only valid alongside status=failed — see lib/commerce.ts's failure path. */
+  content             Json?             // assembled section-by-section report, source of truth
   pdfObjectKey         String?
+  language             String           @default("en")
+  reportEngineVersion  Int?
+  promptVersion        Int?
+  modelVersion         String?
+  failureReason        String?
   generatedAt          DateTime         @default(now())
   deliveredAt          DateTime?
 

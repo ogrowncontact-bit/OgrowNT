@@ -761,15 +761,20 @@ export const loveAssessment: AssessmentConfig = {
 
   premiumReportStructure: [
     { key: "signature", title: "Your INNER Signature", promptRef: "love.signature" },
-    { key: "dominant_pattern", title: "Your Dominant Pattern", promptRef: "love.dominant_pattern" },
+    { key: "dominant_pattern", title: "Your Dominant Love Pattern", promptRef: "love.dominant_pattern" },
     { key: "how_you_connect", title: "How You Connect", promptRef: "love.how_you_connect" },
-    { key: "what_you_need", title: "What You May Need", promptRef: "love.what_you_need" },
-    { key: "how_you_react", title: "How You May React", promptRef: "love.how_you_react" },
+    { key: "how_you_handle_closeness", title: "How You Handle Closeness", promptRef: "love.how_you_handle_closeness" },
+    { key: "your_independence", title: "Your Independence", promptRef: "love.your_independence" },
+    { key: "your_vulnerability", title: "Your Vulnerability", promptRef: "love.your_vulnerability" },
+    { key: "trust_and_security", title: "Trust & Security", promptRef: "love.trust_and_security" },
+    { key: "distance_response", title: "How You Respond to Distance", promptRef: "love.distance_response" },
+    { key: "communication_in_connection", title: "Your Communication in Connection", promptRef: "love.communication_in_connection" },
     { key: "strengths", title: "Your Strengths", promptRef: "love.strengths" },
-    { key: "friction_points", title: "Potential Friction Points", promptRef: "love.friction_points" },
-    { key: "perception", title: "What Others May Perceive", promptRef: "love.perception" },
-    { key: "reflection", title: "Reflection Questions", promptRef: "love.reflection" },
-    { key: "conclusion", title: "Your Personalized Conclusion", promptRef: "love.conclusion" },
+    { key: "friction_points", title: "Your Potential Friction Points", promptRef: "love.friction_points" },
+    { key: "inner_tension", title: "The Tension Inside Your Profile", promptRef: "love.inner_tension" },
+    { key: "misunderstood_aspects", title: "What Others May Sometimes Misunderstand About You", promptRef: "love.misunderstood_aspects" },
+    { key: "reflection", title: "Your Personal Reflection", promptRef: "love.reflection" },
+    { key: "final_note", title: "Final INNER Note", promptRef: "love.final_note" },
   ],
 
   recommendedNext: [

@@ -183,10 +183,16 @@ export async function saveAssessmentDraft(assessmentId: string, config: Assessme
     },
   });
 
-  await prisma.price.deleteMany({ where: { assessmentId } });
+  // Deactivate rather than delete: a Price row is a required FK from any
+  // historical Order that was ever charged against it (Order.priceId), so a
+  // hard delete here would break the moment a real purchase exists (fine on
+  // a config publish before launch, but not a safe pattern for production
+  // republishing). `active: false` is exactly what checkout already filters
+  // on when picking a price to charge.
+  await prisma.price.updateMany({ where: { assessmentId, active: true }, data: { active: false } });
   for (const priceRef of Object.values(config.pricing)) {
     await prisma.price.create({
-      data: { assessmentId, productType: priceRef.productType, amountCents: priceRef.amountCents, currency: priceRef.currency },
+      data: { assessmentId, productType: priceRef.productType, amountCents: priceRef.amountCents, currency: priceRef.currency, active: true },
     });
   }
 
