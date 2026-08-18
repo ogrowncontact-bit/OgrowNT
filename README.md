@@ -117,6 +117,16 @@ server-side proxy pattern. Live-verified: a real browser run created a real
 `BacktestRun` row, confirmed directly in Postgres. Walk-forward/optimize
 still API-only — out of scope for this pass.
 
+**Dashboard: restore/promote strategy.** Third and last admin-only action
+closed this session — the Strategy Health panel showed lifecycle state and
+promotion readiness but had no button for `POST /api/strategies/{id}/restore`
+(Phase 5) or `/promote` (Phase 6). Added a confirm-gated
+`StrategyActionButton`, shown only when the action actually applies
+(Restore under quarantine, Promote when eligible). Live-verified by putting
+a real strategy into quarantine and clicking Restore in a real browser:
+`StrategyRow.lifecycle_stage` flipped to `paper` and a real `AuditLog` row
+was written, confirmed directly in Postgres.
+
 ## Architecture at a glance
 
 ```text

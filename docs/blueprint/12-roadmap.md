@@ -581,6 +581,40 @@ Walk-forward e optimize continuam apenas via API direta (`/docs`) — âmbito
 desta alteração foi deliberadamente o backtest simples, o gap mais visível
 (era o único com uma mensagem no próprio dashboard a apontar para `curl`).
 
+## Dashboard: restaurar/promover estratégia (pós-Fase 7) — **status: implementada e validada nesta sessão**
+
+Terceira e última ação admin-only fechada nesta sessão: `POST
+/api/strategies/{id}/restore` (Fase 5) e `POST /api/strategies/{id}/promote`
+(Fase 6) já existiam mas o painel "Strategy Health" só mostrava o estado
+(`LifecycleBadge`, "Ready for promotion") sem nenhum botão — o operador via
+que uma estratégia estava pronta mas não a conseguia promover sem `curl`.
+
+- [x] `components/StrategyActionButton.tsx` — botão genérico
+      confirm-gated reutilizado para ambas as ações; aparece "Restore to
+      paper" quando `lifecycle_stage === "quarantine"`, "Promote ->
+      {next_stage}" quando `promotion.eligible === true` (nunca ambos, nunca
+      quando nenhuma condição se aplica)
+- [x] `app/api/strategy-action/route.ts` — mesmo padrão de proxy
+      server-side dos dois anteriores (kill switch, backtest launcher)
+- [x] `lib/api.ts`'s `strategyAction()` adicionado ao lado das restantes
+- [x] **verificado ao vivo num browser real**: como nenhuma estratégia no
+      DB de desenvolvimento cumpre os critérios de promoção
+      (`min_paper_trades: 30`, `min_paper_days: 30`), colocada uma
+      estratégia real em quarentena (a mesma transição de estado que o
+      Learning Agent aplicaria automaticamente) para testar o caminho de
+      restauro end-to-end: dashboard mostrou "Quarantined" + botão "Restore
+      to paper" → clique real → label "Quarantined" desaparece → confirmado
+      diretamente na base de dados que `StrategyRow.lifecycle_stage` mudou
+      para `paper` e que um `AuditLog` real (`restore_strategy`,
+      `actor=admin@example.com`) foi escrito. Confirmado também que nenhum
+      botão "Promote" aparece quando nenhuma estratégia é elegível — o
+      condicional está correto, não sempre visível. `npm run lint` e `npm
+      run build` limpos
+
+Com isto, as três ações administrativas que só existiam via API desde
+fases anteriores (kill switch, lançar backtest, restaurar/promover
+estratégia) estão todas agora acessíveis a partir do dashboard.
+
 ## Evolução futura (fora de âmbito até validação completa)
 
 Live brokers, exchanges reais (crypto/forex/ações), ML avançado, deep learning,

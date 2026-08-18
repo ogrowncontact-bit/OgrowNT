@@ -282,6 +282,17 @@ export async function runBacktest(token: string, payload: RunBacktestPayload) {
   return { ok: true as const, result: body as BacktestSummary };
 }
 
+export async function strategyAction(token: string, strategyId: number, action: "promote" | "restore") {
+  const res = await fetch(`${API_URL}/api/strategies/${strategyId}/${action}`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  const body = await res.json().catch(() => null);
+  if (!res.ok) return { ok: false as const, detail: body?.detail ?? `${action} failed (${res.status})` };
+  return { ok: true as const, result: body as Strategy };
+}
+
 export async function login(email: string, password: string) {
   const res = await fetch(`${API_URL}/api/auth/login`, {
     method: "POST",

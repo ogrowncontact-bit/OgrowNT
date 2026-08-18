@@ -23,6 +23,7 @@ import { RiskBadge } from "@/components/RiskBadge";
 import { RegimeBadge } from "@/components/RegimeBadge";
 import { TierBadge } from "@/components/TierBadge";
 import { LifecycleBadge } from "@/components/LifecycleBadge";
+import { StrategyActionButton } from "@/components/StrategyActionButton";
 import { LogoutButton } from "@/components/LogoutButton";
 import { KillSwitchButton } from "@/components/KillSwitchButton";
 import { RunBacktestForm } from "@/components/RunBacktestForm";
@@ -370,12 +371,33 @@ export default async function DashboardPage() {
                     </div>
                     {promotion && promotion.next_stage && (
                       <div
-                        className={`mt-1 text-[10px] ${promotion.eligible ? "text-signal-green" : "text-ink-500"}`}
+                        className={`mt-1 flex items-center justify-between text-[10px] ${promotion.eligible ? "text-signal-green" : "text-ink-500"}`}
                         title={promotion.eligible ? undefined : promotion.reasons.join("; ")}
                       >
-                        {promotion.eligible
-                          ? `Ready for promotion -> ${promotion.next_stage}`
-                          : `Not yet ready for ${promotion.next_stage} (${promotion.reasons.length} unmet criteria)`}
+                        <span>
+                          {promotion.eligible
+                            ? `Ready for promotion -> ${promotion.next_stage}`
+                            : `Not yet ready for ${promotion.next_stage} (${promotion.reasons.length} unmet criteria)`}
+                        </span>
+                        {promotion.eligible && (
+                          <StrategyActionButton
+                            strategyId={s.strategy_id}
+                            action="promote"
+                            label={`Promote -> ${promotion.next_stage}`}
+                            confirmText={`Promote ${s.strategy_code} to ${promotion.next_stage}? The server re-checks eligibility before applying.`}
+                          />
+                        )}
+                      </div>
+                    )}
+                    {s.lifecycle_stage === "quarantine" && (
+                      <div className="mt-1 flex items-center justify-between text-[10px] text-signal-red">
+                        <span>Quarantined — excluded from new signal generation</span>
+                        <StrategyActionButton
+                          strategyId={s.strategy_id}
+                          action="restore"
+                          label="Restore to paper"
+                          confirmText={`Restore ${s.strategy_code} from quarantine back to paper trading?`}
+                        />
                       </div>
                     )}
                   </div>
