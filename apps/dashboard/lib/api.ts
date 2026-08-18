@@ -24,6 +24,14 @@ export type Asset = {
   exchange: string | null;
   is_active: boolean;
 };
+export type Strategy = {
+  id: number;
+  code: string;
+  name: string;
+  family: string;
+  version: string;
+  lifecycle_stage: string;
+};
 export type Opportunity = {
   signal_id: number;
   asset_symbol: string;
@@ -225,6 +233,7 @@ export const getHealth = () => apiFetch<HealthResponse>("/api/system/health");
 export const getSystemStatus = (token: string) => apiFetch<SystemStatus>("/api/system/status", token);
 export const getPortfolio = (token: string) => apiFetch<Portfolio>("/api/portfolio", token);
 export const getAssets = (token: string) => apiFetch<Asset[]>("/api/assets", token);
+export const getStrategies = (token: string) => apiFetch<Strategy[]>("/api/strategies", token);
 export const getPositions = (token: string, statusFilter: "open" | "closed" = "open") =>
   apiFetch<Position[]>(`/api/positions?status_filter=${statusFilter}`, token);
 export const getOpportunities = (token: string, limit = 10) => apiFetch<Opportunity[]>(`/api/opportunities?limit=${limit}`, token);
@@ -250,6 +259,27 @@ export async function setKillSwitch(token: string, action: "trigger" | "release"
   });
   if (!res.ok) return null;
   return (await res.json()) as SystemStatus;
+}
+
+export type RunBacktestPayload = {
+  strategy_id: number;
+  asset_id: number;
+  timeframe: string;
+  start_ts: string;
+  end_ts: string;
+  initial_capital: number;
+};
+
+export async function runBacktest(token: string, payload: RunBacktestPayload) {
+  const res = await fetch(`${API_URL}/api/backtests`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+    cache: "no-store",
+  });
+  const body = await res.json().catch(() => null);
+  if (!res.ok) return { ok: false as const, detail: body?.detail ?? `Backtest failed (${res.status})` };
+  return { ok: true as const, result: body as BacktestSummary };
 }
 
 export async function login(email: string, password: string) {

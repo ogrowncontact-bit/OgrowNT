@@ -12,6 +12,7 @@ import {
   getPositions,
   getPromotionCheck,
   getRegimes,
+  getStrategies,
   getStrategyLearning,
   getSystemStatus,
   getTradeJournal,
@@ -24,6 +25,7 @@ import { TierBadge } from "@/components/TierBadge";
 import { LifecycleBadge } from "@/components/LifecycleBadge";
 import { LogoutButton } from "@/components/LogoutButton";
 import { KillSwitchButton } from "@/components/KillSwitchButton";
+import { RunBacktestForm } from "@/components/RunBacktestForm";
 import { EquitySparkline } from "@/components/EquitySparkline";
 
 export const dynamic = "force-dynamic";
@@ -35,7 +37,7 @@ export default async function DashboardPage() {
   const cookieStore = await cookies();
   const token = cookieStore.get("ogrownt_token")?.value ?? "";
 
-  const [health, status, portfolio, assets, positions, opportunities, regimes, trades, news, strategyLearning, tradeJournal, learnedRules, alerts] =
+  const [health, status, portfolio, assets, positions, opportunities, regimes, trades, news, strategyLearning, tradeJournal, learnedRules, alerts, strategies] =
     await Promise.all([
       getHealth(),
       getSystemStatus(token),
@@ -50,6 +52,7 @@ export default async function DashboardPage() {
       getTradeJournal(token, 6),
       getLearnedRules(token, 6),
       getAlerts(token, 8),
+      getStrategies(token),
     ]);
 
   const [backtests, promotionChecks, analytics] = await Promise.all([
@@ -554,6 +557,7 @@ export default async function DashboardPage() {
         <p className="mb-3 text-[11px] uppercase tracking-wider text-ink-500">
           Backtests {backtests ? `(${backtests.length})` : ""}
         </p>
+        <RunBacktestForm strategies={strategies ?? []} assets={assets ?? []} />
         {backtests && backtests.length > 0 ? (
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs">
@@ -589,7 +593,8 @@ export default async function DashboardPage() {
           </div>
         ) : (
           <p className="text-xs text-ink-500">
-            No backtests run yet — launch one via <code>POST /api/backtests</code> (see <code>/docs</code>).
+            No backtests run yet — use the form above, or{" "}
+            <code>POST /api/backtests</code> directly for walk-forward/optimize runs (see <code>/docs</code>).
           </p>
         )}
       </section>

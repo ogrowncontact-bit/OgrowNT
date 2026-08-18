@@ -552,6 +552,35 @@ mais crítico não podia depender de abrir um terminal.
 Nada nesta secção adiciona lógica nova de risco — expõe uma ação que já
 existia e já era auditada, apenas antes inacessível sem a API diretamente.
 
+## Dashboard: launcher de backtests (pós-Fase 7) — **status: implementada e validada nesta sessão**
+
+Continuação direta da secção anterior: o painel "Backtests" já listava
+resultados mas dizia explicitamente "launch one via `POST /api/backtests`
+(see `/docs`)" quando vazio — o mesmo problema do kill switch, desta vez
+para `/api/backtests` (existente desde a Fase 6). Corrigido com um formulário
+mínimo, não uma reescrita do painel:
+
+- [x] `components/RunBacktestForm.tsx` — estratégia (`/api/strategies`),
+      ativo (`/api/assets` já disponível), intervalo de datas (por omissão os
+      últimos 3 dias) e capital inicial; timeframe fixo em `1m` porque é o
+      único com histórico realmente carregado
+      (`apps/worker/history.py`) — não oferecer opções que o sistema não
+      consegue mesmo cumprir
+- [x] `app/api/run-backtest/route.ts` — mesmo padrão de proxy server-side
+      (cookie `httpOnly` → Bearer token) do kill switch e do logout
+- [x] `lib/api.ts`'s `getStrategies()`/`runBacktest()` adicionados ao lado
+      das restantes funções
+- [x] **verificado ao vivo num browser real** (Playwright/Chromium, build de
+      produção, API e Postgres reais): login → formulário pré-populado com
+      estratégias/ativos reais (4 estratégias, 22 ativos) → submeter → nova
+      `BacktestRun` real persistida (id 98, confirmado diretamente na base
+      de dados) → mensagem de resultado inline → tabela de backtests
+      atualizada sem reload manual. `npm run lint` e `npm run build` limpos
+
+Walk-forward e optimize continuam apenas via API direta (`/docs`) — âmbito
+desta alteração foi deliberadamente o backtest simples, o gap mais visível
+(era o único com uma mensagem no próprio dashboard a apontar para `curl`).
+
 ## Evolução futura (fora de âmbito até validação completa)
 
 Live brokers, exchanges reais (crypto/forex/ações), ML avançado, deep learning,

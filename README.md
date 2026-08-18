@@ -109,6 +109,14 @@ Chromium browser against the production build: trigger → dashboard reflects
 disabled state → release → back to enabled, with real `Alert`/`AuditLog`
 rows written by each click. See `docs/blueprint/12-roadmap.md` for details.
 
+**Dashboard: backtest launcher.** Same gap, different endpoint — the
+Backtests panel told you to `POST /api/backtests` via `curl` when empty.
+Added a small form (strategy/asset/date-range/capital, `1m` timeframe only
+since that's the one with real backfilled history) behind the same
+server-side proxy pattern. Live-verified: a real browser run created a real
+`BacktestRun` row, confirmed directly in Postgres. Walk-forward/optimize
+still API-only — out of scope for this pass.
+
 ## Architecture at a glance
 
 ```text
