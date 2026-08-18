@@ -1,9 +1,148 @@
 import Link from "next/link";
+import { getDashboardOverview, getTopAcquisitionSources, getTopAssessments, getTopRecommendations } from "@/lib/admin/dashboardReader";
+import { getReportStatusCounts } from "@/lib/admin/reportsReader";
 
-export default function AdminHomePage() {
+function formatMoney(cents: number, currency = "EUR") {
+  return new Intl.NumberFormat("en-IE", { style: "currency", currency }).format(cents / 100);
+}
+
+const card = "rounded-[var(--inner-radius-lg)] border border-[var(--inner-line)] bg-[var(--inner-card)] p-5";
+const cardLabel = "text-[12px] text-[var(--inner-muted)]";
+const cardValue = "font-display text-[22px] text-[var(--inner-ink)]";
+const sectionCard = "overflow-x-auto rounded-[var(--inner-radius-lg)] border border-[var(--inner-line)] bg-[var(--inner-card)]";
+
+export const dynamic = "force-dynamic";
+
+export default async function AdminHomePage() {
+  const [overview, reportCounts, topAssessments, topSources, topRecommendations] = await Promise.all([
+    getDashboardOverview(),
+    getReportStatusCounts(),
+    getTopAssessments(5),
+    getTopAcquisitionSources(5),
+    getTopRecommendations(5),
+  ]);
+
   return (
     <div>
-      <h1 className="font-display mb-6 text-[24px] text-[var(--inner-ink)]">Overview</h1>
+      <h1 className="font-display mb-6 text-[24px] text-[var(--inner-ink)]">INNER Control Center</h1>
+
+      <div className="mb-8 grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <div className={card}>
+          <p className={cardLabel}>Revenue (paid)</p>
+          <p className={cardValue}>{formatMoney(overview.totalRevenueCents)}</p>
+          <p className={cardLabel}>{overview.totalPaidOrders} orders</p>
+        </div>
+        <div className={card}>
+          <p className={cardLabel}>Completion → paid</p>
+          <p className={cardValue}>{overview.completionToPaidConversionPct}%</p>
+          <p className={cardLabel}>{overview.totalCompletedSessions} completed</p>
+        </div>
+        <div className={card}>
+          <p className={cardLabel}>Experiences live</p>
+          <p className={cardValue}>{overview.publishedAssessments}</p>
+          <p className={cardLabel}>{overview.totalAssessments} total</p>
+        </div>
+        <div className={card}>
+          <p className={cardLabel}>Sessions started</p>
+          <p className={cardValue}>{overview.totalStartedSessions}</p>
+        </div>
+      </div>
+
+      <div className="mb-8 grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <div className={card}>
+          <p className={cardLabel}>Reports ready</p>
+          <p className={cardValue}>{reportCounts.ready}</p>
+        </div>
+        <div className={card}>
+          <p className={cardLabel}>Generation failed</p>
+          <p className={`${cardValue} ${reportCounts.failed > 0 ? "text-[var(--inner-accent)]" : ""}`}>{reportCounts.failed}</p>
+        </div>
+        <div className={card}>
+          <p className={cardLabel}>Email failed</p>
+          <p className={`${cardValue} ${reportCounts.emailFailed > 0 ? "text-[var(--inner-accent)]" : ""}`}>{reportCounts.emailFailed}</p>
+        </div>
+        <Link href="/admin/reports" className={`${card} flex items-center justify-center hover:border-[var(--inner-accent-soft)]`}>
+          <p className="text-[13px] text-[var(--inner-ink-soft)]">View all reports →</p>
+        </Link>
+      </div>
+
+      <div className="mb-8 grid gap-6 sm:grid-cols-2">
+        <div>
+          <h2 className="font-display mb-3 text-[16px] text-[var(--inner-ink)]">Top experiences</h2>
+          <div className={sectionCard}>
+            <table className="w-full text-left text-[13px]">
+              <thead>
+                <tr className="border-b border-[var(--inner-line)] text-[var(--inner-muted)]">
+                  <th className="px-4 py-3 font-medium">Experience</th>
+                  <th className="px-4 py-3 font-medium">Completions</th>
+                  <th className="px-4 py-3 font-medium">Paid</th>
+                </tr>
+              </thead>
+              <tbody>
+                {topAssessments.map((a) => (
+                  <tr key={a.slug} className="border-b border-[var(--inner-line)] last:border-0">
+                    <td className="px-4 py-3 font-medium text-[var(--inner-ink)]">/{a.slug}</td>
+                    <td className="px-4 py-3 text-[var(--inner-ink-soft)]">{a.completions}</td>
+                    <td className="px-4 py-3 text-[var(--inner-ink-soft)]">{a.paidOrders}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div>
+          <h2 className="font-display mb-3 text-[16px] text-[var(--inner-ink)]">Top acquisition sources</h2>
+          <div className={sectionCard}>
+            <table className="w-full text-left text-[13px]">
+              <thead>
+                <tr className="border-b border-[var(--inner-line)] text-[var(--inner-muted)]">
+                  <th className="px-4 py-3 font-medium">Source</th>
+                  <th className="px-4 py-3 font-medium">Sessions</th>
+                  <th className="px-4 py-3 font-medium">Paid</th>
+                </tr>
+              </thead>
+              <tbody>
+                {topSources.map((s) => (
+                  <tr key={s.source} className="border-b border-[var(--inner-line)] last:border-0">
+                    <td className="px-4 py-3 font-medium text-[var(--inner-ink)]">{s.source}</td>
+                    <td className="px-4 py-3 text-[var(--inner-ink-soft)]">{s.sessions}</td>
+                    <td className="px-4 py-3 text-[var(--inner-ink-soft)]">{s.paidOrders}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <h2 className="font-display mb-3 text-[16px] text-[var(--inner-ink)]">Top recommendation edges</h2>
+      <p className="mb-3 text-[13px] text-[var(--inner-ink-soft)]">
+        Ranked by report-page impressions — no per-click tracking exists yet, so this reflects exposure, not conversion.
+      </p>
+      <div className={`${sectionCard} mb-8`}>
+        <table className="w-full text-left text-[13px]">
+          <thead>
+            <tr className="border-b border-[var(--inner-line)] text-[var(--inner-muted)]">
+              <th className="px-4 py-3 font-medium">From</th>
+              <th className="px-4 py-3 font-medium">To</th>
+              <th className="px-4 py-3 font-medium">Weight</th>
+              <th className="px-4 py-3 font-medium">Impressions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {topRecommendations.map((r, i) => (
+              <tr key={`${r.fromSlug}-${r.toSlug}-${i}`} className="border-b border-[var(--inner-line)] last:border-0">
+                <td className="px-4 py-3 font-medium text-[var(--inner-ink)]">/{r.fromSlug}</td>
+                <td className="px-4 py-3 text-[var(--inner-ink-soft)]">/{r.toSlug}</td>
+                <td className="px-4 py-3 text-[var(--inner-ink-soft)]">{r.weight}</td>
+                <td className="px-4 py-3 text-[var(--inner-ink-soft)]">{r.impressions}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
       <div className="grid gap-4 sm:grid-cols-2">
         <Link
           href="/admin/assessments"

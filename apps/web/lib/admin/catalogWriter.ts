@@ -215,6 +215,39 @@ export async function saveAssessmentDraft(assessmentId: string, config: Assessme
   return { versionId: version.id };
 }
 
+/**
+ * Gate checked before a draft can go live — catches an assessment that
+ * would be technically valid (passes validateAssessmentConfig's referential
+ * checks) but practically unusable: no questions to ask, no profile it
+ * could ever land on, no report to sell, no price to charge for it.
+ * "Recommendation configured" is deliberately not a hard gate here — the
+ * very first assessment ever published has nothing to point to yet.
+ */
+async function validatePublishReadiness(draftId: string, assessmentId: string): Promise<string[]> {
+  const [draft, coreQuestionCount, profileCount, reportTemplate, activePriceCount] = await Promise.all([
+    prisma.assessmentVersion.findUniqueOrThrow({ where: { id: draftId } }),
+    prisma.question.count({ where: { assessmentVersionId: draftId, isCore: true } }),
+    prisma.profile.count({ where: { assessmentVersionId: draftId } }),
+    prisma.reportTemplate.findUnique({ where: { assessmentVersionId: draftId } }),
+    prisma.price.count({ where: { assessmentId, active: true } }),
+  ]);
+
+  const problems: string[] = [];
+  if (coreQuestionCount < draft.minQuestions) {
+    problems.push(`needs at least ${draft.minQuestions} core questions (has ${coreQuestionCount})`);
+  }
+  if (profileCount === 0) problems.push("needs at least one profile");
+  const reportSections = (reportTemplate?.sections as unknown[] | undefined) ?? [];
+  if (reportSections.length === 0) problems.push("needs a premium report structure with at least one section");
+  const freeResult = draft.freeResultTemplate as { headline?: string; insightIntro?: string } | null;
+  if (!freeResult?.headline?.trim() || !freeResult?.insightIntro?.trim()) {
+    problems.push("needs a free result headline and intro");
+  }
+  if (activePriceCount === 0) problems.push("needs at least one active price");
+
+  return problems;
+}
+
 /** Publishes the current draft — the live app starts serving it on the very next request. */
 export async function publishDraft(assessmentId: string): Promise<void> {
   const draft = await prisma.assessmentVersion.findFirst({
@@ -223,8 +256,46 @@ export async function publishDraft(assessmentId: string): Promise<void> {
   });
   if (!draft) throw new Error("No draft to publish — save one first");
 
+  const problems = await validatePublishReadiness(draft.id, assessmentId);
+  if (problems.length > 0) throw new Error(`Not ready to publish: ${problems.join("; ")}`);
+
   await prisma.$transaction([
     prisma.assessmentVersion.update({ where: { id: draft.id }, data: { publishedAt: new Date() } }),
     prisma.assessment.update({ where: { id: assessmentId }, data: { status: "published" } }),
   ]);
+}
+
+/**
+ * Takes a live experience offline immediately without touching version
+ * history — getAssessmentConfig() only ever serves a status="published"
+ * assessment, so this alone is enough to stop the live app from serving
+ * it. The already-published AssessmentVersion row is left untouched (its
+ * publishedAt stays set), so republishAssessment() can bring it straight
+ * back without going through save-draft again.
+ */
+export async function unpublishAssessment(assessmentId: string): Promise<void> {
+  const assessment = await prisma.assessment.findUniqueOrThrow({ where: { id: assessmentId } });
+  if (assessment.status !== "published") throw new Error(`Assessment is "${assessment.status}", not published`);
+  await prisma.assessment.update({ where: { id: assessmentId }, data: { status: "draft" } });
+}
+
+/** Brings a merely-unpublished (not archived) experience back live, reusing its already-published version — no new draft cycle needed. */
+export async function republishAssessment(assessmentId: string): Promise<void> {
+  const hasPublishedVersion = await prisma.assessmentVersion.findFirst({
+    where: { assessmentId, publishedAt: { not: null } },
+  });
+  if (!hasPublishedVersion) throw new Error("No previously-published version to restore — publish a draft instead");
+  await prisma.assessment.update({ where: { id: assessmentId }, data: { status: "published" } });
+}
+
+/** Permanent retirement — distinct from unpublish so an operator can tell "paused" from "done for good" in the list. */
+export async function archiveAssessment(assessmentId: string): Promise<void> {
+  await prisma.assessment.update({ where: { id: assessmentId }, data: { status: "archived" } });
+}
+
+/** Reopens an archived experience into draft — the normal edit/publish flow takes it from there. */
+export async function restoreAssessment(assessmentId: string): Promise<void> {
+  const assessment = await prisma.assessment.findUniqueOrThrow({ where: { id: assessmentId } });
+  if (assessment.status !== "archived") throw new Error(`Assessment is "${assessment.status}", not archived`);
+  await prisma.assessment.update({ where: { id: assessmentId }, data: { status: "draft" } });
 }

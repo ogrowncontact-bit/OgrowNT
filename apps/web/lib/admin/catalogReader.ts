@@ -6,27 +6,44 @@ export interface AdminAssessmentListItem {
   id: string;
   slug: string;
   name: string;
+  category: string;
   status: "draft" | "published" | "archived";
   hasDraft: boolean;
+  hasPublishedVersion: boolean;
   publishedVersion: number | null;
+  completions: number;
+  priceLabel: string | null;
+  updatedAt: Date;
 }
 
 export async function listAssessmentsForAdmin(): Promise<AdminAssessmentListItem[]> {
   const assessments = await prisma.assessment.findMany({
     orderBy: { name: "asc" },
-    include: { versions: { select: { versionNumber: true, publishedAt: true } } },
+    include: {
+      versions: { select: { versionNumber: true, publishedAt: true } },
+      prices: { where: { active: true, productType: "individual" }, select: { amountCents: true, currency: true } },
+      _count: { select: { assessmentSessions: { where: { status: "completed" } } } },
+    },
   });
 
   return assessments.map((a) => {
     const published = a.versions.filter((v) => v.publishedAt).sort((x, y) => y.versionNumber - x.versionNumber)[0];
     const hasDraft = a.versions.some((v) => !v.publishedAt);
+    const activePrice = a.prices[0];
     return {
       id: a.id,
       slug: a.slug,
       name: a.name,
+      category: a.category,
       status: a.status,
       hasDraft,
+      hasPublishedVersion: !!published,
       publishedVersion: published?.versionNumber ?? null,
+      completions: a._count.assessmentSessions,
+      priceLabel: activePrice
+        ? new Intl.NumberFormat("en-IE", { style: "currency", currency: activePrice.currency }).format(activePrice.amountCents / 100)
+        : null,
+      updatedAt: a.updatedAt,
     };
   });
 }
