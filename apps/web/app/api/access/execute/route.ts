@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifyAccessLinkToken, grantAccessCookie } from "@/lib/access";
+import { readAnonymousSessionId } from "@/lib/anonymousSession";
+import { track } from "@/lib/analytics";
 
 export async function POST(request: NextRequest) {
   const body = await request.json().catch(() => null);
@@ -10,6 +12,11 @@ export async function POST(request: NextRequest) {
   }
 
   await grantAccessCookie(payload.userId);
+
+  const anonymousSessionId = await readAnonymousSessionId();
+  if (anonymousSessionId) {
+    await track({ anonymousSessionId, eventName: "magic_link_used", userId: payload.userId });
+  }
 
   return NextResponse.json({ ok: true });
 }

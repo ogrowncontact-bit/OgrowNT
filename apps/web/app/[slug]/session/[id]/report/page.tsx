@@ -9,6 +9,8 @@ import { selectRecommendation } from "@/lib/recommendation";
 import { track } from "@/lib/analytics";
 import { ReportPolling } from "@/components/ReportPolling";
 
+export const metadata = { robots: { index: false, follow: false } };
+
 interface ReportSection {
   key: string;
   title: string;
@@ -100,6 +102,13 @@ export default async function ReportPage({ params }: { params: Promise<{ slug: s
       </Screen>
     );
   }
+
+  await track({
+    anonymousSessionId,
+    eventName: "report_viewed",
+    assessmentId: session.assessmentId,
+    properties: { reportId: report.id },
+  });
 
   if (recommendation) {
     await track({ anonymousSessionId, eventName: "recommendation_viewed", assessmentId: session.assessmentId });

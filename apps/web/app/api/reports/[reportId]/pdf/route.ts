@@ -3,6 +3,7 @@ import { prisma } from "@inner/db";
 import { readAnonymousSessionId } from "@/lib/anonymousSession";
 import { readAccessUserId } from "@/lib/access";
 import { readReportPdf } from "@/lib/reportStorage";
+import { track } from "@/lib/analytics";
 
 /** Ownership-checked PDF download — stands in for a short-lived signed R2 URL until real object storage is wired (see lib/reportStorage.ts). */
 export async function GET(_request: NextRequest, { params }: { params: Promise<{ reportId: string }> }) {
@@ -24,6 +25,13 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
   if (!ownsViaCurrentSession && !ownsViaMagicLink) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
+
+  await track({
+    anonymousSessionId: report.assessmentSession.anonymousSessionId,
+    eventName: "pdf_downloaded",
+    assessmentId: report.assessmentSession.assessmentId,
+    properties: { reportId: report.id },
+  });
 
   const pdf = await readReportPdf(report.pdfObjectKey);
   return new NextResponse(new Uint8Array(pdf), {

@@ -11,6 +11,21 @@ const nextConfig: NextConfig = {
     "@inner/email",
     "@inner/pdf",
   ],
+  async headers() {
+    return [
+      {
+        // Baseline hardening applied site-wide. A full Content-Security-Policy
+        // needs allowlisting Stripe/analytics script origins and belongs to a
+        // dedicated pass — these headers are safe, non-breaking defaults.
+        source: "/:path*",
+        headers: [
+          { key: "X-Content-Type-Options", value: "nosniff" },
+          { key: "X-Frame-Options", value: "DENY" },
+          { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+        ],
+      },
+    ];
+  },
 };
 
 export default nextConfig;

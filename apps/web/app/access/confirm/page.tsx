@@ -2,6 +2,8 @@ import { Screen } from "@inner/ui";
 import { verifyAccessLinkToken } from "@/lib/access";
 import { AccessConfirmAction } from "@/components/AccessConfirmAction";
 
+export const metadata = { robots: { index: false, follow: false } };
+
 export default async function AccessConfirmPage({ searchParams }: { searchParams: Promise<{ token?: string }> }) {
   const { token } = await searchParams;
   const payload = verifyAccessLinkToken(token);

@@ -6,6 +6,7 @@ import { readAccessUserId } from "@/lib/access";
 import { getAssessmentConfig } from "@/lib/assessments";
 
 export const dynamic = "force-dynamic";
+export const metadata = { robots: { index: false, follow: false } };
 
 export default async function AccessReportsPage() {
   const userId = await readAccessUserId();
