@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { Screen } from "@inner/ui";
 import { getAssessmentConfig, listPublishedSlugs } from "@/lib/assessments";
@@ -5,6 +6,12 @@ import { readAnonymousSessionId } from "@/lib/anonymousSession";
 import { readAccessUserId } from "@/lib/access";
 import { rankExploreCandidates } from "@/lib/explorePersonalization";
 import { getMasterProfile } from "@/lib/masterProfile";
+import { PublicNav } from "@/components/PublicNav";
+
+export const metadata: Metadata = {
+  title: "Explore all experiences",
+  description: "Browse every short, adaptive INNER experience — each one reveals a different pattern in how you relate, decide, and connect.",
+};
 
 // The deliberate full-catalog surface — everywhere else in the product stays
 // focused on the single experience a user entered through or was pointed to
@@ -45,7 +52,7 @@ export default async function ExplorePage() {
   );
 
   return (
-    <Screen align="top">
+    <Screen align="top" eyebrow={<PublicNav />}>
       <p className="mb-3 text-xs font-medium uppercase tracking-[0.2em] text-[var(--inner-muted)]">Explore INNER</p>
       <h1 className="font-display text-[28px] leading-tight text-[var(--inner-ink)]">
         Every pattern is a different door in.

@@ -39,6 +39,7 @@ export function LegalDocument({ title, lastUpdated, children }: LegalDocumentPro
       <p className="border-t border-[var(--inner-line)] pb-8 pt-6 text-[13px] text-[var(--inner-muted)]">
         See also: <Link href="/terms" className="underline">Terms of Service</Link> ·{" "}
         <Link href="/privacy-policy" className="underline">Privacy Policy</Link> ·{" "}
+        <Link href="/cookies" className="underline">Cookie Policy</Link> ·{" "}
         <Link href="/privacy" className="underline">Access, export or delete your data</Link>
       </p>
     </Screen>

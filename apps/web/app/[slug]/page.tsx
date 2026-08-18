@@ -1,32 +1,53 @@
-import { Suspense } from "react";
+import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { Screen } from "@inner/ui";
 import { getAssessmentConfig } from "@/lib/assessments";
-import { BeginButton } from "@/components/BeginButton";
-import { LandingViewTracker } from "@/components/LandingViewTracker";
+import { AssessmentLandingTemplate } from "@/components/AssessmentLandingTemplate";
+import { getFaqItems } from "@/lib/landingContent";
+import { getSiteUrl } from "@/lib/siteUrl";
+
+export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
+  const { slug } = await params;
+  const config = await getAssessmentConfig(slug);
+  if (!config) return {};
+
+  const url = `${getSiteUrl()}/${slug}`;
+  return {
+    title: config.name,
+    description: config.hook,
+    alternates: { canonical: url },
+    openGraph: {
+      title: config.name,
+      description: config.hook,
+      url,
+      type: "website",
+    },
+    twitter: {
+      card: "summary_large_image",
+      title: config.name,
+      description: config.hook,
+    },
+  };
+}
 
 export default async function ExperienceLanding({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
   const config = await getAssessmentConfig(slug);
   if (!config) notFound();
 
+  const faqJsonLd = {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    mainEntity: getFaqItems(config).map((item) => ({
+      "@type": "Question",
+      name: item.question,
+      acceptedAnswer: { "@type": "Answer", text: item.answer },
+    })),
+  };
+
   return (
-    <Screen
-      footer={
-        <Suspense fallback={null}>
-          <BeginButton slug={slug} />
-        </Suspense>
-      }
-    >
-      <Suspense fallback={null}>
-        <LandingViewTracker slug={slug} />
-      </Suspense>
-      <p className="mb-3 text-xs font-medium uppercase tracking-[0.2em] text-[var(--inner-muted)]">INNER</p>
-      <h1 className="font-display text-[34px] leading-[1.15] text-[var(--inner-ink)]">{config.name}</h1>
-      <p className="mt-5 text-[18px] leading-relaxed text-[var(--inner-ink-soft)]">{config.hook}</p>
-      <p className="mt-8 text-sm text-[var(--inner-muted)]">
-        About {config.recommendedQuestions} short questions · roughly 4–7 minutes · private, no account needed
-      </p>
-    </Screen>
+    <>
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(faqJsonLd) }} />
+      <AssessmentLandingTemplate slug={slug} config={config} />
+    </>
   );
 }
