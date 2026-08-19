@@ -72,6 +72,24 @@ services:
       migrate:
         condition: service_completed_successfully
 
+  # "PROMPT 7" — a deliberately *separate* process from `worker` above:
+  # backtest/walk-forward/Monte Carlo/stress-test jobs are heavy, on-demand
+  # compute that must never share a process with the live-trading loop (see
+  # apps/backtest_worker/main.py's module docstring). READ/COMPUTE only —
+  # never touches paper trading tables or submits an order.
+  backtest_worker:
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile.backtest-worker
+    restart: unless-stopped
+    env_file:
+      - ../../.env
+    environment:
+      DATABASE_URL: postgresql+psycopg://ogrownt:ogrownt@postgres:5432/ogrownt
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
   dashboard:
     build:
       context: ../../apps/dashboard

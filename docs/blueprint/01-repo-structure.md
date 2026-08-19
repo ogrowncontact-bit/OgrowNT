@@ -157,8 +157,9 @@ ogrownt/
 ## Regras de dependência entre packages
 
 ```text
-apps/api      → packages/shared, packages/quant (leitura), packages/risk (leitura), packages/analytics
+apps/api      → packages/shared, packages/quant (leitura), packages/risk (leitura), packages/analytics, packages/backtest
 apps/worker   → todos os packages exceto packages/backtest e packages/analytics
+apps/backtest_worker → packages/backtest, packages/shared, packages/quant, packages/risk (leitura) — nunca packages/execution além do fill simulator
 packages/backtest → packages/quant, packages/risk, packages/execution, packages/portfolio (nunca escreve nas tabelas de paper trading)
 packages/quant    → packages/shared, packages/data
 packages/risk     → packages/shared
@@ -171,3 +172,10 @@ A regra mais importante: **`packages/llm` nunca deve conseguir chamar
 `packages/execution` diretamente.** Isso é o que torna a regra "LLM ≠ Trading Engine"
 estrutural (não apenas uma convenção de prompt) — ver `04-agents-architecture.md §Guardrail
 Estrutural`.
+
+**"PROMPT 7" acrescenta `apps/backtest_worker`** — um processo *separado* de
+`apps/worker`, não uma cadência dentro dele: `apps/worker → ... exceto
+packages/backtest` já existia antes desta fase por um motivo real (isolar o
+loop de trading ao vivo de compute pesado sob demanda), e adicionar
+walk-forward optimization/Monte Carlo/stress test como uma cadência teria
+violado exatamente essa regra. Ver `apps/backtest_worker/main.py`.

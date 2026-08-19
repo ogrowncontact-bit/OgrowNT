@@ -25,6 +25,9 @@ class SimPosition:
     target_price: float | None
     size: float
     opened_at: datetime
+    entry_fees: float = 0.0
+    entry_slippage_bps: float = 0.0
+    entry_regime: str | None = None
 
 
 @dataclass
@@ -39,12 +42,21 @@ class SimTrade:
     opened_at: datetime
     closed_at: datetime
     exit_reason: str
+    entry_fees: float = 0.0
+    exit_fees: float = 0.0
+    entry_slippage_bps: float = 0.0
+    exit_slippage_bps: float = 0.0
+    entry_regime: str | None = None
 
 
 @dataclass
 class EquityPoint:
     ts: datetime
     equity: float
+    cash: float = 0.0
+    exposure_pct: float = 0.0
+    drawdown_pct: float = 0.0
+    daily_pnl: float = 0.0
 
 
 class SimulatedPortfolio:
@@ -107,16 +119,31 @@ class SimulatedPortfolio:
         )
 
     def record_equity(self, ts: datetime, open_position: SimPosition | None, current_price: float | None) -> None:
-        equity = self._equity(open_position, current_price)
-        self.equity_curve.append(EquityPoint(ts=ts, equity=round(equity, 2)))
-        self._equity_history.append((ts, equity))
+        state = self.state(ts, open_position, current_price)
+        self.equity_curve.append(
+            EquityPoint(
+                ts=ts, equity=round(state.equity, 2), cash=round(self.cash, 2),
+                exposure_pct=state.exposure_pct, drawdown_pct=state.drawdown_pct, daily_pnl=state.daily_pnl,
+            )
+        )
+        self._equity_history.append((ts, state.equity))
 
-    def open(self, *, direction: str, entry_price: float, stop_price: float, target_price: float | None, size: float, opened_at: datetime, entry_fees: float) -> SimPosition:
+    def open(
+        self, *, direction: str, entry_price: float, stop_price: float, target_price: float | None, size: float,
+        opened_at: datetime, entry_fees: float, entry_slippage_bps: float = 0.0, entry_regime: str | None = None,
+    ) -> SimPosition:
         notional = entry_price * size
         self.cash -= notional + entry_fees
-        return SimPosition(direction=direction, entry_price=entry_price, stop_price=stop_price, target_price=target_price, size=size, opened_at=opened_at)
+        return SimPosition(
+            direction=direction, entry_price=entry_price, stop_price=stop_price, target_price=target_price,
+            size=size, opened_at=opened_at, entry_fees=entry_fees, entry_slippage_bps=entry_slippage_bps,
+            entry_regime=entry_regime,
+        )
 
-    def close(self, position: SimPosition, *, exit_price: float, closed_at: datetime, exit_reason: str, exit_fees: float) -> SimTrade:
+    def close(
+        self, position: SimPosition, *, exit_price: float, closed_at: datetime, exit_reason: str,
+        exit_fees: float, exit_slippage_bps: float = 0.0,
+    ) -> SimTrade:
         direction_mult = 1 if position.direction == "long" else -1
         pnl = (exit_price - position.entry_price) * position.size * direction_mult - exit_fees
         stop_distance = abs(position.entry_price - position.stop_price)
@@ -130,4 +157,7 @@ class SimulatedPortfolio:
             direction=position.direction, entry_price=position.entry_price, exit_price=exit_price, size=position.size,
             pnl=round(pnl, 2), r_multiple=round(r_multiple, 4) if r_multiple is not None else None, outcome=outcome,
             opened_at=position.opened_at, closed_at=closed_at, exit_reason=exit_reason,
+            entry_fees=round(position.entry_fees, 4), exit_fees=round(exit_fees, 4),
+            entry_slippage_bps=position.entry_slippage_bps, exit_slippage_bps=exit_slippage_bps,
+            entry_regime=position.entry_regime,
         )

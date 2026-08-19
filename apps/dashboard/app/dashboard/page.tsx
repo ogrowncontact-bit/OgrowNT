@@ -37,6 +37,7 @@ import { RunBacktestForm } from "@/components/RunBacktestForm";
 import { OpportunityRow } from "@/components/OpportunityRow";
 import { EquitySparkline } from "@/components/EquitySparkline";
 import { NewsIntelligenceCenter } from "@/components/NewsIntelligenceCenter";
+import { StrategyLab } from "@/components/StrategyLab";
 
 export const dynamic = "force-dynamic";
 
@@ -757,6 +758,8 @@ export default async function DashboardPage() {
           </p>
         )}
       </section>
+
+      <StrategyLab strategies={strategies ?? []} assets={assets ?? []} />
 
       <section className="mb-6 rounded-lg border border-base-700 bg-base-900 p-4">
         <p className="mb-3 text-[11px] uppercase tracking-wider text-ink-500">

@@ -164,6 +164,12 @@ class SystemState(Base):
     # (database, market data, ...) that could all be green while the worker
     # process itself is dead or stuck.
     worker_last_heartbeat: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Same idea, for the separate apps/backtest_worker process ("PROMPT 7"
+    # §46-47) -- a distinct column, not the field above, because the two
+    # processes are independently deployed/restarted and conflating their
+    # liveness into one timestamp would make either one's outage invisible
+    # whenever the other happened to still be healthy.
+    backtest_worker_last_heartbeat: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class Alert(Base):
@@ -808,5 +814,120 @@ class BacktestRun(Base):
     notes: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
+    # --- "PROMPT 7" reproducibility (spec §48-49) --------------------------
+    # A backtest is reproducible only if every input that could change its
+    # result is on record: which strategy/code/data snapshot produced it and
+    # (for anything that samples randomly, i.e. Monte Carlo) the exact seed.
+    # code_version is the git commit the run executed under -- the one input
+    # `params`/`extra_metrics` can't capture on their own.
+    strategy_version: Mapped[str | None] = mapped_column(String)
+    code_version: Mapped[str | None] = mapped_column(String)
+    data_version: Mapped[str | None] = mapped_column(String)
+    random_seed: Mapped[int | None] = mapped_column()
+
+    # Every "PROMPT 7" metric beyond the Phase 6 core set (Sortino, recovery
+    # factor, gross P&L, exposure, turnover, streaks, drawdown duration,
+    # trade distribution, regime breakdown -- packages/backtest/metrics.py)
+    # lives here rather than as one column per metric: they're read-only,
+    # derived-from-`trades`/`equity_curve` figures with no independent query
+    # need of their own, so a JSON bundle avoids ~20 near-permanent nullable
+    # columns for numbers every one of which is a pure function of data this
+    # row already stores.
+    extra_metrics: Mapped[dict] = mapped_column(JSON, default=dict)
+
     strategy: Mapped["StrategyRow"] = relationship()
     asset: Mapped["Asset"] = relationship()
+
+
+# --- "PROMPT 7" (Backtesting Engine + Walk-Forward + Monte Carlo + Strategy Lab) --
+
+
+class BacktestJob(Base):
+    """Async job envelope for the heavier "PROMPT 7" analyses (§46-47) —
+    Monte Carlo, stress tests, walk-forward optimization and full-lab
+    reports can take much longer than a single request/response cycle
+    should block on. `kind` picks which engine module
+    apps/worker/backtest_jobs.py dispatches to; `payload` is that engine
+    call's kwargs (JSON so the schema doesn't grow a column per engine);
+    `result` is engine-specific too (references to created BacktestRun ids,
+    or, for Monte Carlo/stress test, the run id in monte_carlo_runs/
+    stress_test_runs).
+
+    Honest limitation: this worker executes jobs one at a time on a single
+    cadence tick (docs/blueprint's established single-process/multiple-
+    cadences architecture, not literally-separate OS processes — same
+    documented divergence as "PROMPT 6"'s 6 workers). A QUEUED job can be
+    cancelled; a RUNNING one runs to completion — there is no mid-job
+    interrupt, since the engine call underneath is a plain synchronous
+    Python function, not a cooperative/cancellable task.
+    """
+
+    __tablename__ = "backtest_jobs"
+    __table_args__ = (
+        CheckConstraint(
+            "kind IN ('backtest','walk_forward','walk_forward_optimization','optimize',"
+            "'monte_carlo','stress_test','sensitivity','full_lab')",
+            name="ck_backtest_jobs_kind",
+        ),
+        CheckConstraint("status IN ('queued','running','completed','failed','cancelled')", name="ck_backtest_jobs_status"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    kind: Mapped[str] = mapped_column(String, nullable=False)
+    status: Mapped[str] = mapped_column(String, default="queued", nullable=False)
+    payload: Mapped[dict] = mapped_column(JSON, default=dict)
+    result: Mapped[dict] = mapped_column(JSON, default=dict)
+    error: Mapped[str | None] = mapped_column(Text)
+    requested_by: Mapped[str | None] = mapped_column(String)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class MonteCarloRun(Base):
+    """One Monte Carlo simulation batch (§24-28) over a reference
+    BacktestRun's closed trades — never over raw price data, since what's
+    being resampled is the trade sequence/return distribution the strategy
+    already produced, per §25's four methods."""
+
+    __tablename__ = "monte_carlo_runs"
+    __table_args__ = (
+        CheckConstraint(
+            "method IN ('trade_reshuffling','bootstrap','return_perturbation',"
+            "'slippage_perturbation','execution_perturbation')",
+            name="ck_monte_carlo_runs_method",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    reference_backtest_run_id: Mapped[int] = mapped_column(ForeignKey("backtest_runs.id"), nullable=False)
+    method: Mapped[str] = mapped_column(String, nullable=False)
+    num_simulations: Mapped[int] = mapped_column(nullable=False)
+    random_seed: Mapped[int] = mapped_column(nullable=False)
+    percentiles: Mapped[dict] = mapped_column(JSON, default=dict)
+    probability_of_loss: Mapped[float | None] = mapped_column(Float)
+    probability_of_drawdown_threshold: Mapped[float | None] = mapped_column(Float)
+    drawdown_threshold_pct: Mapped[float | None] = mapped_column(Float)
+    notes: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+    reference_backtest_run: Mapped["BacktestRun"] = relationship()
+
+
+class StressTestRun(Base):
+    """One stress-test scenario applied to a reference BacktestRun (§29-30,
+    §60) — e.g. `volatility_spike`, `slippage_increase`, `market_crash`,
+    `kill_switch_drill`. `result` holds the stressed re-run's own metrics
+    (same shape as BacktestResult) alongside the delta vs. the reference."""
+
+    __tablename__ = "stress_test_runs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    reference_backtest_run_id: Mapped[int] = mapped_column(ForeignKey("backtest_runs.id"), nullable=False)
+    scenario: Mapped[str] = mapped_column(String, nullable=False)
+    params: Mapped[dict] = mapped_column(JSON, default=dict)
+    result: Mapped[dict] = mapped_column(JSON, default=dict)
+    survived: Mapped[bool | None] = mapped_column(Boolean)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+    reference_backtest_run: Mapped["BacktestRun"] = relationship()

@@ -45,11 +45,11 @@ class OptimizationResult:
     reason: str
 
 
-def _numeric_params(strategy) -> dict:
+def numeric_params(strategy) -> dict:
     return {k: v for k, v in vars(strategy).items() if isinstance(v, (int, float)) and not isinstance(v, bool)}
 
 
-def _grid(base_params: dict, multipliers: tuple[float, ...]) -> list[dict]:
+def build_param_grid(base_params: dict, multipliers: tuple[float, ...]) -> list[dict]:
     keys = list(base_params.keys())
     value_options = []
     for key in keys:
@@ -85,8 +85,8 @@ def optimize_parameters(
     if strategy_class is None:
         raise ValueError(f"unknown strategy code: {strategy_code!r}")
 
-    base_params = _numeric_params(strategy_class())
-    combos = _grid(base_params, multipliers)
+    base_params = numeric_params(strategy_class())
+    combos = build_param_grid(base_params, multipliers)
 
     if len(combos) > max_combinations:
         rng = random.Random(f"{_SAMPLE_SEED_PREFIX}:{strategy_code}")

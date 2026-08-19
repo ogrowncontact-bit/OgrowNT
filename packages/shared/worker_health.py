@@ -38,3 +38,16 @@ def is_heartbeat_stale(last_heartbeat: datetime | None, *, scan_interval_seconds
     now = now or datetime.now(timezone.utc)
     stale_after = max(HEARTBEAT_STALE_MULTIPLIER * scan_interval_seconds, HEARTBEAT_STALE_FLOOR_SECONDS)
     return (now - last_heartbeat).total_seconds() > stale_after
+
+
+def record_backtest_worker_heartbeat(db: Session) -> None:
+    """Same idea as record_heartbeat(), for the separate apps/backtest_worker
+    process ("PROMPT 7" §46-47) — a distinct SystemState column so this
+    on-demand/batch process's liveness never gets conflated with the live
+    trading worker's (see SystemState.backtest_worker_last_heartbeat)."""
+    state = db.get(SystemState, True)
+    if state is None:
+        state = SystemState(id=True)
+    state.backtest_worker_last_heartbeat = datetime.now(timezone.utc)
+    db.add(state)
+    db.commit()

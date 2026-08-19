@@ -4,7 +4,7 @@
 **paper trading only** — no real orders are ever sent. See the full engineering
 specification in [`docs/blueprint/`](docs/blueprint/00-overview.md).
 
-## Status: Phase 7 (Advanced Analytics, Alerts, Optimization) + post-Phase-7 security hardening + Supervisor 24/7 + Market Data Engine + Scanner + Pattern/Strategy/Opportunity confidence & evidence + Risk Engine/Portfolio Intelligence hardening (Risk Center, Risk Heatmap, Strategy Health, configurable Safety Belts) + News Intelligence Center (sentiment, macro calendar, event risk, source consensus)
+## Status: Phase 7 (Advanced Analytics, Alerts, Optimization) + post-Phase-7 security hardening + Supervisor 24/7 + Market Data Engine + Scanner + Pattern/Strategy/Opportunity confidence & evidence + Risk Engine/Portfolio Intelligence hardening (Risk Center, Risk Heatmap, Strategy Health, configurable Safety Belts) + News Intelligence Center (sentiment, macro calendar, event risk, source consensus) + Strategy Lab (walk-forward optimization, Monte Carlo, stress testing, robustness/quality scoring, async backtest job system)
 
 Per [`docs/blueprint/12-roadmap.md`](docs/blueprint/12-roadmap.md):
 
@@ -237,13 +237,50 @@ including the documented, deliberate choice to keep this as worker
 cadences (this codebase's established architecture) rather than the
 spec's literal six separate processes.
 
+**Strategy Lab.** The event-driven Backtest Engine already existed from
+this repo's real Phase 6 (walk-forward, grid-search optimization,
+parameter-stability checks); this pass turned it into the full lab the
+spec asked for. Fees/slippage/latency are now configurable
+(`packages/backtest/execution_models.py`) while defaulting to byte-
+identical behavior with before. A Data Integrity gate blocks a backtest
+outright on bad OHLC/future data. A genuine walk-forward
+*optimization* engine (train→grid-search→validate→roll,
+`packages/backtest/walkforward_optimization.py`) sits alongside the
+existing fixed-parameter walk-forward and global-search optimizer — each
+with a distinct role, none removed. A Monte Carlo Engine resamples a
+backtest's closed trades five ways (reshuffling, bootstrap, return/
+slippage/execution perturbation) into percentile distributions, never a
+forecast. A Stress Testing Engine runs 7 scenarios — `gap`/
+`regime_reversal`/`market_crash` are built entirely in memory and proven
+to never write to the live `ohlcv` table, since other worker cadences
+read it concurrently. The kill switch drill is proven both
+deterministically (a portfolio at 1.5x the EMERGENCY threshold is
+rejected) and by counting real trips during a synthetic crash. A
+Robustness Score, Strategy Quality Score/Status, Reality Gap Analyzer, and
+Strategy Failure Detector combine all of the above into an always-
+advisory verdict — never "guaranteed profit," never a mutation of a
+strategy's live lifecycle stage. Heavy analyses (Monte Carlo, stress
+tests, walk-forward optimization, a full lab run) go through a real async
+job system (`backtest_jobs` table) processed by a **new, separate**
+`apps/backtest_worker` process — deliberately not a cadence inside the
+live-trading worker, since this codebase's own dependency rules already
+forbade `apps/worker` from importing `packages/backtest` for a real
+isolation reason. A new "Strategy Lab" dashboard panel runs the full
+pipeline and polls it to completion. Live-verified against real Postgres,
+a real backtest worker processing a real queued job, and a real browser
+click-through. See `docs/blueprint/12-roadmap.md`'s "PROMPT 7" section for
+the full list, including the four new as-built docs
+(`docs/backtest-lab.md`, `docs/monte-carlo-stress-testing.md`,
+`docs/strategy-quality-score.md`, `docs/backtest-jobs.md`).
+
 ## Architecture at a glance
 
 ```text
 apps/
   api/         FastAPI backend (auth, system health, assets, market data, portfolio,
                strategies, opportunities/signals, regime, risk, positions/orders/trades,
-               news, macro, patterns, learning, research, backtests, alerts, analytics)
+               news, macro, patterns, learning, research, backtests (incl. jobs,
+               data-integrity, reality-gap, failure-check, compare), alerts, analytics)
   worker/      24/7 loop: Market Data Agent (scan), Trade Monitor + safety-belt
                refresh + Learning Agent (per trade close, every scan), News
                Intelligence Agent (ingestion + DET analysis, own cadence),
@@ -251,7 +288,11 @@ apps/
                detection, own cadence), Strategy Engine cycle (history
                backfill, regime, patterns, strategies, scoring, Risk Engine, paper
                execution), Research Agent + News Learning (own, longer cadence),
-               Alert delivery cycle (own cadence)
+               Alert delivery cycle (own cadence) — never imports packages/backtest
+  backtest_worker/ separate process (deliberately not a cadence inside worker/
+               above — see packages/backtest below): polls backtest_jobs and
+               dispatches by kind (backtest/walk_forward/walk_forward_optimization/
+               optimize/monte_carlo/stress_test/sensitivity/full_lab)
   dashboard/   Next.js dashboard (single admin user)
 packages/
   shared/      DB models, settings, logging, OHLCV lookup — shared across apps/packages
@@ -265,9 +306,13 @@ packages/
   execution/   ExecutionProvider interface, PaperExecutionProvider, order manager,
                shared fill-simulation math (packages/execution/fills.py)
   backtest/    event-driven Backtest Engine, isolated simulated portfolio,
-               walk-forward validation, parameter-stability checks, bounded
-               grid-search parameter optimization — never touches the live
-               paper account, never writes a strategy's live parameters
+               walk-forward validation (fixed-params, true optimization, and
+               global grid-search variants), parameter-stability checks, Monte
+               Carlo engine, stress testing (in-memory only, never writes
+               ohlcv), risk of ruin, sensitivity analysis, robustness/quality
+               scoring, reality gap analyzer, strategy failure detector —
+               never touches the live paper account, never writes a
+               strategy's live parameters
   notifications/ NotificationChannel Protocol, Email/Telegram channels, an
                honest WhatsApp stub, and a fan-out dispatcher — never decides,
                only delivers
@@ -304,9 +349,10 @@ docker compose -f infra/docker/docker-compose.yml up --build
 - API: http://localhost:8000 (docs at `/docs`)
 - Dashboard: http://localhost:3000 (redirects to `/login`)
 
-All three images run as a non-root user. `docker compose config` validates,
-but the full `up --build` hasn't been run in this repo's own dev sandbox (no
-Docker daemon available there) — worth a one-time check before relying on it.
+All four images (api/worker/backtest_worker/dashboard) run as a non-root
+user. `docker compose config` validates, but the full `up --build` hasn't
+been run in this repo's own dev sandbox (no Docker daemon available
+there) — worth a one-time check before relying on it.
 
 The `migrate` service applies Alembic migrations and runs `scripts/seed.py`
 (creates the admin user, seeds ~20 assets across crypto/forex/equities/indices/
@@ -315,9 +361,11 @@ strategies) before `api`/`worker` start. The worker backfills enough mock histor
 per asset on startup so opportunities show up within the first strategy cycle
 rather than after `MIN_CANDLES_REQUIRED` real minutes.
 
-Backtests, walk-forward runs, and parameter optimization are launched via the API
-(no dashboard launcher UI yet — the dashboard's Backtests panel is read-only) —
-use `/docs` for an interactive form, or:
+Backtests, walk-forward runs, and parameter optimization can be launched from the
+dashboard (a simple form above the Backtests table) or, for the heavier
+Strategy Lab pipeline (walk-forward optimization, Monte Carlo, stress
+testing, robustness/quality scoring — see the "Strategy Lab" panel), via
+the API directly. Use `/docs` for an interactive form, or:
 ```bash
 curl -X POST localhost:8000/api/backtests -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
@@ -353,6 +401,7 @@ alembic upgrade head
 python -m scripts.seed
 uvicorn apps.api.main:app --reload &
 python -m apps.worker.main &
+python -m apps.backtest_worker.main &   # separate process — see docs/backtest-jobs.md
 
 # Tests
 pytest
@@ -367,7 +416,7 @@ cd apps/dashboard && npm install && npm run dev
 unused imports, undefined names, mutable-default footguns — not a style
 rewrite; see `[tool.ruff]` in `pyproject.toml`), `mypy packages apps scripts`
 (type-checked with the `pydantic.mypy` plugin so FastAPI response models
-type-check correctly), then the full pytest suite (494 tests) against a real
+type-check correctly), then the full pytest suite (585 tests) against a real
 `postgres:16-alpine` service container, migrated from scratch via `alembic
 upgrade head`; separately, the dashboard's `eslint` + `next build`; and
 separately again, a plain `docker build` of all three

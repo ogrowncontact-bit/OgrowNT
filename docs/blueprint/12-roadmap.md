@@ -1075,6 +1075,180 @@ Divergência deliberada não alterada: os 4 documentos pedidos em §47
 prompt nomeia explicitamente — fora de `docs/blueprint/`'s série numerada,
 já que o prompt deu caminhos exatos, ao contrário dos prompts anteriores.
 
+## "PROMPT 7" — Backtesting Engine + Walk-Forward + Monte Carlo + Strategy Lab (pós-Fase 7) — **status: implementada e validada nesta sessão**
+
+O "PROMPT 7" pede um laboratório quantitativo completo (66 secções): motor
+de backtest event-driven com fees/slippage/latência configuráveis, gates
+de look-ahead/data-leakage/data-integrity, train/validation/test,
+walk-forward optimization genuíno, Monte Carlo, stress testing (incl. kill
+switch drill), risk of ruin, sensitivity a custo/slippage/capital,
+robustness score, strategy quality score + status, reality gap analyzer,
+strategy failure detector, sistema de jobs assíncronos, Strategy Lab no
+dashboard, e a regra de que nenhuma estratégia é promovida só por
+`ROI > 0`. O motor de backtest event-driven **já existia** desde a Fase 6
+(`packages/backtest/engine.py`, com walk-forward simples, otimização por
+grid search e parameter stability já implementados) — este prompt não o
+substitui, estende-o com tudo o que faltava:
+
+- [x] **Schema** (migração `0012`) — `backtest_runs` ganhou
+      `strategy_version/code_version/data_version/random_seed/
+      extra_metrics` (JSON bundle, não ~20 colunas novas — todas as
+      métricas de §11-15 são funções puras de dados já guardados); novas
+      tabelas `backtest_jobs`, `monte_carlo_runs`, `stress_test_runs`;
+      `system_state` ganhou `backtest_worker_last_heartbeat` (coluna
+      separada do heartbeat do worker de trading ao vivo)
+- [x] **Execução configurável** (§8-10) — `packages/backtest/execution_models.py`
+      novo: `FeeModel` (percentage/fixed/tiered/provider_specific),
+      `SlippageModel` (fixed/percentage/volatility_based/liquidity_based),
+      `LatencyModel` (atraso sinal→execução em barras). `ExecutionConfig()`
+      sem argumentos reproduz **byte a byte** o comportamento anterior
+      (`packages/execution/fills.py` continua intocado, ainda a única
+      fonte de verdade para a Paper Execution real)
+- [x] **Métricas enriquecidas** (§11-15, §31) — `packages/backtest/metrics.py`
+      novo: Sortino, recovery factor, gross P&L, avg win/loss, exposição
+      média, turnover, detalhe de drawdown, streaks, distribuição de
+      trades, regime breakdown — tudo honesto ("NOT AVAILABLE" via `None`
+      quando a amostra não sustenta a métrica, nunca um número fabricado)
+- [x] **Data Integrity Gate** (§52-53) — `packages/backtest/data_integrity.py`
+      novo, corre antes de qualquer backtest; crítico →
+      `BACKTEST_BLOCKED`. Duplicados não verificados (a PK
+      `(asset_id, timeframe, ts)` já os torna impossíveis — checá-los
+      seria código morto a fingir guardar contra algo que o schema já
+      exclui)
+- [x] **Look-ahead bias** — nenhum mecanismo novo (a garantia já é
+      estrutural: `window = candles[:i+1]`), mas testado adversarialmente
+      pela primeira vez de forma explícita (§53): duas séries idênticas
+      até um corte, divergindo depois — resultados até ao corte têm de
+      ser idênticos
+- [x] **News-aware backtest** (§34) — `packages/backtest/news_replay.py`
+      novo: `news_aware=True` troca notícia neutra por uma query real
+      look-ahead-safe a `news_impact` (`created_at <= as_of`, nunca
+      `datetime.now()`) — honestamente esparsa para janelas anteriores ao
+      News Intelligence worker (Prompt 6)
+- [x] **Reprodutibilidade** (§48-49) — `strategy_version`/`code_version`
+      (`packages/backtest/versioning.py`, env var em produção + git local,
+      nunca um placeholder fabricado)/`data_version` (fingerprint sha256
+      das candles)/`random_seed` (só em runs estocásticos)
+- [x] **Train/Validation/Test** (§17) — `packages/backtest/split.py` novo,
+      divisão cronológica pura, nunca baralhada
+- [x] **Walk-Forward Optimization genuíno** (§18-19) —
+      `packages/backtest/walkforward_optimization.py` novo: TRAIN→OPTIMIZE
+      (grid search)→VALIDATION→roll, repetido — distinto do walk-forward
+      de parâmetros fixos e do optimize.py de busca global já existentes
+      desde a Fase 6 (ambos mantidos, cada um com o seu papel documentado
+      em `docs/backtest-lab.md`). VALIDATION provado nunca influenciar a
+      escolha de parâmetros por replay determinístico
+- [x] **Overfitting classification** (§21-22) — `packages/backtest/overfitting.py`
+      novo, os dois exemplos do spec testados literalmente: (+80%,-3%) →
+      `SEVERE_OVERFITTING`, (+25%,+19%) → `MORE_ROBUST`
+- [x] **Monte Carlo Engine** (§24-28) — `packages/backtest/monte_carlo.py`
+      novo: 5 métodos (trade_reshuffling/bootstrap/return_perturbation/
+      slippage_perturbation/execution_perturbation), percentis P5-P95,
+      probability_of_loss/of_drawdown_threshold, `random_seed`
+      reprodutível byte a byte
+- [x] **Risk of Ruin** (§28) — `packages/backtest/risk_of_ruin.py` novo,
+      reutiliza o bootstrap do Monte Carlo Engine em vez de reimplementar
+      um simulador paralelo, hipóteses documentadas explicitamente no
+      resultado
+- [x] **Stress Testing Engine + Kill Switch Drill** (§29-30, §60) —
+      `packages/backtest/stress_test.py` + `stress_data.py` novos: 7
+      cenários, `gap`/`regime_reversal`/`market_crash` construídos
+      **inteiramente em memória** (nunca escrevem em `ohlcv` — outras
+      cadências ao vivo leem essa tabela concorrentemente, §65). Kill
+      switch provado deterministicamente (`PortfolioState` a 1.5x
+      EMERGENCY é rejeitado) e por integração
+      (`risk_veto_counts["kill_switch"]` conta disparos reais durante um
+      crash sintético). `consecutive_losses`/`news_shock` do §29
+      deliberadamente não implementados, com razão documentada
+- [x] **Cost/Slippage/Capital Sensitivity** (§35-37) —
+      `packages/backtest/sensitivity.py` novo: base/+25%/+50%/+100%
+      custos, 1x/2x/5x/10x slippage, 5 níveis de capital
+- [x] **Robustness Score** (§23) — `packages/backtest/robustness.py` novo,
+      8 componentes ponderados, **zero contribuição sem evidência** (nunca
+      um valor neutro por omissão)
+- [x] **Strategy Quality Score + Status + Final Assessment** (§38-39, §51)
+      — `packages/backtest/quality_score.py` novo: score 0-100, 7 status
+      (EXPERIMENTAL/PROMISING/VALIDATING/ROBUST/DEGRADED/REJECTED/
+      QUARANTINED), 5 assessments fechados
+      (ROBUST/PROMISING/WEAK/UNSTABLE/INSUFFICIENT EVIDENCE) — nunca
+      "Guaranteed Profit"/"Safe"/"Will make money", testado literalmente
+- [x] **Reality Gap Analyzer** (§42) — `packages/backtest/reality_gap.py`
+      novo, comparação estruturada completa (distinto do
+      `check_degradation` já existente da Fase 5, que só decide disparar
+      um Alert); `return_difference` honestamente `None` — unidades
+      genuinamente não comparáveis entre `BacktestRun.net_return` (%) e
+      `StrategyPerformance` (P&L)
+- [x] **Strategy Failure Detector** (§43) — `packages/backtest/failure_detector.py`
+      novo, consolida tudo acima em STRATEGY_REJECTED/QUARANTINED/OK,
+      sempre consultivo, nunca muta `lifecycle_stage`
+- [x] **Sistema de Jobs Assíncronos + `apps/backtest_worker`** (§46-47) —
+      **processo separado** de `apps/worker` (não uma cadência): a regra
+      de dependências já existente `apps/worker → ... exceto
+      packages/backtest` tinha um motivo real (isolar o loop de trading
+      ao vivo de compute pesado sob demanda), que uma cadência teria
+      violado. Cinco "workers" nomeados no §47 = um processo a despachar
+      por `BacktestJob.kind` (mesma divergência "vários workers →
+      cadências" documentada, aplicada aqui ao nível de processo, não de
+      cadência). `apps/backtest_worker/jobs.py` + `main.py` novos,
+      `infra/docker/Dockerfile.backtest-worker` novo, novo serviço no
+      `docker-compose.yml`
+- [x] **Strategy Lab (dashboard)** (§44) — `apps/dashboard/components/StrategyLab.tsx`
+      novo: Strategy/Asset/Timeframe/Period/Capital/Risk Model → "Run full
+      lab" cria um `BacktestJob(kind=full_lab)`, faz polling até
+      completar, renderiza Backtest/Walk Forward/Monte Carlo/Stress
+      Test/Robustness/Final Score/Decision — o mesmo relatório de
+      `packages/backtest/report.py`'s `run_full_lab` (as 13 secções do
+      §50 num único dict)
+- [x] **API** — `POST/GET /api/backtests/jobs`, `GET /api/backtests/jobs/{id}`,
+      `POST /api/backtests/jobs/{id}/cancel`, `POST /api/backtests/data-integrity`,
+      `GET /api/backtests/reality-gap/{id}`, `GET /api/backtests/failure-check/{id}`,
+      `POST /api/backtests/compare` (tabela StrategyLab §16). Rotas
+      estáticas registadas **antes** de `GET /{run_id}` — FastAPI/Starlette
+      correspondem rotas pela ordem de registo, e `{run_id}: int` teria
+      capturado `/jobs` primeiro e falhado a coerção de tipo (bug real,
+      apanhado e corrigido durante esta sessão antes do commit)
+- [x] 91 novos testes automatizados (585/585 no total da suite): motor v2
+      (execução configurável, latência, métricas, integrity gate,
+      look-ahead adversarial, data leakage de notícias — 10),
+      train/validation/test (4), overfitting (6), walk-forward
+      optimization + prova de isolamento TRAIN/VALIDATION (4), Monte Carlo
+      (7), risk of ruin (6), stress testing + kill switch drill + prova de
+      que nunca escreve em `ohlcv` (6), sensitivity (4), robustness +
+      quality score + failure detector (14), reality gap (4), full lab
+      report (4), job dispatch (8), API de jobs/lab (12), e a simulação
+      completa do §62 — uma estratégia (Breakout) em 3 ativos × 3
+      timeframes através do pipeline completo, mais a prova estrutural e
+      comportamental de que nenhum live trading existe em
+      `packages/backtest`/`apps/backtest_worker` (2)
+- [x] **verificado ao vivo** contra Postgres real: API + worker de trading
+      + backtest worker + dashboard reais a correr em simultâneo; um job
+      `full_lab` real criado via `POST /api/backtests/jobs`, processado
+      pelo `apps/backtest_worker` real, resultado poll-ado e renderizado
+      no Strategy Lab do dashboard (Playwright/Chromium). `ruff`/`mypy`/
+      `npm run lint`/`npm run build` limpos (mypy: os mesmos 20 erros
+      pré-existentes de antes desta fase, confirmados por comparação
+      direta contra o HEAD anterior — zero regressões introduzidas)
+
+Divergências deliberadas, documentadas (não silenciosas):
+
+1. `apps/backtest_worker` é um **processo separado**, não uma cadência —
+   o inverso da divergência habitual deste projeto, porque a regra de
+   dependências (`apps/worker` nunca importa `packages/backtest`) já
+   existia por um motivo genuíno de isolamento de carga.
+2. `consecutive_losses`/`news_shock` (§29) não implementados — o primeiro
+   já coberto com uma distribuição estatística real pelos percentis
+   `losing_streak` do Monte Carlo; o segundo exigiria escrever
+   NewsEvent/NewsImpact sintéticos na base de dados, a mesma violação de
+   "nunca mutar tabelas partilhadas" que os outros cenários evitam.
+3. Survivorship bias/delisting (§54-55) e comparação entre múltiplas
+   fontes de dados (§56) não implementados — este ambiente só tem um
+   provider mock por ativo, sem histórico de delisting nem segunda fonte
+   a comparar; documentado como limitação de dados, não fabricado.
+4. Os 4 documentos deste prompt (`docs/backtest-lab.md`,
+   `docs/monte-carlo-stress-testing.md`, `docs/strategy-quality-score.md`,
+   `docs/backtest-jobs.md`) na raiz de `docs/`, mesma convenção
+   estabelecida no "PROMPT 6".
+
 ## Evolução futura (fora de âmbito até validação completa)
 
 Live brokers, exchanges reais (crypto/forex/ações), ML avançado, deep learning,

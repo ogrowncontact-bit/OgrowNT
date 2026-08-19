@@ -107,6 +107,12 @@ class Settings(BaseSettings):
     # alerts (kill switch, safety belt changes) are time-sensitive.
     alert_delivery_interval_seconds: int = 60
 
+    # apps/backtest_worker/main.py's poll cadence -- separate process from
+    # apps/worker (see that module's docstring for why), short enough that
+    # a queued backtest/Monte Carlo/stress-test job feels responsive in the
+    # Strategy Lab UI without hammering Postgres between jobs.
+    backtest_job_poll_interval_seconds: int = 5
+
 
 @lru_cache
 def get_settings() -> Settings:

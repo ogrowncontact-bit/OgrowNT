@@ -389,6 +389,62 @@ export async function runBacktest(token: string, payload: RunBacktestPayload) {
   return { ok: true as const, result: body as BacktestSummary };
 }
 
+// --- "PROMPT 7" Strategy Lab -----------------------------------------------
+
+export type BacktestJob = {
+  id: number;
+  kind: string;
+  status: "queued" | "running" | "completed" | "failed" | "cancelled";
+  payload: Record<string, unknown>;
+  result: Record<string, unknown>;
+  error: string | null;
+  created_at: string;
+  started_at: string | null;
+  completed_at: string | null;
+};
+
+export type FullLabReport = {
+  blocked: boolean;
+  reason?: string | null;
+  configuration?: Record<string, unknown>;
+  data?: { bars_checked: number; issues: { severity: string; code: string; detail: string }[]; data_fingerprint: string | null };
+  strategy?: Record<string, unknown>;
+  performance?: Record<string, number | string | null>;
+  risk?: Record<string, unknown>;
+  drawdown?: Record<string, unknown>;
+  walk_forward?: { consistent: boolean | null; reason: string; pooled_oos_expectancy: number | null; num_windows: number };
+  monte_carlo?: { method: string; num_simulations: number; percentiles: Record<string, Record<string, number | null> | null>; probability_of_loss: number | null; probability_of_drawdown_threshold: number | null };
+  stress_tests?: { scenario: string; return_delta: number | null; drawdown_delta: number | null; survived: boolean | null; notes: Record<string, unknown> }[];
+  robustness?: { score: number; components: { name: string; score: number; max_score: number; evidence: string }[]; insufficient_evidence: string[] };
+  parameter_stability?: { stable: boolean | null; reason: string };
+  reality_gap?: { reference_backtest_id: number | null; expectancy_difference: number | null; win_rate_difference: number | null; drawdown_difference: number | null; notes: string[] };
+  final_assessment?: { quality_score: number; status: string; assessment: string; reasons: string[]; failure_verdict: string; failure_reasons: string[] };
+};
+
+export type FullLabJobPayload = {
+  strategy_id: number;
+  asset_id: number;
+  timeframe: string;
+  start_ts: string;
+  end_ts: string;
+  initial_capital: number;
+  monte_carlo_simulations?: number;
+};
+
+export async function createFullLabJob(token: string, payload: FullLabJobPayload) {
+  const res = await fetch(`${API_URL}/api/backtests/jobs`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ kind: "full_lab", payload }),
+    cache: "no-store",
+  });
+  const body = await res.json().catch(() => null);
+  if (!res.ok) return { ok: false as const, detail: body?.detail ?? `Strategy Lab run failed (${res.status})` };
+  return { ok: true as const, job: body as BacktestJob };
+}
+
+export const getLabJob = (token: string, jobId: number) => apiFetch<BacktestJob>(`/api/backtests/jobs/${jobId}`, token);
+
 export async function strategyAction(token: string, strategyId: number, action: "promote" | "restore") {
   const res = await fetch(`${API_URL}/api/strategies/${strategyId}/${action}`, {
     method: "POST",

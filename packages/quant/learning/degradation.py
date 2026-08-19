@@ -22,7 +22,12 @@ from packages.shared.models import Alert, BacktestRun, StrategyPerformance, Stra
 ALERT_COOLDOWN_HOURS = 24
 
 
-def _reference_backtest(db: Session, strategy_id: int) -> BacktestRun | None:
+def reference_backtest(db: Session, strategy_id: int) -> BacktestRun | None:
+    """The backtest a live strategy's performance is judged against --
+    shared with packages/backtest/reality_gap.py (packages/backtest is
+    allowed to depend on packages/quant per
+    docs/blueprint/01-repo-structure.md's dependency table; the reverse
+    isn't, so this lookup lives here, not there)."""
     return (
         db.query(BacktestRun)
         .filter(BacktestRun.strategy_id == strategy_id, BacktestRun.kind == "backtest")
@@ -49,7 +54,7 @@ def check_degradation(db: Session, strategy_id: int, *, tolerance_pct: float | N
     if strategy is None:
         return False
 
-    reference = _reference_backtest(db, strategy_id)
+    reference = reference_backtest(db, strategy_id)
     if reference is None or reference.expectancy is None or reference.expectancy <= 0:
         return False  # nothing to compare against, or no positive baseline to degrade from
 

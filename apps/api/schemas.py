@@ -527,6 +527,10 @@ class BacktestSummaryOut(BaseModel):
     num_trades: int
     sharpe_like: float | None
     created_at: datetime
+    strategy_version: str | None = None
+    code_version: str | None = None
+    data_version: str | None = None
+    random_seed: int | None = None
 
 
 class BacktestDetailOut(BacktestSummaryOut):
@@ -534,6 +538,7 @@ class BacktestDetailOut(BacktestSummaryOut):
     equity_curve: list[dict]
     trades: list[dict]
     notes: dict
+    extra_metrics: dict = {}
 
 
 class WalkForwardRequest(BaseModel):
@@ -692,3 +697,224 @@ class DataQualityOut(BaseModel):
     status: str
     components: dict[str, float]
     detail: str | None = None
+
+
+# --- "PROMPT 7" (Backtesting Engine + Walk-Forward + Monte Carlo + Strategy Lab) --
+
+
+class BacktestJobCreate(BaseModel):
+    kind: str
+    payload: dict
+
+
+class BacktestJobOut(BaseModel):
+    id: int
+    kind: str
+    status: str
+    payload: dict
+    result: dict
+    error: str | None
+    created_at: datetime
+    started_at: datetime | None
+    completed_at: datetime | None
+
+
+class DataIntegrityIssueOut(BaseModel):
+    severity: str
+    code: str
+    detail: str
+
+
+class DataIntegrityReportOut(BaseModel):
+    blocked: bool
+    status: str
+    bars_checked: int
+    issues: list[DataIntegrityIssueOut]
+
+
+class TrainValidationTestSplitOut(BaseModel):
+    train_start: datetime
+    train_end: datetime
+    validation_start: datetime
+    validation_end: datetime
+    test_start: datetime
+    test_end: datetime
+    train_ratio: float
+    validation_ratio: float
+    test_ratio: float
+
+
+class WalkForwardOptimizationRequest(BaseModel):
+    strategy_id: int
+    asset_id: int
+    timeframe: str = "1m"
+    start_ts: datetime
+    end_ts: datetime
+    train_days: float
+    validation_days: float
+    initial_capital: float = 10_000.0
+
+
+class WalkForwardOptWindowOut(BaseModel):
+    index: int
+    train_start: datetime
+    train_end: datetime
+    validation_start: datetime
+    validation_end: datetime
+    best_params: dict
+    train_result: BacktestSummaryOut
+    validation_result: BacktestSummaryOut
+
+
+class WalkForwardOptimizationResponseOut(BaseModel):
+    windows: list[WalkForwardOptWindowOut]
+    pooled_oos_expectancy: float | None
+    oos_positive_window_ratio: float | None
+    parameter_stability: dict
+    consistent: bool | None
+    reason: str
+
+
+class MonteCarloRequest(BaseModel):
+    backtest_run_id: int
+    method: str = "trade_reshuffling"
+    num_simulations: int = 1000
+    random_seed: int = 42
+    drawdown_threshold_pct: float | None = None
+
+
+class MonteCarloOut(BaseModel):
+    id: int
+    reference_backtest_run_id: int
+    method: str
+    num_simulations: int
+    random_seed: int
+    percentiles: dict
+    probability_of_loss: float | None
+    probability_of_drawdown_threshold: float | None
+    drawdown_threshold_pct: float | None
+    notes: dict
+    created_at: datetime
+
+
+class StressTestRequest(BaseModel):
+    strategy_id: int
+    asset_id: int
+    timeframe: str = "1m"
+    start_ts: datetime
+    end_ts: datetime
+    initial_capital: float = 10_000.0
+    scenarios: list[str] | None = None
+
+
+class StressTestOut(BaseModel):
+    id: int
+    reference_backtest_run_id: int
+    scenario: str
+    params: dict
+    result: dict
+    survived: bool | None
+    created_at: datetime
+
+
+class SensitivityRequest(BaseModel):
+    strategy_id: int
+    asset_id: int
+    timeframe: str = "1m"
+    start_ts: datetime
+    end_ts: datetime
+    initial_capital: float = 10_000.0
+    kind: str = "cost"  # 'cost' | 'slippage' | 'capital'
+
+
+class SensitivityPointOut(BaseModel):
+    level: float
+    net_return: float | None
+    max_drawdown: float | None
+    survived: bool | None
+
+
+class SensitivityResponseOut(BaseModel):
+    kind: str
+    points: list[SensitivityPointOut]
+    survives_all_levels: bool | None
+
+
+class RiskOfRuinRequest(BaseModel):
+    backtest_run_id: int
+    drawdown_threshold_pct: float | None = None
+    capital_loss_threshold_pct: float | None = None
+    num_simulations: int = 1000
+    random_seed: int = 42
+
+
+class RiskOfRuinOut(BaseModel):
+    probability_of_ruin: float | None
+    drawdown_threshold_pct: float | None
+    capital_loss_threshold_pct: float | None
+    num_simulations: int
+    random_seed: int
+    assumptions: list[str]
+
+
+class RealityGapOut(BaseModel):
+    strategy_id: int
+    reference_backtest_id: int | None
+    return_difference: float | None
+    win_rate_difference: float | None
+    expectancy_difference: float | None
+    drawdown_difference: float | None
+    execution_difference: float | None
+    notes: list[str]
+
+
+class FailureVerdictOut(BaseModel):
+    strategy_id: int
+    verdict: str
+    reasons: list[str]
+
+
+class FullLabRequest(BaseModel):
+    strategy_id: int
+    asset_id: int
+    timeframe: str = "1m"
+    start_ts: datetime
+    end_ts: datetime
+    initial_capital: float = 10_000.0
+    monte_carlo_simulations: int = 300
+    random_seed: int = 42
+
+
+class FullLabReportOut(BaseModel):
+    blocked: bool
+    reason: str | None = None
+    configuration: dict | None = None
+    data: dict | None = None
+    strategy: dict | None = None
+    performance: dict | None = None
+    risk: dict | None = None
+    drawdown: dict | None = None
+    walk_forward: dict | None = None
+    monte_carlo: dict | None = None
+    stress_tests: list[dict] | None = None
+    robustness: dict | None = None
+    parameter_stability: dict | None = None
+    reality_gap: dict | None = None
+    final_assessment: dict | None = None
+
+
+class StrategyLabComparisonRow(BaseModel):
+    strategy_id: int
+    strategy_code: str
+    net_return: float | None
+    max_drawdown: float | None
+    expectancy: float | None
+    profit_factor: float | None
+    sharpe_like: float | None
+    num_trades: int
+    quality_score: float | None
+    status: str | None
+
+
+class StrategyLabCompareRequest(BaseModel):
+    backtest_run_ids: list[int]

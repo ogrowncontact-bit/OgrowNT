@@ -1,0 +1,23 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends libpq5 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY pyproject.toml ./
+COPY apps ./apps
+COPY packages ./packages
+COPY config ./config
+
+RUN pip install --no-cache-dir -e .
+
+# See packages/backtest/versioning.py: set at build time (CI passes the
+# real git sha) so packages/backtest never needs `.git` inside the image.
+ARG OGROWNT_CODE_VERSION=""
+ENV OGROWNT_CODE_VERSION=${OGROWNT_CODE_VERSION}
+
+RUN useradd --create-home --uid 1000 appuser && chown -R appuser:appuser /app
+USER appuser
+
+CMD ["python", "-m", "apps.backtest_worker.main"]
