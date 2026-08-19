@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@inner/db";
 import { getPaymentProvider } from "@/lib/payments";
 import { completeOrder } from "@/lib/commerce";
-import { track } from "@/lib/analytics";
+import { markOrderCancelled } from "@/lib/orderCancellation";
 
 /** Real Stripe webhook — the only trigger that grants an entitlement in production. Unreachable/no-op path while MockProvider is active. */
 export async function POST(request: NextRequest) {
@@ -19,7 +19,7 @@ export async function POST(request: NextRequest) {
 
   if (!event) return NextResponse.json({ ok: true }); // event we don't act on
 
-  const order = await prisma.order.findFirst({ where: { providerRef: event.providerRef }, include: { assessmentSession: true } });
+  const order = await prisma.order.findFirst({ where: { providerRef: event.providerRef } });
   if (!order) {
     console.error(`[webhooks/stripe] no order found for providerRef ${event.providerRef}`);
     return NextResponse.json({ error: "Order not found" }, { status: 404 });
@@ -27,20 +27,12 @@ export async function POST(request: NextRequest) {
 
   if (event.type === "payment_completed") {
     await completeOrder(order.id);
-    return NextResponse.json({ ok: true });
-  }
-
-  // payment_cancelled (checkout.session.expired) — only meaningful for an
-  // order that's still pending; a session can outlive an order that was
-  // already completed or cancelled by an earlier delivery of this same event.
-  if (order.status === "pending") {
-    await prisma.order.update({ where: { id: order.id }, data: { status: "cancelled" } });
-    await track({
-      anonymousSessionId: order.assessmentSession.anonymousSessionId,
-      eventName: "checkout_abandoned",
-      assessmentId: order.assessmentSession.assessmentId,
-      properties: { orderId: order.id, priceId: order.priceId, currency: order.currency, amountCents: order.amountCents },
-    });
+  } else {
+    // payment_cancelled (checkout.session.expired) — markOrderCancelled is a
+    // no-op if the order already moved past "pending" (completed by a
+    // webhook that arrived first, or already cancelled by an earlier
+    // delivery of this same event).
+    await markOrderCancelled(order.id);
   }
   return NextResponse.json({ ok: true });
 }

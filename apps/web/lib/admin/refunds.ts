@@ -1,6 +1,10 @@
 import { prisma } from "@inner/db";
+import { renderRefundConfirmationEmail } from "@inner/email";
 import { getPaymentProvider } from "@/lib/payments";
 import { computeOrderStatusAfterRefund } from "@/lib/refundStatus";
+import { getEmailProvider } from "@/lib/email";
+import { recordEmailEvent } from "@/lib/emailEvents";
+import { formatPrice } from "@/lib/money";
 
 /**
  * Issues a real refund through the configured PaymentProvider, then records
@@ -20,7 +24,10 @@ export async function issueRefund(
   reason?: string,
   amountCents?: number
 ): Promise<{ ok: true } | { ok: false; error: string }> {
-  const order = await prisma.order.findUnique({ where: { id: orderId }, include: { refunds: true } });
+  const order = await prisma.order.findUnique({
+    where: { id: orderId },
+    include: { refunds: true, user: true, price: { include: { assessment: true } } },
+  });
   if (!order) return { ok: false, error: "Order not found" };
   if (order.status !== "paid" && order.status !== "partially_refunded") {
     return { ok: false, error: `Order status is "${order.status}" — nothing left to refund` };
@@ -47,6 +54,24 @@ export async function issueRefund(
     prisma.refund.create({ data: { orderId, amountCents: refundCents, reason } }),
     prisma.order.update({ where: { id: orderId }, data: { status: newStatus } }),
   ]);
+
+  const sendResult = await getEmailProvider().send({
+    to: order.user.email,
+    subject: `${order.price.assessment.name} — refund confirmation`,
+    html: renderRefundConfirmationEmail({
+      assessmentName: order.price.assessment.name,
+      refundAmountLabel: formatPrice(refundCents, order.currency),
+      partial: newStatus === "partially_refunded",
+    }),
+  });
+  await recordEmailEvent({
+    userId: order.userId,
+    type: "refund_confirmation",
+    templateKey: "refund_confirmation_v1",
+    providerRef: sendResult.providerRef,
+    relatedEntityId: order.id,
+    status: sendResult.ok ? "sent" : "failed",
+  });
 
   return { ok: true };
 }

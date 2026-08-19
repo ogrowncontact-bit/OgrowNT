@@ -1,7 +1,7 @@
 import { prisma } from "@inner/db";
 import { getPaymentProvider } from "@/lib/payments";
 import { completeOrder } from "@/lib/commerce";
-import { track } from "@/lib/analytics";
+import { markOrderCancelled } from "@/lib/orderCancellation";
 
 /**
  * Manual reconciliation for a stuck "pending" order — an admin escape hatch
@@ -13,7 +13,7 @@ import { track } from "@/lib/analytics";
  * webhook got lost.
  */
 export async function checkOrderPaymentStatus(orderId: string): Promise<{ ok: true; status: string } | { ok: false; error: string }> {
-  const order = await prisma.order.findUnique({ where: { id: orderId }, include: { assessmentSession: true } });
+  const order = await prisma.order.findUnique({ where: { id: orderId } });
   if (!order) return { ok: false, error: "Order not found" };
   if (order.status !== "pending") return { ok: false, error: `Order status is already "${order.status}"` };
   if (!order.providerRef) return { ok: false, error: "Order has no payment reference on file" };
@@ -25,13 +25,7 @@ export async function checkOrderPaymentStatus(orderId: string): Promise<{ ok: tr
     return { ok: true, status: "paid" };
   }
   if (status === "cancelled") {
-    await prisma.order.update({ where: { id: order.id }, data: { status: "cancelled" } });
-    await track({
-      anonymousSessionId: order.assessmentSession.anonymousSessionId,
-      eventName: "checkout_abandoned",
-      assessmentId: order.assessmentSession.assessmentId,
-      properties: { orderId: order.id, priceId: order.priceId, currency: order.currency, amountCents: order.amountCents },
-    });
+    await markOrderCancelled(order.id);
     return { ok: true, status: "cancelled" };
   }
   return { ok: true, status };

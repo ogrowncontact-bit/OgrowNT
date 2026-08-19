@@ -54,7 +54,7 @@ export async function POST(request: NextRequest) {
 
   const user = await prisma.user.upsert({
     where: { email },
-    update: {},
+    update: { lastSeenAt: new Date() },
     create: { email },
   });
 

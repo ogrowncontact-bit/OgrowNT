@@ -4,6 +4,7 @@ import { getEmailProvider } from "./email";
 import { getAssessmentConfig } from "./assessments";
 import { selectRecommendation } from "./recommendation";
 import { signToken } from "./security/signedToken";
+import { recordEmailEvent } from "./emailEvents";
 
 /**
  * Growth tooling per docs/ARCHITECTURE.md §6/§11. Meant to be invoked
@@ -77,8 +78,13 @@ async function sendCheckoutReminders(now: Date): Promise<ReengagementCounts> {
       }),
     });
 
-    await prisma.emailEvent.create({
-      data: { userId: order.userId, type: "checkout_reminder", templateKey: "checkout_reminder_v1", sentAt: now },
+    await recordEmailEvent({
+      userId: order.userId,
+      type: "checkout_reminder",
+      templateKey: "checkout_reminder_v1",
+      providerRef: result.providerRef,
+      relatedEntityId: order.id,
+      status: result.ok ? "sent" : "failed",
     });
     if (result.ok) counts.sent++;
     else counts.skipped++;
@@ -160,8 +166,14 @@ async function sendRecommendationNudges(now: Date): Promise<ReengagementCounts> 
       }),
     });
 
-    await prisma.emailEvent.create({
-      data: { userId: entitlement.userId, type: "recommendation_nudge", templateKey: "recommendation_nudge_v1", sentAt: now },
+    await recordEmailEvent({
+      userId: entitlement.userId,
+      type: "recommendation_nudge",
+      templateKey: "recommendation_nudge_v1",
+      transactional: false, // the one genuinely marketing-flagged send — gated on consent + Unsubscribe above
+      providerRef: result.providerRef,
+      relatedEntityId: entitlement.id,
+      status: result.ok ? "sent" : "failed",
     });
     if (result.ok) counts.sent++;
     else counts.skipped++;

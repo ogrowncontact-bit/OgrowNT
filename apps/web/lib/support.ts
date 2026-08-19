@@ -3,6 +3,7 @@ import { renderReportDeliveryEmail } from "@inner/email";
 import { getAssessmentConfig } from "./assessments";
 import { getEmailProvider } from "./email";
 import { readReportPdf } from "./reportStorage";
+import { recordEmailEvent } from "./emailEvents";
 
 const RESEND_COOLDOWN_MS = 10 * 60 * 1000;
 
@@ -47,14 +48,19 @@ export async function resendMostRecentReport(email: string): Promise<void> {
   const pdf = await readReportPdf(report.pdfObjectKey);
   const reportViewUrl = `${appBaseUrl()}/${report.assessmentSession.sourceSlug}/session/${report.assessmentSessionId}/report`;
 
-  await getEmailProvider().send({
+  const sendResult = await getEmailProvider().send({
     to: user.email,
     subject: `${report.order.price.assessment.name} — your report, resent`,
     html: renderReportDeliveryEmail({ assessmentName: report.order.price.assessment.name, profileName, reportViewUrl }),
     attachments: [{ filename: "inner-report.pdf", content: pdf, contentType: "application/pdf" }],
   });
 
-  await prisma.emailEvent.create({
-    data: { userId: user.id, type: "report_resend", templateKey: "report_delivery_v1", sentAt: new Date() },
+  await recordEmailEvent({
+    userId: user.id,
+    type: "report_resend",
+    templateKey: "report_delivery_v1",
+    providerRef: sendResult.providerRef,
+    relatedEntityId: report.id,
+    status: sendResult.ok ? "sent" : "failed",
   });
 }

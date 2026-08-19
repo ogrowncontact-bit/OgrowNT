@@ -8,18 +8,25 @@ export function AccessRequestForm() {
   const [email, setEmail] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [done, setDone] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 
   async function handleSubmit() {
     if (!emailValid || submitting) return;
     setSubmitting(true);
+    setError(null);
     try {
-      await fetch("/api/access/request", {
+      const res = await fetch("/api/access/request", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email }),
       });
+      if (res.status === 429) {
+        const data = await res.json().catch(() => null);
+        setError(data?.error ?? "Too many requests — please wait a few minutes and try again.");
+        return;
+      }
       setDone(true);
     } finally {
       setSubmitting(false);
@@ -74,6 +81,12 @@ export function AccessRequestForm() {
           </Link>{" "}
           instead.
         </p>
+
+        {error && (
+          <p role="alert" className="mt-4 text-sm text-[var(--inner-accent)]">
+            {error}
+          </p>
+        )}
       </div>
     </Screen>
   );

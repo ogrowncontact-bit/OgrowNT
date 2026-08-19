@@ -1,12 +1,14 @@
 import { prisma, Prisma } from "@inner/db";
 import { generateReport, type ReportContext, type ReportTension } from "@inner/ai";
 import { renderReportPdf } from "@inner/pdf";
-import { renderReportDeliveryEmail } from "@inner/email";
+import { renderReportDeliveryEmail, renderPurchaseConfirmationEmail } from "@inner/email";
 import { dimensionPool } from "@inner/content/dimensions";
 import { getAssessmentConfig } from "./assessments";
 import { getEmailProvider } from "./email";
 import { storeReportPdf } from "./reportStorage";
 import { track } from "./analytics";
+import { recordEmailEvent } from "./emailEvents";
+import { formatPrice } from "./money";
 import type { OpenResponseAiMeta } from "./openResponseAiMeta";
 import { ensureAiTelemetryRegistered } from "./aiTelemetry";
 
@@ -40,6 +42,7 @@ export async function completeOrder(orderId: string): Promise<void> {
   if (!config) throw new Error(`Unknown assessment for order ${orderId}`);
 
   const existingReport = await prisma.report.findUnique({ where: { orderId: order.id } });
+  const isFirstAttempt = !existingReport;
   if (existingReport && existingReport.status !== "failed") {
     // Already generated (or another call is mid-flight) — never regenerate a
     // paid report unnecessarily. Just make sure downstream state agrees.
@@ -59,6 +62,32 @@ export async function completeOrder(orderId: string): Promise<void> {
     prisma.user.findUniqueOrThrow({ where: { id: order.userId } }),
   ]);
   if (!profileResultRow) throw new Error(`Session ${session.id} has no profile result yet`);
+
+  if (isFirstAttempt) {
+    // Sent once, right when payment is confirmed — before AI/PDF generation,
+    // which can take a few seconds. Also serves as the "we're preparing it"
+    // notice (see docs on renderPurchaseConfirmationEmail), so a customer
+    // isn't left wondering between this and the separate report-ready email.
+    const statusUrl = `${appBaseUrl()}/${session.sourceSlug}/session/${session.id}/report`;
+    const confirmResult = await getEmailProvider().send({
+      to: user.email,
+      subject: `${config.name} — purchase confirmed`,
+      html: renderPurchaseConfirmationEmail({
+        assessmentName: config.name,
+        priceLabel: formatPrice(order.amountCents, order.currency),
+        purchaseDateLabel: new Date().toLocaleDateString("en-IE", { year: "numeric", month: "long", day: "numeric" }),
+        statusUrl,
+      }),
+    });
+    await recordEmailEvent({
+      userId: order.userId,
+      type: "purchase_confirmation",
+      templateKey: "purchase_confirmation_v1",
+      providerRef: confirmResult.providerRef,
+      relatedEntityId: order.id,
+      status: confirmResult.ok ? "sent" : "failed",
+    });
+  }
 
   const primary = config.profiles.find((p) => p.key === profileResultRow.primaryProfileKey);
   if (!primary) throw new Error(`Unknown profile key ${profileResultRow.primaryProfileKey}`);
@@ -139,6 +168,14 @@ export async function completeOrder(orderId: string): Promise<void> {
       subject: `${config.name} — your report is ready`,
       html: renderReportDeliveryEmail({ assessmentName: config.name, profileName: primary.name, reportViewUrl }),
       attachments: [{ filename: "inner-report.pdf", content: pdf, contentType: "application/pdf" }],
+    });
+    await recordEmailEvent({
+      userId: order.userId,
+      type: "report_delivery",
+      templateKey: "report_delivery_v1",
+      providerRef: sendResult.providerRef,
+      relatedEntityId: report.id,
+      status: sendResult.ok ? "sent" : "failed",
     });
 
     try {

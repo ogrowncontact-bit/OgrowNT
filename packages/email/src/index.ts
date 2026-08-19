@@ -6,3 +6,7 @@ export { renderCheckoutReminderEmail } from "./templates/checkoutReminder";
 export { renderRecommendationNudgeEmail } from "./templates/recommendationNudge";
 export { renderPrivacyConfirmEmail } from "./templates/privacyConfirm";
 export { renderAccessLinkEmail } from "./templates/accessLink";
+export { renderPurchaseConfirmationEmail } from "./templates/purchaseConfirmation";
+export { renderReportPreparingEmail } from "./templates/reportPreparing";
+export { renderPaymentFailedEmail } from "./templates/paymentFailed";
+export { renderRefundConfirmationEmail } from "./templates/refundConfirmation";

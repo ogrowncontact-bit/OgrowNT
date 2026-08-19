@@ -53,9 +53,22 @@ export default async function AccessReportsPage() {
                 href={`/${report.assessmentSession.sourceSlug}/session/${report.assessmentSessionId}/report`}
                 className="block rounded-[var(--inner-radius-lg)] border border-[var(--inner-line)] bg-[var(--inner-card)] p-5"
               >
-                <p className="text-xs font-medium uppercase tracking-[0.2em] text-[var(--inner-muted)]">
-                  {report.order.price.assessment.name}
-                </p>
+                <div className="flex items-start justify-between gap-3">
+                  <p className="text-xs font-medium uppercase tracking-[0.2em] text-[var(--inner-muted)]">
+                    {report.order.price.assessment.name}
+                  </p>
+                  {report.status !== "ready" && (
+                    <span
+                      className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium ${
+                        report.status === "failed"
+                          ? "bg-[var(--inner-accent)] text-[var(--inner-accent-contrast)]"
+                          : "bg-[var(--inner-paper-dim)] text-[var(--inner-muted)]"
+                      }`}
+                    >
+                      {report.status === "generating" || report.status === "pending" ? "Preparing" : "Failed"}
+                    </span>
+                  )}
+                </div>
                 <h2 className="mt-1 font-display text-[19px] text-[var(--inner-ink)]">{profileName}</h2>
                 <p className="mt-2 text-[13px] text-[var(--inner-muted)]">
                   {new Date(report.generatedAt).toLocaleDateString(undefined, {
@@ -69,6 +82,12 @@ export default async function AccessReportsPage() {
           })}
         </div>
       )}
+
+      <p className="mb-8 text-[13px] text-[var(--inner-muted)]">
+        <Link href="/preferences" className="underline">
+          Email preferences
+        </Link>
+      </p>
     </Screen>
   );
 }

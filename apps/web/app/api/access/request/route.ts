@@ -10,7 +10,13 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "A valid email is required" }, { status: 400 });
   }
 
-  await requestAccessLink(email);
+  const { rateLimited } = await requestAccessLink(email);
+  if (rateLimited) {
+    // Distinct from the neutral success response, but safe to reveal: the
+    // rate limit is keyed by the email string itself regardless of whether
+    // it matches a real account, so this never confirms an email exists.
+    return NextResponse.json({ error: "Too many requests for this email — please wait a few minutes and try again." }, { status: 429 });
+  }
 
   // Best-effort only — a device requesting access may have no anonymous
   // session cookie at all (that's the whole point of the flow), and we

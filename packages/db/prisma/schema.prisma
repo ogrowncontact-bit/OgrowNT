@@ -47,6 +47,7 @@ model User {
   emailVerifiedAt   DateTime?
   stripeCustomerId  String?
   createdAt         DateTime @default(now())
+  lastSeenAt        DateTime @default(now())
 
   anonymousSessions AnonymousSession[]
   marketingConsents MarketingConsent[]
@@ -74,6 +75,26 @@ model DeletionRequest {
   status      DeletionStatus @default(requested)
   completedAt DateTime?
 
+  @@schema("identity")
+}
+
+/** Marks an access-link token as spent — see lib/access.ts. Stores a hash of the token, never the token itself, and only for the lifetime of the token's own expiry. */
+model UsedAccessToken {
+  tokenHash String   @id
+  usedAt    DateTime @default(now())
+  expiresAt DateTime
+
+  @@schema("identity")
+}
+
+/** Generic sliding-window request counter — see lib/security/rateLimit.ts. One row per attempt (allowed or not); rows past their own window are pruned lazily on the next check for the same scope+identifier. */
+model RateLimitHit {
+  id         String   @id @default(cuid())
+  scope      String
+  identifier String
+  createdAt  DateTime @default(now())
+
+  @@index([scope, identifier, createdAt])
   @@schema("identity")
 }
 
@@ -498,17 +519,28 @@ model MarketingConsent {
 }
 
 model EmailEvent {
-  id          String   @id @default(cuid())
-  userId      String
-  user        User     @relation(fields: [userId], references: [id])
-  type        String   // report_delivery | recommendation | re_engagement
-  templateKey String
-  sentAt      DateTime @default(now())
-  openedAt    DateTime?
-  clickedAt   DateTime?
+  id            String    @id @default(cuid())
+  userId        String
+  user          User      @relation(fields: [userId], references: [id])
+  type          String    // report_delivery | purchase_confirmation | report_preparing | payment_failed | refund_confirmation | magic_link | checkout_reminder | recommendation_nudge | report_resend
+  templateKey   String
+  transactional Boolean   @default(true) // false only for recommendation_nudge — everything else is triggered by the recipient's own action, not a campaign
+  providerRef   String?   // provider's message id, for correlating an async delivered/bounced webhook back to this row
+  /** Report.id for report_delivery/report_preparing, Order.id for purchase_confirmation/payment_failed/refund_confirmation — lets a user with multiple purchases be retried against the right one. Untyped on purpose: which table it points into is determined by `type`. */
+  relatedEntityId String?
+  status        String    @default("sent") // sent | delivered | bounced | failed
+  failureReason String?
+  attempts      Int       @default(1)
+  sentAt        DateTime  @default(now())
+  deliveredAt   DateTime?
+  bouncedAt     DateTime?
+  openedAt      DateTime?
+  clickedAt     DateTime?
 
+  @@index([providerRef])
   @@schema("marketing")
 }
+
 
 enum UnsubscribeScope {
   all
