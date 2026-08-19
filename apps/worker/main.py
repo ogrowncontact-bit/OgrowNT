@@ -17,14 +17,42 @@ Runs three independent cadences (docs/blueprint/05-event-flow.md §Cadência):
   computes its pair fresh, so this is audit/display only.
 - Every RESEARCH_INTERVAL_SECONDS: Research Agent — proposes candidate
   learned_rules for underperforming patterns/strategies and runs the DET
-  validation pass (packages/quant/learning/research.py). The Learning
-  Agent's per-trade half (strategy performance, health score, quarantine,
-  trade journal) runs inline in the Trade Monitor above, not on this
-  cadence — it reacts to trade closes, not to a clock.
+  validation pass (packages/quant/learning/research.py). Also runs the
+  NewsLearningWorker (packages/quant/news/event_reaction.py's
+  compute_event_reactions) — batch, slow-changing work grouped on the same
+  cadence as Research Agent for the same reason: it reasons over data that
+  only changes as slowly as trades/news close, not per scan/news tick. The
+  Learning Agent's per-trade half (strategy performance, health score,
+  quarantine, trade journal) runs inline in the Trade Monitor above, not on
+  this cadence — it reacts to trade closes, not to a clock.
+- Every MACRO_CALENDAR_INTERVAL_SECONDS: MacroCalendarWorker — ingests/
+  resolves the macro economic calendar (packages/data/connectors/macro).
+  Slower than news_interval_seconds since a calendar changes far less often
+  than headlines do.
+- Every SENTIMENT_SHIFT_INTERVAL_SECONDS: SentimentWorker — per-asset
+  SENTIMENT_SHIFT detection (packages/quant/news/sentiment.py), a rollup
+  over already-ingested news_events rather than per-item work, so it runs
+  on its own cadence instead of inline in the News Intelligence Agent above.
 - Every ALERT_DELIVERY_INTERVAL_SECONDS: attempts delivery of any
   not-yet-delivered Alert row to whatever notification channels are
   configured (apps/worker/alerts.py) — short by default since alerts
   (kill switch, safety belt changes) are time-sensitive.
+
+Prompt 6 §37 asks for NewsIngestionWorker / NewsAnalysisWorker /
+EventDetectionWorker / SentimentWorker / MacroCalendarWorker /
+NewsLearningWorker as separate processes ("não colocar tudo em um único
+processo"). This codebase's established architecture (every phase so far)
+is a single worker process with independent *cadences*, not one OS process
+per agent — deliberately kept consistent with every other agent in this
+file rather than special-cased for News Intelligence. Ingestion, DET
+analysis (entities/sentiment/importance/novelty/dedup/impact score), and
+event detection are one cohesive, sequential pass over the same item
+(run_news_cycle/apps/worker/news_agent.py) — splitting them into separate
+passes would only add redundant DB round-trips with no behavioral
+difference. SentimentWorker (shift detection), MacroCalendarWorker, and
+NewsLearningWorker each get their own independent cadence below, which is
+the actual isolation §37 is asking for: one slow/failing agent never
+blocks another.
 
 Each cadence above runs in its own try/except (apps/worker/supervisor.py's
 CadenceFailureTracker) — one cadence failing doesn't skip the others in the
@@ -46,12 +74,15 @@ import time
 
 from apps.worker.alerts import run_alert_delivery_cycle
 from apps.worker.history import backfill_active_assets
+from apps.worker.macro_agent import run_macro_calendar_cycle
 from apps.worker.market_alerts import MarketAlertTracker
 from apps.worker.news_agent import run_news_cycle
 from apps.worker.scanner import run_scan_cycle
+from apps.worker.sentiment_agent import run_sentiment_shift_cycle
 from apps.worker.strategy_runner import run_strategy_cycle
 from apps.worker.supervisor import CadenceFailureTracker
 from apps.worker.trade_monitor import run_trade_monitor_cycle
+from packages.data.connectors.macro.factory import get_macro_calendar_provider
 from packages.data.connectors.market.factory import get_market_data_provider
 from packages.data.connectors.news.factory import get_news_provider
 from packages.execution.adapters.paper import PaperExecutionProvider
@@ -59,6 +90,7 @@ from packages.llm.client import LLMClient
 from packages.notifications.dispatcher import NotificationDispatcher
 from packages.portfolio.state import refresh_snapshot
 from packages.quant.learning.research import run_research_cycle
+from packages.quant.news.event_reaction import compute_event_reactions
 from packages.risk.correlation_guard import refresh_correlation_matrix
 from packages.risk.monitor import update_safety_belt
 from packages.shared.db import SessionLocal
@@ -81,15 +113,17 @@ def main() -> None:
     settings = get_settings()
     provider = get_market_data_provider()
     news_provider = get_news_provider()
+    macro_provider = get_macro_calendar_provider()
     llm_client = LLMClient()
     dispatcher = NotificationDispatcher()
     logger.info(
-        "Worker starting — market_data=%s news=%s llm_configured=%s "
+        "Worker starting — market_data=%s news=%s macro=%s llm_configured=%s "
         "scan_interval=%ss news_interval=%ss strategy_interval=%ss research_interval=%ss "
-        "alert_delivery_interval=%ss",
-        provider.name, news_provider.name, llm_client.is_available(),
+        "macro_calendar_interval=%ss sentiment_shift_interval=%ss alert_delivery_interval=%ss",
+        provider.name, news_provider.name, macro_provider.name, llm_client.is_available(),
         settings.scan_interval_seconds, settings.news_interval_seconds,
         settings.strategy_interval_seconds, settings.research_interval_seconds,
+        settings.macro_calendar_interval_seconds, settings.sentiment_shift_interval_seconds,
         settings.alert_delivery_interval_seconds,
     )
     if not llm_client.is_available():
@@ -112,6 +146,8 @@ def main() -> None:
     last_news_run = 0.0
     last_strategy_run = 0.0
     last_research_run = 0.0
+    last_macro_run = 0.0
+    last_sentiment_shift_run = 0.0
     last_alert_delivery_run = 0.0
     tracker = CadenceFailureTracker()
     market_alert_tracker = MarketAlertTracker()
@@ -147,6 +183,24 @@ def main() -> None:
                     tracker.record_failure(db, "news", str(exc))
                 last_news_run = cycle_start
 
+            if cycle_start - last_macro_run >= settings.macro_calendar_interval_seconds:
+                try:
+                    run_macro_calendar_cycle(db, macro_provider)
+                    tracker.record_success("macro_calendar")
+                except Exception as exc:  # noqa: BLE001
+                    logger.exception("macro_calendar cadence failed")
+                    tracker.record_failure(db, "macro_calendar", str(exc))
+                last_macro_run = cycle_start
+
+            if cycle_start - last_sentiment_shift_run >= settings.sentiment_shift_interval_seconds:
+                try:
+                    run_sentiment_shift_cycle(db)
+                    tracker.record_success("sentiment_shift")
+                except Exception as exc:  # noqa: BLE001
+                    logger.exception("sentiment_shift cadence failed")
+                    tracker.record_failure(db, "sentiment_shift", str(exc))
+                last_sentiment_shift_run = cycle_start
+
             if cycle_start - last_strategy_run >= settings.strategy_interval_seconds:
                 try:
                     backfill_active_assets(db, provider)
@@ -165,6 +219,10 @@ def main() -> None:
             if cycle_start - last_research_run >= settings.research_interval_seconds:
                 try:
                     run_research_cycle(db, llm_client)
+                    # NewsLearningWorker (Prompt 6 §30-32): same batch/slow
+                    # cadence as Research Agent above — both reason over data
+                    # that only changes as trades/news close, not per tick.
+                    compute_event_reactions(db)
                     tracker.record_success("research")
                 except Exception as exc:  # noqa: BLE001
                     logger.exception("research cadence failed")

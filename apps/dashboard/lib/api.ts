@@ -160,6 +160,7 @@ export type NewsImpact = {
   confidence: number;
   horizon_hours: number;
   rationale: string;
+  is_direct: boolean;
 };
 export type NewsEvent = {
   id: number;
@@ -168,6 +169,35 @@ export type NewsEvent = {
   headline: string;
   category: string | null;
   impacts: NewsImpact[];
+  source_quality_score: number;
+  sentiment: "very_bullish" | "bullish" | "neutral" | "bearish" | "very_bearish" | "unknown";
+  sentiment_confidence: number;
+  importance: "low" | "medium" | "high" | "critical";
+  novelty_score: number;
+  impact_score: number;
+  cluster_id: number | null;
+  source_consensus_score: number;
+  has_conflicting_sources: boolean;
+  entities: { type: string; value: string }[];
+};
+export type MacroEvent = {
+  id: number;
+  event: string;
+  country: string;
+  currency: string | null;
+  scheduled_at: string;
+  importance: "low" | "medium" | "high" | "critical";
+  forecast: number | null;
+  previous: number | null;
+  actual: number | null;
+  surprise: number | null;
+  status: "scheduled" | "released";
+};
+export type NewsRisk = {
+  level: "normal" | "elevated" | "high" | "critical";
+  size_multiplier: number;
+  blocked: boolean;
+  reasons: string[];
 };
 export type StrategyLearning = {
   strategy_id: number;
@@ -315,6 +345,8 @@ export const getOpportunityDetail = (token: string, signalId: number) =>
 export const getRegimes = (token: string) => apiFetch<Regime[]>("/api/regime", token);
 export const getTrades = (token: string, limit = 10) => apiFetch<Trade[]>(`/api/trades?limit=${limit}`, token);
 export const getNews = (token: string, limit = 10) => apiFetch<NewsEvent[]>(`/api/news?limit=${limit}`, token);
+export const getMacroEvents = (token: string) => apiFetch<MacroEvent[]>("/api/macro", token);
+export const getNewsRisk = (token: string) => apiFetch<NewsRisk>("/api/news/risk", token);
 export const getStrategyLearning = (token: string) => apiFetch<StrategyLearning[]>("/api/learning/strategy-performance", token);
 export const getTradeJournal = (token: string, limit = 10) =>
   apiFetch<TradeJournalEntry[]>(`/api/learning/trade-journal?limit=${limit}`, token);

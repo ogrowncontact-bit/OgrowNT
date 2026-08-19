@@ -4,7 +4,7 @@
 **paper trading only** — no real orders are ever sent. See the full engineering
 specification in [`docs/blueprint/`](docs/blueprint/00-overview.md).
 
-## Status: Phase 7 (Advanced Analytics, Alerts, Optimization) + post-Phase-7 security hardening + Supervisor 24/7 + Market Data Engine + Scanner + Pattern/Strategy/Opportunity confidence & evidence + Risk Engine/Portfolio Intelligence hardening (Risk Center, Risk Heatmap, Strategy Health, configurable Safety Belts)
+## Status: Phase 7 (Advanced Analytics, Alerts, Optimization) + post-Phase-7 security hardening + Supervisor 24/7 + Market Data Engine + Scanner + Pattern/Strategy/Opportunity confidence & evidence + Risk Engine/Portfolio Intelligence hardening (Risk Center, Risk Heatmap, Strategy Health, configurable Safety Belts) + News Intelligence Center (sentiment, macro calendar, event risk, source consensus)
 
 Per [`docs/blueprint/12-roadmap.md`](docs/blueprint/12-roadmap.md):
 
@@ -207,19 +207,51 @@ data) and a real browser click-through of the new Risk Center. See
 `docs/blueprint/12-roadmap.md`'s "PROMPT 4" section for the full list,
 including the mathematically-validated €10,000 drawdown simulation test.
 
+**News Intelligence Center.** News ingestion + LLM interpretation already
+existed from this repo's real Phase 4; this pass built the deterministic
+analysis layer the spec asked for on top of it — new `packages/quant/news/`
+package: entity extraction (a curated dictionary, never an invented match),
+direct-vs-indirect asset mapping, a sentiment lexicon deliberately
+independent of the LLM's price-direction call (`docs/sentiment.md`),
+deduplication/clustering with source-consensus and conflicting-source
+detection, novelty decay, importance classification, a configurable impact
+score (`config/news_weights.yaml`), and Event Reaction Memory (real
+historical price reactions, gated on a minimum sample like every other
+"how confident are we" score in this codebase). A new Macro Calendar
+provider abstraction (`docs/macro-events.md`) tracks scheduled releases and
+computes surprise the moment `actual` appears, never before. The one rule
+that mattered most: a `News Risk Guard` (`docs/event-risk.md`) is the
+*only* way News Intelligence touches a trade — wired into
+`packages/risk/engine.py` as one more check step that can only reduce size
+or block, exactly like every other check, never approve or size on its
+own — verified both by a full escalation simulation and by walking the
+News Intelligence package's own AST to confirm it never imports
+`packages.execution`. A technical/news direction conflict now measurably
+lowers Opportunity confidence instead of being silently ignored. New
+`GET /api/news/risk`, `GET /api/macro`, `GET /api/news/context/{symbol}`
+endpoints and a "News Intelligence Center" dashboard panel (Event Risk,
+Market Sentiment, News Momentum, Source Quality, Upcoming Macro Events).
+Live-verified against real Postgres and a real browser click-through. See
+`docs/blueprint/12-roadmap.md`'s "PROMPT 6" section for the full list,
+including the documented, deliberate choice to keep this as worker
+cadences (this codebase's established architecture) rather than the
+spec's literal six separate processes.
+
 ## Architecture at a glance
 
 ```text
 apps/
   api/         FastAPI backend (auth, system health, assets, market data, portfolio,
                strategies, opportunities/signals, regime, risk, positions/orders/trades,
-               news, patterns, learning, research, backtests, alerts, analytics)
+               news, macro, patterns, learning, research, backtests, alerts, analytics)
   worker/      24/7 loop: Market Data Agent (scan), Trade Monitor + safety-belt
                refresh + Learning Agent (per trade close, every scan), News
-               Intelligence Agent (own cadence), Strategy Engine cycle (history
+               Intelligence Agent (ingestion + DET analysis, own cadence),
+               Macro Calendar Worker (own cadence), Sentiment Worker (shift
+               detection, own cadence), Strategy Engine cycle (history
                backfill, regime, patterns, strategies, scoring, Risk Engine, paper
-               execution), Research Agent (own, longer cadence), Alert delivery
-               cycle (own cadence)
+               execution), Research Agent + News Learning (own, longer cadence),
+               Alert delivery cycle (own cadence)
   dashboard/   Next.js dashboard (single admin user)
 packages/
   shared/      DB models, settings, logging, OHLCV lookup — shared across apps/packages
@@ -335,7 +367,7 @@ cd apps/dashboard && npm install && npm run dev
 unused imports, undefined names, mutable-default footguns — not a style
 rewrite; see `[tool.ruff]` in `pyproject.toml`), `mypy packages apps scripts`
 (type-checked with the `pydantic.mypy` plugin so FastAPI response models
-type-check correctly), then the full pytest suite (427 tests) against a real
+type-check correctly), then the full pytest suite (494 tests) against a real
 `postgres:16-alpine` service container, migrated from scratch via `alembic
 upgrade head`; separately, the dashboard's `eslint` + `next build`; and
 separately again, a plain `docker build` of all three

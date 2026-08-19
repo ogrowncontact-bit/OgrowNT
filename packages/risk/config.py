@@ -66,6 +66,19 @@ class SafetyBeltMultipliersConfig:
 
 
 @dataclass(frozen=True)
+class NewsRiskMultipliersConfig:
+    """Risk-per-trade multiplier applied at each News Risk Guard level
+    (packages/risk/news_guard.py, Prompt 6 §17/§26) — field names match the
+    guard's level constants exactly, same getattr()-by-level pattern as
+    SafetyBeltMultipliersConfig above."""
+
+    normal: float
+    elevated: float
+    high: float
+    critical: float
+
+
+@dataclass(frozen=True)
 class RiskLimits:
     capital: CapitalConfig
     per_trade: PerTradeConfig
@@ -74,6 +87,7 @@ class RiskLimits:
     liquidity: LiquidityConfig
     data_quality: DataQualityConfig
     safety_belt_multipliers: SafetyBeltMultipliersConfig
+    news_risk_multipliers: NewsRiskMultipliersConfig
 
 
 def load_risk_limits(path: Path = CONFIG_PATH) -> RiskLimits:
@@ -86,4 +100,5 @@ def load_risk_limits(path: Path = CONFIG_PATH) -> RiskLimits:
         liquidity=LiquidityConfig(**raw["liquidity"]),
         data_quality=DataQualityConfig(**raw["data_quality"]),
         safety_belt_multipliers=SafetyBeltMultipliersConfig(**raw["safety_belt_multipliers"]),
+        news_risk_multipliers=NewsRiskMultipliersConfig(**raw["news_risk_multipliers"]),
     )

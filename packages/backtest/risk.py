@@ -20,6 +20,11 @@ Deliberately narrower than packages/risk/engine.py's full pipeline:
   equity curve (packages/backtest/portfolio.py) are its audit trail —
   writing rows tied to a signal_id that was never persisted would pollute
   the live audit tables for no benefit.
+- No strategy health / News Risk Guard checks (packages/risk/strategy_health.py,
+  packages/risk/news_guard.py): both consult live/real-time state
+  (current health_score, currently-scheduled macro_events/news_events) that
+  has no meaning replayed against historical bars from an arbitrary past
+  window — there is no historical news_events data to replay against.
 """
 from __future__ import annotations
 

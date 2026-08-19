@@ -38,6 +38,13 @@ _NO_ALIGNED_PATTERN_CONFIDENCE = 0.6
 # had a real sample -- Prompt 3 §18's INSUFFICIENT_HISTORY, expressed as a
 # reduced confidence rather than a fabricated number.
 _INSUFFICIENT_HISTORY_CONFIDENCE = 0.4
+# confidence.news_confidence when the technical signal direction and the
+# most impactful news read actively disagree -- Prompt 6 §28
+# ("TECHNICAL = BULLISH, NEWS = BEARISH -> CONFLICT... reduce confidence").
+# Same magnitude as _INSUFFICIENT_HISTORY_CONFIDENCE: a real, known problem
+# with the read, not the milder "no data" case (which stays neutral 1.0
+# here, same as no aligned pattern -- see _pattern_score's own neutral 50).
+_NEWS_CONFLICT_CONFIDENCE = 0.4
 
 TARGET_RISK_REWARD_FOR_FULL_SCORE = 3.0
 _IMPACT_WEIGHT = {"low": 0.3, "medium": 0.6, "high": 1.0}
@@ -98,6 +105,15 @@ def _news_score(signal_direction: str, news_signals: list[NewsSignal]) -> tuple[
         "news_count": len(news_signals), "aligned": alignment == 1,
         "confidence": best.confidence, "impact": best.impact,
     }
+
+
+def _news_conflict(signal_direction: str, news_signals: list[NewsSignal]) -> bool:
+    """Same "most impactful/confident" news read _news_score uses for the
+    `news` component -- one definition of "what the news says", not two."""
+    if not news_signals:
+        return False
+    best = max(news_signals, key=lambda n: n.confidence * _IMPACT_WEIGHT.get(n.impact, 0.5))
+    return _alignment(signal_direction, best.direction) == -1
 
 
 def _expectancy_to_score(expectancy: float | None) -> float:
@@ -166,16 +182,22 @@ def compute_opportunity_confidence(
     signal_direction: str,
     pattern_expectancy: float | None,
     strategy_expectancy: float | None,
+    news_signals: list[NewsSignal] | None = None,
 ) -> tuple[float, dict]:
     """0-100: how much the inputs behind this Opportunity's score can be
     trusted -- shown separately from final_score, never as a proxy for it
     (Prompt 3 §17/§20 "Nunca tratar score como probabilidade real").
 
-    Deliberately a small, auditable average of four already-real signals
+    Deliberately a small, auditable average of five already-real signals
     (data quality, regime confidence, the best aligned pattern's own
-    confidence, whether historical_edge had a real sample) rather than a
-    fabricated single number -- every component here is something another
-    part of the system already computed, not a new opinion.
+    confidence, whether historical_edge had a real sample, whether the most
+    impactful news read actively contradicts the signal — Prompt 6 §28)
+    rather than a fabricated single number -- every component here is
+    something another part of the system already computed, not a new
+    opinion. A news/technical conflict lowers confidence; it never blocks
+    or flips the signal by itself (§27: "NEWS ONLY não deve criar uma trade
+    opportunity" — this only ever makes an existing signal look less
+    trustworthy, on top of whatever already generated it).
     """
     quality_confidence = data_quality_confidence(ctx.candles)
     regime_confidence = ctx.regime.confidence
@@ -186,14 +208,19 @@ def compute_opportunity_confidence(
     insufficient_history = pattern_expectancy is None and strategy_expectancy is None
     history_confidence = _INSUFFICIENT_HISTORY_CONFIDENCE if insufficient_history else 1.0
 
+    news_conflict = _news_conflict(signal_direction, news_signals or [])
+    news_confidence = _NEWS_CONFLICT_CONFIDENCE if news_conflict else 1.0
+
     components = {
         "data_quality": round(quality_confidence, 3),
         "regime": round(regime_confidence, 3),
         "pattern": round(pattern_confidence, 3),
         "history": round(history_confidence, 3),
+        "news": round(news_confidence, 3),
     }
     overall = sum(components.values()) / len(components)
     return round(max(0.0, min(100.0, overall * 100)), 2), {
         "components": components,
         "insufficient_history": insufficient_history,
+        "news_conflict": news_conflict,
     }

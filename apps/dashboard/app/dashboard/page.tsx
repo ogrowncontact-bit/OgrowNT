@@ -6,9 +6,11 @@ import {
   getBacktests,
   getHealth,
   getLearnedRules,
+  getMacroEvents,
   getMarketEvents,
   getMarketOverview,
   getNews,
+  getNewsRisk,
   getOpportunities,
   getPortfolio,
   getPortfolioExposure,
@@ -34,6 +36,7 @@ import { KillSwitchButton } from "@/components/KillSwitchButton";
 import { RunBacktestForm } from "@/components/RunBacktestForm";
 import { OpportunityRow } from "@/components/OpportunityRow";
 import { EquitySparkline } from "@/components/EquitySparkline";
+import { NewsIntelligenceCenter } from "@/components/NewsIntelligenceCenter";
 
 export const dynamic = "force-dynamic";
 
@@ -65,7 +68,7 @@ export default async function DashboardPage() {
   const cookieStore = await cookies();
   const token = cookieStore.get("ogrownt_token")?.value ?? "";
 
-  const [health, status, portfolio, assets, positions, opportunities, regimes, trades, news, strategyLearning, tradeJournal, learnedRules, alerts, strategies, marketOverview, marketEvents, portfolioExposure, riskState] =
+  const [health, status, portfolio, assets, positions, opportunities, regimes, trades, news, strategyLearning, tradeJournal, learnedRules, alerts, strategies, marketOverview, marketEvents, portfolioExposure, riskState, macroEvents, newsRisk] =
     await Promise.all([
       getHealth(),
       getSystemStatus(token),
@@ -75,7 +78,7 @@ export default async function DashboardPage() {
       getOpportunities(token, 10),
       getRegimes(token),
       getTrades(token, 8),
-      getNews(token, 6),
+      getNews(token, 10),
       getStrategyLearning(token),
       getTradeJournal(token, 6),
       getLearnedRules(token, 6),
@@ -85,6 +88,8 @@ export default async function DashboardPage() {
       getMarketEvents(token, 8),
       getPortfolioExposure(token),
       getRiskState(token, 10),
+      getMacroEvents(token),
+      getNewsRisk(token),
     ]);
 
   const [backtests, promotionChecks, analytics] = await Promise.all([
@@ -401,51 +406,12 @@ export default async function DashboardPage() {
         </div>
       </section>
 
-      <section className="mb-6 rounded-lg border border-base-700 bg-base-900 p-4">
-        <p className="mb-3 text-[11px] uppercase tracking-wider text-ink-500">
-          News {news ? `(${news.length})` : ""}
-        </p>
-        {news && news.length > 0 ? (
-          <div className="space-y-2">
-            {news.map((n) => (
-              <div key={n.id} className="rounded border border-base-700 px-2 py-1.5 text-xs">
-                <div className="flex items-center justify-between text-ink-100">
-                  <span>{n.headline}</span>
-                  <span className="shrink-0 pl-2 text-ink-500">{n.source}</span>
-                </div>
-                {n.impacts.length > 0 ? (
-                  <div className="mt-1 flex flex-wrap gap-2">
-                    {n.impacts.map((impact, i) => (
-                      <span
-                        key={i}
-                        className={`text-[10px] uppercase tracking-wide ${
-                          impact.direction === "bullish"
-                            ? "text-signal-green"
-                            : impact.direction === "bearish"
-                              ? "text-signal-red"
-                              : "text-ink-500"
-                        }`}
-                      >
-                        {impact.asset_symbol} {impact.direction} ({impact.impact}, {Math.round(impact.confidence * 100)}%)
-                      </span>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="mt-1 text-[10px] text-ink-500">
-                    No asset impact interpreted{" "}
-                    {health?.components.find((c) => c.name === "ai_services")?.status === "yellow"
-                      ? "— AI services not configured"
-                      : "yet"}
-                    .
-                  </p>
-                )}
-              </div>
-            ))}
-          </div>
-        ) : (
-          <p className="text-xs text-ink-500">No recent news.</p>
-        )}
-      </section>
+      <NewsIntelligenceCenter
+        news={news ?? []}
+        macroEvents={macroEvents ?? []}
+        newsRisk={newsRisk}
+        aiServicesConfigured={health?.components.find((c) => c.name === "ai_services")?.status !== "yellow"}
+      />
 
       <section className="mb-6 rounded-lg border border-base-700 bg-base-900 p-4">
         <p className="mb-3 text-[11px] uppercase tracking-wider text-ink-500">

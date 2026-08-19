@@ -3,7 +3,7 @@ from datetime import datetime, timedelta, timezone
 from packages.data.connectors.market.base import Candle
 from packages.quant.indicators.core import compute_indicators
 from packages.quant.patterns.detector import CLASS_TECHNICAL, PatternDetection
-from packages.quant.regime.classifier import classify_regime
+from packages.quant.regime.classifier import NewsSignal, classify_regime
 from packages.quant.scoring.inputs import compute_opportunity_confidence
 from packages.quant.strategies import MarketContext
 
@@ -76,3 +76,24 @@ def test_conflicting_pattern_does_not_contribute_its_confidence():
     no_pattern, _ = compute_opportunity_confidence(ctx, [], "long", 0.5, 0.5)
     with_conflicting, _ = compute_opportunity_confidence(ctx, [conflicting], "long", 0.5, 0.5)
     assert no_pattern == with_conflicting
+
+
+def test_conflicting_news_lowers_confidence_and_is_flagged():
+    # Prompt 6 §28: TECHNICAL=BULLISH vs NEWS=BEARISH -> reduced confidence,
+    # not a block and not a flipped signal.
+    ctx = _ctx()
+    bearish_news = [NewsSignal(direction="bearish", impact="high", confidence=0.9)]
+    no_news, notes_no_news = compute_opportunity_confidence(ctx, [], "long", 0.5, 0.5)
+    with_conflict, notes_conflict = compute_opportunity_confidence(ctx, [], "long", 0.5, 0.5, news_signals=bearish_news)
+    assert with_conflict < no_news
+    assert notes_conflict["news_conflict"] is True
+    assert notes_no_news["news_conflict"] is False
+
+
+def test_aligned_news_does_not_lower_confidence():
+    ctx = _ctx()
+    bullish_news = [NewsSignal(direction="bullish", impact="high", confidence=0.9)]
+    no_news, _ = compute_opportunity_confidence(ctx, [], "long", 0.5, 0.5)
+    with_aligned, notes = compute_opportunity_confidence(ctx, [], "long", 0.5, 0.5, news_signals=bullish_news)
+    assert with_aligned == no_news
+    assert notes["news_conflict"] is False

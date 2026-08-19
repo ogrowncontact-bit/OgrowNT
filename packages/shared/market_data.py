@@ -8,6 +8,7 @@ home for it, same as get_latest_candle_row below.
 """
 from __future__ import annotations
 
+from datetime import datetime
 from typing import cast
 
 from sqlalchemy.orm import Session
@@ -27,6 +28,20 @@ def get_latest_candle_row(db: Session, asset_id: int, timeframe: str = "1m") -> 
 
 def get_latest_close(db: Session, asset_id: int, timeframe: str = "1m") -> float | None:
     row = get_latest_candle_row(db, asset_id, timeframe)
+    return row.close if row else None
+
+
+def get_close_at_or_after(db: Session, asset_id: int, ts: datetime, timeframe: str = "1m") -> float | None:
+    """The first known close at or after `ts` — used by
+    packages/quant/news/event_reaction.py to mark the price right as a news
+    event/macro release lands. None (never an interpolated guess) when no
+    candle that late exists yet."""
+    row = (
+        db.query(OHLCV)
+        .filter(OHLCV.asset_id == asset_id, OHLCV.timeframe == timeframe, OHLCV.ts >= ts)
+        .order_by(OHLCV.ts.asc())
+        .first()
+    )
     return row.close if row else None
 
 

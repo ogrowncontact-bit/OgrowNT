@@ -31,3 +31,10 @@ safety_belt_multipliers:
   defensive: 0.5
   emergency: 0.0
   kill_switch: 0.0
+# Risk-per-trade multiplier applied at each News Risk Guard level
+# (packages/risk/news_guard.py) — Prompt 6 §17/§26.
+news_risk_multipliers:
+  normal: 1.0
+  elevated: 0.75
+  high: 0.5
+  critical: 0.0

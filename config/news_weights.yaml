@@ -1,0 +1,20 @@
+# News Intelligence configuration — see docs/news-intelligence.md.
+# packages/quant/news/impact_score.py's compute_impact_score() weights,
+# operator-tunable like config/scoring_weights.yaml and
+# config/risk_limits.yaml, never hardcoded in Python.
+
+impact_score_weights:
+  source_quality: 0.20
+  importance: 0.35
+  asset_relevance: 0.20
+  novelty: 0.10
+  confidence: 0.15
+
+# Prompt 6 §17: how far ahead of a scheduled high/critical-importance macro
+# event the News Risk Guard (packages/risk/news_guard.py) starts treating it
+# as a pre-event risk window.
+pre_event_window_minutes: 30
+# How long after a breaking critical-importance news item the News Risk
+# Guard keeps treating it as active event risk (§18: post-event effects
+# don't vanish the instant the headline lands).
+post_event_window_minutes: 60

@@ -3,6 +3,7 @@ from packages.risk.config import (
     DataQualityConfig,
     LiquidityConfig,
     LossLimitsConfig,
+    NewsRiskMultipliersConfig,
     PerTradeConfig,
     PortfolioLimitsConfig,
     RiskLimits,
@@ -25,6 +26,7 @@ LIMITS = RiskLimits(
     safety_belt_multipliers=SafetyBeltMultipliersConfig(
         normal=1.0, caution=0.75, defensive=0.5, emergency=0.0, kill_switch=0.0
     ),
+    news_risk_multipliers=NewsRiskMultipliersConfig(normal=1.0, elevated=0.75, high=0.5, critical=0.0),
 )
 
 

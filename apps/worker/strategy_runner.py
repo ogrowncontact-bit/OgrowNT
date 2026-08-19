@@ -218,7 +218,8 @@ def run_strategy_cycle(
             )
             score = compute_score(inputs)
             confidence, confidence_notes = compute_opportunity_confidence(
-                ctx, [d for d, _ in persisted_patterns], signal.direction, pattern_expectancy, strategy_expectancy
+                ctx, [d for d, _ in persisted_patterns], signal.direction, pattern_expectancy, strategy_expectancy,
+                news_signals=news_signals,
             )
             db.add(
                 OpportunityScore(

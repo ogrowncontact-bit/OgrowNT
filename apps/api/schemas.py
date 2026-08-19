@@ -263,6 +263,7 @@ class RiskLimitsUpdate(BaseModel):
     liquidity: dict | None = None
     data_quality: dict | None = None
     safety_belt_multipliers: dict | None = None
+    news_risk_multipliers: dict | None = None
 
 
 class PositionOut(BaseModel):
@@ -328,6 +329,7 @@ class NewsImpactOut(BaseModel):
     confidence: float
     horizon_hours: float
     rationale: str
+    is_direct: bool
 
 
 class NewsEventOut(BaseModel):
@@ -337,6 +339,78 @@ class NewsEventOut(BaseModel):
     headline: str
     category: str | None
     impacts: list[NewsImpactOut]
+    # Prompt 6 News Intelligence additions.
+    source_quality_score: float
+    sentiment: str
+    sentiment_confidence: float
+    importance: str
+    novelty_score: float
+    impact_score: float
+    cluster_id: int | None
+    source_consensus_score: float
+    has_conflicting_sources: bool
+    entities: list[dict]
+
+
+class MacroEventOut(BaseModel):
+    id: int
+    event: str
+    country: str
+    currency: str | None
+    scheduled_at: datetime
+    importance: str
+    forecast: float | None
+    previous: float | None
+    actual: float | None
+    surprise: float | None
+    status: str
+
+
+class NewsRiskOut(BaseModel):
+    level: str
+    size_multiplier: float
+    blocked: bool
+    reasons: list[str]
+
+
+class RecentNewsItemOut(BaseModel):
+    news_event_id: int
+    headline: str
+    source: str
+    published_at: datetime
+    sentiment: str
+    importance: str
+    direction: str
+    impact: str
+    confidence: float
+    is_direct: bool
+
+
+class NewsMomentumOut(BaseModel):
+    count_lookback: int
+    count_recent: int
+    high_importance_count: int
+    distinct_sources: int
+    sentiment_mix: dict
+    level: str
+
+
+class SentimentShiftOut(BaseModel):
+    recent_bullish_share: float | None
+    baseline_bullish_share: float | None
+    recent_count: int
+    baseline_count: int
+    shift: float | None
+    detected: bool
+
+
+class AssetNewsContextOut(BaseModel):
+    asset_id: int
+    asset_symbol: str
+    recent_news: list[RecentNewsItemOut]
+    momentum: NewsMomentumOut | None
+    sentiment_shift: SentimentShiftOut | None
+    avg_source_quality: float | None
 
 
 class PatternOut(BaseModel):

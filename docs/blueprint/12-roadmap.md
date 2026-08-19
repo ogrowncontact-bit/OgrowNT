@@ -946,6 +946,135 @@ foram evitadas deliberadamente (campos derivados por leitura, não
 persistidos, como o resto do padrão semanal já estabelecido) ou já cabiam
 em colunas/tabelas existentes.
 
+## "PROMPT 6" — News Intelligence + Sentiment + Macro Events (pós-Fase 7) — **status: implementada e validada nesta sessão**
+
+O "PROMPT 6" pede uma camada de News Intelligence completa: entity
+extraction, asset mapping direto/indireto, deduplicação, novelty,
+importância, sentiment (separado de direção), macro calendar com
+surpresa, event reaction memory, News Risk Guard integrado ao Risk
+Engine, dashboard, 6 workers, e a regra absoluta de que notícia nunca
+executa uma trade. O que já existia (Fase 4 real): `NewsProvider`
+abstrato + `MockNewsProvider`, tabelas `news_events`/`news_impact`,
+interpretação LLM por (notícia, ativo) em `packages/llm/news_intelligence.py`,
+e `news` já como input real (não neutro) do Opportunity Scoring. Era uma
+base fina — a maior parte do spec (48 secções) era genuinamente nova,
+não uma revisão de algo já construído:
+
+- [x] **Schema** (migração `0011`) — `news_events` ganhou
+      `source_type/source_quality_score/retrieved_at/language/entities/
+      novelty_score/cluster_id/source_consensus_score/
+      has_conflicting_sources/sentiment/sentiment_confidence/importance/
+      impact_score`; `news_impact` ganhou `is_direct`; `category` foi
+      **alargado** (nunca renomeado) com as categorias do §9; novas
+      tabelas `macro_events` e `event_reactions`. Colunas NOT NULL numa
+      tabela já populada usaram `server_default` para backfill honesto
+      (`unknown`/`low`/0, nunca um valor real fabricado para dados
+      anteriores a esta feature), removido depois — mesmo idioma da
+      migração `0010`
+- [x] **Macro Calendar** (§15-17, §35) — `packages/data/connectors/macro/`
+      novo, mesmo padrão de `{market,news}`: `MacroCalendarProvider` +
+      `MockMacroCalendarProvider` (templates recorrentes determinísticos
+      por nome+ciclo; `actual` só existe para ocorrências já passadas —
+      nunca inventado antecipadamente). `apps/worker/macro_agent.py` faz
+      upsert por `(event, country, scheduled_at)` e calcula `surprise =
+      actual - forecast` só no momento em que `actual` aparece
+- [x] **Pipeline DET completo** (§4-14, §23-24) — novo pacote
+      `packages/quant/news/`: `entities.py` (dicionário curado, nunca
+      inventa uma entidade), `asset_mapping.py` (direto vs indireto,
+      direto nunca rebaixado), `sentiment.py` (léxico financeiro DET,
+      5 níveis + `UNKNOWN` honesto quando não há sinal — **deliberadamente
+      independente** de `NewsImpact.direction`, o único passo com LLM
+      em toda a stack, ver §11), `importance.py`, `novelty.py`,
+      `dedup.py` (clustering por similaridade de Jaccard + consenso/
+      conflito entre fontes), `impact_score.py` (pesos configuráveis em
+      `config/news_weights.yaml` novo), `momentum.py`, `context.py`
+      (`NewsContextEngine`)
+- [x] **Event Reaction Memory** (§19/§30-32) — `event_reaction.py`'s
+      `compute_event_reactions()`, recomputação total a partir de
+      movimentos de preço reais (`packages/shared/market_data.py`'s
+      `get_close_at_or_after()` novo), mesmo padrão de
+      `StrategyPerformance`. `MIN_SAMPLES_FOR_REACTION=5` antes de
+      qualquer estatística ser mostrada — nunca uma amostra de 2 a
+      parecer confiável
+- [x] **News Risk Guard soberano ao Risk Engine** (§17/§26/§43/§48 — o
+      critério de conclusão mais crítico do prompt) —
+      `packages/risk/news_guard.py` novo:
+      NORMAL/ELEVATED/HIGH/CRITICAL a partir de eventos macro
+      high/critical iminentes + notícias high/critical recentes,
+      multiplicadores configuráveis (`news_risk_multipliers` em
+      `config/risk_limits.yaml`, mesmo padrão de
+      `safety_belt_multipliers`). Passo 11 novo em
+      `packages/risk/engine.py`, na mesma posição estrutural que
+      Strategy Health — só pode reduzir o tamanho aprovado ou bloquear,
+      nunca aprovar sozinho. Verificado estruturalmente
+      (`tests/test_news_simulation.py` percorre a AST de todo
+      `packages/quant/news/` e falha se algo importar
+      `packages.execution` ou referenciar `RiskVerdict`/`RiskDecision`)
+- [x] **Contradição notícia vs. técnico reduz confidence, nunca bloqueia
+      sozinha** (§27-28) — `compute_opportunity_confidence()` ganhou
+      `news_signals`: quando a leitura de notícia mais impactante
+      contradiz a direção técnica do sinal, `confidence` desce
+      (`_NEWS_CONFLICT_CONFIDENCE=0.4`, mesma magnitude que
+      `_INSUFFICIENT_HISTORY_CONFIDENCE` já existente) — nunca vira o
+      sinal, nunca gera uma oportunidade sozinha
+- [x] **Workers como cadências, não 6 processos** — divergência
+      deliberada e documentada (não silenciosa): esta base de código
+      inteira (Fases 1-7) já usa um processo com múltiplas cadências
+      independentes, nunca um processo por agente. Ingestão + análise
+      DET + deteção de evento são um único passe sequencial sobre o
+      mesmo item (`apps/worker/news_agent.py`) — separá-los seria só
+      round-trips redundantes à BD sem diferença de comportamento.
+      `MacroCalendarWorker` e `SentimentWorker` (shift) ganharam cada um
+      a sua própria cadência nova (`macro_calendar_interval_seconds`,
+      `sentiment_shift_interval_seconds`); `NewsLearningWorker`
+      (`compute_event_reactions`) partilha a cadência batch/lenta já
+      existente do Research Agent
+- [x] **Alertas** (§36) — `CRITICAL_NEWS`/`CONFLICTING_INFORMATION`
+      (`news_agent.py`), `HIGH_IMPACT_EVENT`/`MACRO_SURPRISE`
+      (`macro_agent.py`), `SENTIMENT_SHIFT` (`sentiment_agent.py`, com
+      cooldown de 6h para não repetir o mesmo shift em curso a cada
+      ciclo) — todos categoria `news` nova em `alerts.category`.
+      `NEWS_FEED_FAILURE` coberto pelo `CadenceFailureTracker` genérico
+      já existente, mesma cobertura que qualquer outra cadência
+- [x] **Dashboard "News Intelligence Center"** (§33-34/44) — novo
+      `apps/dashboard/components/NewsIntelligenceCenter.tsx`: Event Risk
+      (badge), Market Sentiment agregado, News Momentum, Source
+      Quality, Upcoming Macro Events (tabela), Latest Events
+      (enriquecido com sentiment/importance/consenso/is_direct). Novos
+      endpoints `GET /api/news/risk`, `GET /api/macro`, `GET
+      /api/news/context/{symbol}`; `GET /api/news` enriquecido
+- [x] 67 novos testes automatizados (494/494 no total da suite):
+      entity extraction + asset mapping (6), dedup + novelty + source
+      consensus (7), News Risk Guard NORMAL→CRITICAL (7), sentiment +
+      sentiment shift (7), importance + impact score + source quality
+      (8), macro provider determinismo (4), macro agent
+      upsert/surprise/alertas (6), pipeline de ingestão completo (4),
+      event reaction memory + gate de amostra mínima (3), sentiment
+      shift worker + cooldown (3), API (9), contradição notícia/técnico
+      na confidence (2), e a simulação completa do §42 (1) — notícia
+      normal → evento macro high iminente reduz o tamanho pelo
+      multiplicador exato configurado → sentiment shift detetado não
+      altera o tamanho sozinho → contradição técnico/notícia reduz
+      confidence → evento escala a critical → bloqueado — mais a prova
+      estrutural de que `packages/quant/news` nunca pode aprovar uma
+      trade
+- [x] **verificado ao vivo** contra Postgres real: worker real ingeriu
+      notícias com sentiment/importance/impact_score genuinamente
+      calculados, ingeriu o calendário macro mock com eventos
+      futuros sem `actual` e passados com `actual`/`surprise`
+      preenchidos; `GET /api/news/risk` devolveu um nível real
+      (`normal` sem eventos, escalando corretamente com um evento macro
+      simulado); dashboard testado num browser real (Playwright/
+      Chromium) — painel "News Intelligence Center" completo visível
+      com heatmap de sentimento, calendário macro e latest events reais.
+      `ruff`/`mypy`/`npm run lint`/`npm run build` limpos
+
+Divergência deliberada não alterada: os 4 documentos pedidos em §47
+(`docs/news-intelligence.md`, `docs/macro-events.md`, `docs/sentiment.md`,
+`docs/event-risk.md`) foram criados na raiz de `docs/`, como o próprio
+prompt nomeia explicitamente — fora de `docs/blueprint/`'s série numerada,
+já que o prompt deu caminhos exatos, ao contrário dos prompts anteriores.
+
 ## Evolução futura (fora de âmbito até validação completa)
 
 Live brokers, exchanges reais (crypto/forex/ações), ML avançado, deep learning,

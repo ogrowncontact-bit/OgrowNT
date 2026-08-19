@@ -33,12 +33,15 @@ def derive_decision_view(
     detail = sizing_check.detail if sizing_check else {}
     belt_multiplier = detail.get("belt_multiplier", 1.0)
     health_multiplier = detail.get("strategy_health_multiplier", 1.0)
+    news_risk_multiplier = detail.get("news_risk_multiplier", 1.0)
 
     reduction_reasons = []
     if belt_multiplier < 1.0:
         reduction_reasons.append("safety_belt_size_reduction")
     if health_multiplier < 1.0:
         reduction_reasons.append("strategy_health_size_reduction")
+    if news_risk_multiplier < 1.0:
+        reduction_reasons.append("news_risk_size_reduction")
 
     risk_amount = approved_size * abs(signal.entry_price - signal.stop_price) if approved_size is not None else None
 

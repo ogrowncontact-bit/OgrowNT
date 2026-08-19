@@ -57,6 +57,7 @@ def get_risk_state(
             "liquidity": asdict(limits.liquidity),
             "data_quality": asdict(limits.data_quality),
             "safety_belt_multipliers": asdict(limits.safety_belt_multipliers),
+            "news_risk_multipliers": asdict(limits.news_risk_multipliers),
         },
         recent_decisions=decisions,
     )

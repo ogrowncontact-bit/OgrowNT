@@ -63,6 +63,16 @@ class Settings(BaseSettings):
     # News Intelligence Agent cadence — independent of strategy_interval_seconds.
     news_interval_seconds: int = 900
 
+    macro_calendar_provider: str = "mock"
+    # MacroCalendarWorker cadence (packages/data/connectors/macro) — slower
+    # than news_interval_seconds since a macro calendar changes far less
+    # often than headlines do.
+    macro_calendar_interval_seconds: int = 1800
+    # SentimentWorker's aggregate SENTIMENT_SHIFT cadence (packages/quant/
+    # news/sentiment.py's compute_sentiment_shift) — a per-asset rollup, not
+    # per-item, so it runs on its own cadence rather than per ingested item.
+    sentiment_shift_interval_seconds: int = 900
+
     # Research Agent cadence (packages/quant/learning/research.py) — scans
     # pattern_performance/strategy_performance for underperformers and
     # proposes+validates learned_rules. Deliberately much longer than the

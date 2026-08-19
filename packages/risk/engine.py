@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 from packages.portfolio.state import PortfolioState
 from packages.risk.config import RiskLimits, load_risk_limits
 from packages.risk.correlation_guard import check_correlation_guard
+from packages.risk.news_guard import evaluate_news_risk
 from packages.risk.position_sizing import calculate_position_size
 from packages.risk.safety_belt import evaluate_safety_belt, policy_for, tier_meets_floor
 from packages.risk.strategy_health import classify_strategy_health
@@ -213,9 +214,23 @@ def evaluate_signal(
         )
     ok("strategy_health", {"health_score": health_score, "status": health_verdict.status})
 
+    # 11. News Risk Guard (Prompt 6 §17/§26) — pre-event macro risk and
+    # recent critical/high-importance news. This is the News Intelligence
+    # layer's ONLY influence on a trade: a size reduction or a block,
+    # exactly like every other check above, never an execution of its own
+    # (Prompt 6 §2/§43 — the Risk Engine remains sovereign).
+    news_verdict = evaluate_news_risk(db, limits)
+    if news_verdict.blocked:
+        return blocked(
+            "news_risk",
+            {"level": news_verdict.level, "reasons": news_verdict.reasons},
+            "news_risk_critical",
+        )
+    ok("news_risk", {"level": news_verdict.level, "reasons": news_verdict.reasons})
+
     # Position sizing — always the smallest of every applicable cap, then
-    # scaled down further by the current safety belt's multiplier and, if
-    # the strategy is degraded, by the strategy health multiplier too.
+    # scaled down further by the current safety belt's multiplier, the
+    # strategy health multiplier, and the news risk multiplier.
     sizing = calculate_position_size(
         capital=equity,
         entry_price=signal.entry_price,
@@ -226,7 +241,9 @@ def evaluate_signal(
         correlation_headroom_pct=correlation_headroom_pct,
         limits=limits,
     )
-    approved_quantity = sizing.quantity * policy.size_multiplier * health_verdict.size_multiplier
+    approved_quantity = (
+        sizing.quantity * policy.size_multiplier * health_verdict.size_multiplier * news_verdict.size_multiplier
+    )
 
     if approved_quantity <= 0:
         return blocked("position_sizing", {"sizing": sizing.detail}, "zero_size")
@@ -237,6 +254,7 @@ def evaluate_signal(
             "binding_constraint": sizing.binding_constraint,
             "belt_multiplier": policy.size_multiplier,
             "strategy_health_multiplier": health_verdict.size_multiplier,
+            "news_risk_multiplier": news_verdict.size_multiplier,
         },
     )
 

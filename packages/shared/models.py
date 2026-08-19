@@ -10,9 +10,8 @@ that uses them:
   Phase 5: strategy performance/health, trade journal, learned rules, market memory
   Phase 6: backtest runs
   Post-Phase-7 ("Prompt 2" market data engine): market_events
-macro_events (from the blueprint schema) is not yet implemented — out of
-scope for every phase planned so far; a macro economic calendar is a
-natural but separate future addition.
+  Post-Phase-7 ("Prompt 6" news intelligence): macro_events, event_reactions,
+    plus the News Intelligence columns added to news_events/news_impact
 """
 from datetime import datetime, timezone
 
@@ -172,7 +171,7 @@ class Alert(Base):
     __table_args__ = (
         CheckConstraint("severity IN ('info','warning','critical')", name="ck_alerts_severity"),
         CheckConstraint(
-            "category IN ('trade','risk','loss','emergency','learning','system','market')",
+            "category IN ('trade','risk','loss','emergency','learning','system','market','news')",
             name="ck_alerts_category",
         ),
     )
@@ -453,15 +452,26 @@ class NewsEvent(Base):
     """A real news item from a configured source — never fabricated. See
     docs/blueprint/04-agents-architecture.md#agent-03: ingestion is
     deterministic (packages/data/connectors/news), interpretation (below,
-    NewsImpact) is the only LLM-touched part of this table pair.
+    NewsImpact) is the only LLM-touched part of this table pair. The
+    columns below `created_at` are "Prompt 6" News Intelligence additions —
+    all computed deterministically (packages/quant/news), never by the LLM.
     """
 
     __tablename__ = "news_events"
     __table_args__ = (
         CheckConstraint(
             "category IN ('central_bank','inflation','employment','gdp','geopolitics',"
-            "'regulation','crypto','earnings','m_and_a','other')",
+            "'regulation','crypto','earnings','m_and_a','interest_rate','cpi','ppi','legal',"
+            "'supply_chain','commodity','crypto_regulation','etf','security_breach','banking',"
+            "'currency','energy','other')",
             name="ck_news_events_category",
+        ),
+        CheckConstraint(
+            "importance IN ('low','medium','high','critical')", name="ck_news_events_importance"
+        ),
+        CheckConstraint(
+            "sentiment IN ('very_bullish','bullish','neutral','bearish','very_bearish','unknown')",
+            name="ck_news_events_sentiment",
         ),
     )
 
@@ -473,6 +483,35 @@ class NewsEvent(Base):
     raw_url: Mapped[str | None] = mapped_column(String)
     category: Mapped[str | None] = mapped_column(String)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+    # -- "Prompt 6" News Intelligence -------------------------------------
+    source_type: Mapped[str | None] = mapped_column(String)
+    source_quality_score: Mapped[float] = mapped_column(Float, default=50.0, nullable=False)
+    retrieved_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, nullable=False)
+    language: Mapped[str] = mapped_column(String, default="en", nullable=False)
+    # [{"type": "COMPANY"|"CURRENCY"|"CENTRAL_BANK"|..., "value": "..."}]
+    # (packages/quant/news/entities.py) — a curated-dictionary match, never
+    # an invented entity ("no hallucinated data" applied to NER too).
+    entities: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
+    # 100 for a genuinely new cluster, decaying toward 0 for near-duplicate
+    # repeats of the same event (packages/quant/news/novelty.py).
+    novelty_score: Mapped[float] = mapped_column(Float, default=100.0, nullable=False)
+    # Self-referencing: the id of the earliest event in this item's dedup
+    # cluster (packages/quant/news/dedup.py) — equal to `id` for a canonical/
+    # unclustered item, so every row always has a cluster to query by.
+    cluster_id: Mapped[int | None] = mapped_column(ForeignKey("news_events.id"))
+    # 0-100: rises with more independent (distinct-source) members of this
+    # item's cluster reporting the same sentiment; distinct from just
+    # "N sites copied the same wire story" (Prompt 6 §23).
+    source_consensus_score: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    has_conflicting_sources: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # Tone of the headline/body itself (packages/quant/news/sentiment.py, a
+    # DET lexicon scorer) — deliberately independent of NewsImpact.direction
+    # (the LLM's price-impact call): Prompt 6 §11, "SENTIMENT NÃO É DIREÇÃO".
+    sentiment: Mapped[str] = mapped_column(String, default="unknown", nullable=False)
+    sentiment_confidence: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    importance: Mapped[str] = mapped_column(String, default="low", nullable=False)
+    impact_score: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
 
 
 class NewsImpact(Base):
@@ -498,8 +537,68 @@ class NewsImpact(Base):
     horizon_hours: Mapped[float] = mapped_column(Float, nullable=False)
     rationale: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    # True when the news names this asset (or its issuer) directly; False
+    # when the link runs through a sector/macro driver (e.g. a Fed decision
+    # affecting NASDAQ) — Prompt 6 §8. Computed by
+    # packages/quant/news/asset_mapping.py, independent of the LLM call.
+    is_direct: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
-    news_event: Mapped["NewsEvent"] = relationship()
+    news_event: Mapped["NewsEvent"] = relationship(foreign_keys=[news_event_id])
+    asset: Mapped["Asset"] = relationship()
+
+
+class MacroEvent(Base):
+    """Scheduled macroeconomic calendar entry — Prompt 6 §15-17.
+    packages/data/connectors/macro provides these the same honest-mock way
+    packages/data/connectors/{market,news} do; `actual`/`surprise` are only
+    ever filled in once the real event has genuinely occurred (§16 —
+    "Não assumir automaticamente direção do mercado").
+    """
+
+    __tablename__ = "macro_events"
+    __table_args__ = (
+        CheckConstraint("importance IN ('low','medium','high','critical')", name="ck_macro_events_importance"),
+        CheckConstraint("status IN ('scheduled','released')", name="ck_macro_events_status"),
+        UniqueConstraint("event", "country", "scheduled_at", name="uq_macro_events_event_country_scheduled_at"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    event: Mapped[str] = mapped_column(String, nullable=False)
+    country: Mapped[str] = mapped_column(String, nullable=False)
+    currency: Mapped[str | None] = mapped_column(String)
+    scheduled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    importance: Mapped[str] = mapped_column(String, nullable=False)
+    forecast: Mapped[float | None] = mapped_column(Float)
+    previous: Mapped[float | None] = mapped_column(Float)
+    actual: Mapped[float | None] = mapped_column(Float)
+    surprise: Mapped[float | None] = mapped_column(Float)
+    status: Mapped[str] = mapped_column(String, default="scheduled", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
+class EventReaction(Base):
+    """Event Reaction Memory (Prompt 6 §19/§30-31): "how does this category
+    of event usually move this asset?" — recomputed by
+    packages/quant/news/event_reaction.py from real historical price moves
+    following past news_events/macro_events, the same rolling-recompute
+    pattern as StrategyPerformance (packages/quant/learning/strategy_stats.py).
+    `confidence` (not just sample_size) is what gates whether the dashboard/
+    scoring ever surfaces this — "só mostrar estatísticas quando a amostra
+    for suficiente" (§19).
+    """
+
+    __tablename__ = "event_reactions"
+    __table_args__ = (UniqueConstraint("event_category", "asset_id", name="uq_event_reactions_category_asset"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    event_category: Mapped[str] = mapped_column(String, nullable=False)
+    asset_id: Mapped[int] = mapped_column(ForeignKey("assets.id"), nullable=False)
+    as_of: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, nullable=False)
+    sample_size: Mapped[int] = mapped_column(default=0, nullable=False)
+    avg_reaction_pct: Mapped[float | None] = mapped_column(Float)
+    positive_rate: Mapped[float | None] = mapped_column(Float)
+    confidence: Mapped[float | None] = mapped_column(Float)
+
     asset: Mapped["Asset"] = relationship()
 
 
