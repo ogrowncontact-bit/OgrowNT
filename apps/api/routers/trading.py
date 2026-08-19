@@ -6,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from apps.api.deps import get_current_admin, get_session
+from apps.api.risk_view import derive_decision_view
 from apps.api.schemas import (
     EvidenceItemOut,
     OpportunityDetailOut,
@@ -168,13 +169,18 @@ def get_trade_why(
             )
 
         decision = db.query(RiskDecision).filter(RiskDecision.signal_id == position.signal_id).first()
-        if decision:
+        if decision and signal:
             checks = db.query(RiskCheck).filter(RiskCheck.signal_id == position.signal_id).order_by(RiskCheck.id).all()
+            view = derive_decision_view(
+                approved=decision.approved, reason=decision.reason, approved_size=decision.approved_size,
+                checks=checks, signal=signal,
+            )
             risk_decision_out = RiskDecisionOut(
                 signal_id=decision.signal_id, asset_symbol=asset.symbol, strategy_code=strategy.code,
                 approved=decision.approved, approved_size=decision.approved_size, reason=decision.reason,
                 safety_belt_level=decision.safety_belt_level, created_at=decision.created_at,
                 checks=[RiskCheckOut(check_name=c.check_name, passed=c.passed, detail=c.detail) for c in checks],
+                **view,
             )
 
     return TradeWhyOut(trade=trade_out, position=position_out, opportunity=opportunity_out, risk_decision=risk_decision_out)

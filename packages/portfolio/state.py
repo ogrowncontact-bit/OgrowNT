@@ -34,7 +34,10 @@ class PortfolioState:
     exposure_pct: float
     daily_pnl: float
     daily_loss_pct: float  # 0 unless daily_pnl is negative — see safety_belt.py
+    weekly_pnl: float
     weekly_loss_pct: float
+    monthly_pnl: float
+    monthly_loss_pct: float
     drawdown_pct: float
     unrealized_pnl: float
     open_positions: list[Position]
@@ -111,6 +114,14 @@ def compute_state(db: Session, cash: float | None = None, timeframe: str = "1m")
     weekly_pnl = equity - equity_week_start
     weekly_loss_pct = max(0.0, -weekly_pnl) / equity_week_start * 100 if equity_week_start > 0 else 0.0
 
+    # Monthly window: a fixed 30-day lookback (same approach as weekly's
+    # fixed 7-day lookback), not calendar-month-to-date — simpler and
+    # avoids a discontinuity on the 1st where "monthly" loss would
+    # otherwise reset to near-zero mid-drawdown.
+    equity_month_start = _equity_n_days_ago(db, now, 30)
+    monthly_pnl = equity - equity_month_start
+    monthly_loss_pct = max(0.0, -monthly_pnl) / equity_month_start * 100 if equity_month_start > 0 else 0.0
+
     return PortfolioState(
         ts=now,
         cash=cash,
@@ -118,7 +129,10 @@ def compute_state(db: Session, cash: float | None = None, timeframe: str = "1m")
         exposure_pct=round(exposure_pct, 4),
         daily_pnl=round(daily_pnl, 2),
         daily_loss_pct=round(daily_loss_pct, 4),
+        weekly_pnl=round(weekly_pnl, 2),
         weekly_loss_pct=round(weekly_loss_pct, 4),
+        monthly_pnl=round(monthly_pnl, 2),
+        monthly_loss_pct=round(monthly_loss_pct, 4),
         drawdown_pct=round(drawdown_pct, 4),
         unrealized_pnl=round(unrealized_pnl, 2),
         open_positions=open_positions,

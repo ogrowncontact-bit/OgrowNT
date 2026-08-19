@@ -12,7 +12,15 @@ from sqlalchemy.orm import Session
 
 from packages.execution.adapters.base import ExecutionProvider, OrderRequest, Side
 from packages.portfolio.state import get_latest_cash, refresh_snapshot
-from packages.shared.models import Asset, Order, Position, Signal, Trade
+from packages.shared.models import Asset, Order, Position, Signal, SystemState, Trade
+
+
+def _current_belt_level(db: Session) -> str:
+    """The scan_monitor cadence (apps/worker/main.py) updates system_state
+    every cycle before the strategy cadence that can lead to a fill, so this
+    is always the real current level — never the refresh_snapshot() default."""
+    state = db.get(SystemState, True)
+    return state.safety_belt_level if state is not None else "normal"
 
 
 def open_position(db: Session, provider: ExecutionProvider, *, signal: Signal, asset: Asset, quantity: float) -> Position | None:
@@ -62,7 +70,7 @@ def open_position(db: Session, provider: ExecutionProvider, *, signal: Signal, a
 
     notional = result.filled_price * quantity
     new_cash = get_latest_cash(db) - notional - (result.fees or 0.0)
-    refresh_snapshot(db, cash=new_cash)
+    refresh_snapshot(db, cash=new_cash, safety_belt_level=_current_belt_level(db))
 
     return position
 
@@ -122,6 +130,6 @@ def close_position(db: Session, provider: ExecutionProvider, position: Position,
 
     notional_returned = position.entry_price * position.size
     new_cash = get_latest_cash(db) + notional_returned + pnl
-    refresh_snapshot(db, cash=new_cash)
+    refresh_snapshot(db, cash=new_cash, safety_belt_level=_current_belt_level(db))
 
     return trade

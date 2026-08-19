@@ -11,9 +11,11 @@ import {
   getNews,
   getOpportunities,
   getPortfolio,
+  getPortfolioExposure,
   getPositions,
   getPromotionCheck,
   getRegimes,
+  getRiskState,
   getStrategies,
   getStrategyLearning,
   getSystemStatus,
@@ -22,6 +24,7 @@ import {
 } from "@/lib/api";
 import { StatCard } from "@/components/StatCard";
 import { RiskBadge } from "@/components/RiskBadge";
+import { RiskHeatmap } from "@/components/RiskHeatmap";
 import { RegimeBadge } from "@/components/RegimeBadge";
 import { TierBadge } from "@/components/TierBadge";
 import { LifecycleBadge } from "@/components/LifecycleBadge";
@@ -62,7 +65,7 @@ export default async function DashboardPage() {
   const cookieStore = await cookies();
   const token = cookieStore.get("ogrownt_token")?.value ?? "";
 
-  const [health, status, portfolio, assets, positions, opportunities, regimes, trades, news, strategyLearning, tradeJournal, learnedRules, alerts, strategies, marketOverview, marketEvents] =
+  const [health, status, portfolio, assets, positions, opportunities, regimes, trades, news, strategyLearning, tradeJournal, learnedRules, alerts, strategies, marketOverview, marketEvents, portfolioExposure, riskState] =
     await Promise.all([
       getHealth(),
       getSystemStatus(token),
@@ -80,6 +83,8 @@ export default async function DashboardPage() {
       getStrategies(token),
       getMarketOverview(token),
       getMarketEvents(token, 8),
+      getPortfolioExposure(token),
+      getRiskState(token, 10),
     ]);
 
   const [backtests, promotionChecks, analytics] = await Promise.all([
@@ -132,15 +137,88 @@ export default async function DashboardPage() {
 
       <section className="mb-6 rounded-lg border border-base-700 bg-base-900 p-4">
         <div className="mb-3 flex items-center justify-between">
-          <p className="text-[11px] uppercase tracking-wider text-ink-500">Risk State</p>
+          <p className="text-[11px] uppercase tracking-wider text-ink-500">Risk Center</p>
           <RiskBadge level={status?.safety_belt_level ?? portfolio?.safety_belt_level ?? "normal"} />
         </div>
-        <div className="flex items-center justify-between">
+        <div className="mb-3 flex items-center justify-between">
           <p className="text-xs text-ink-500">
             Trading enabled: {status?.trading_enabled === false ? "no (kill switch)" : "yes"}
           </p>
           <KillSwitchButton tradingEnabled={status?.trading_enabled !== false} />
         </div>
+        <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-4">
+          <StatCard
+            label="Daily P&L"
+            value={portfolio ? eur(portfolio.daily_pnl) : "—"}
+            tone={dailyPnl > 0 ? "positive" : dailyPnl < 0 ? "negative" : "default"}
+          />
+          <StatCard
+            label="Weekly P&L"
+            value={portfolio ? eur(portfolio.weekly_pnl) : "—"}
+            tone={
+              portfolio && portfolio.weekly_pnl > 0 ? "positive" : portfolio && portfolio.weekly_pnl < 0 ? "negative" : "default"
+            }
+          />
+          <StatCard
+            label="Monthly P&L"
+            value={portfolio ? eur(portfolio.monthly_pnl) : "—"}
+            tone={
+              portfolio && portfolio.monthly_pnl > 0 ? "positive" : portfolio && portfolio.monthly_pnl < 0 ? "negative" : "default"
+            }
+          />
+          <StatCard label="Available Cash" value={portfolio ? eur(portfolio.cash) : "—"} />
+        </div>
+        <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-4">
+          <StatCard label="Drawdown" value={portfolio ? `${portfolio.drawdown_pct.toFixed(2)}%` : "—"} />
+          <StatCard label="Exposure" value={portfolio ? `${portfolio.exposure_pct.toFixed(2)}%` : "—"} />
+          <StatCard label="Weekly Loss" value={portfolio ? `${portfolio.weekly_loss_pct.toFixed(2)}%` : "—"} />
+          <StatCard label="Monthly Loss" value={portfolio ? `${portfolio.monthly_loss_pct.toFixed(2)}%` : "—"} />
+        </div>
+        <p className="mb-2 text-[11px] uppercase tracking-wider text-ink-500">
+          Portfolio Risk — Concentration Heatmap
+        </p>
+        {portfolioExposure ? (
+          <RiskHeatmap
+            byAsset={portfolioExposure.by_asset}
+            byStrategy={portfolioExposure.by_strategy}
+            byDirection={portfolioExposure.by_direction}
+            correlations={portfolioExposure.correlations}
+          />
+        ) : (
+          <p className="text-xs text-ink-500">DATA_UNAVAILABLE</p>
+        )}
+        {riskState && riskState.recent_decisions.length > 0 && (
+          <>
+            <p className="mb-2 mt-4 text-[11px] uppercase tracking-wider text-ink-500">
+              Recent Risk Decisions ({riskState.recent_decisions.length})
+            </p>
+            <div className="space-y-1.5">
+              {riskState.recent_decisions.slice(0, 6).map((d) => (
+                <div
+                  key={d.signal_id}
+                  className="flex items-center justify-between rounded border border-base-700 px-2 py-1.5 text-xs"
+                >
+                  <span className="text-ink-100">
+                    {d.asset_symbol} · {d.strategy_code}
+                  </span>
+                  <span
+                    className={
+                      d.decision === "approved"
+                        ? "text-signal-green"
+                        : d.decision === "reduced"
+                          ? "text-signal-yellow"
+                          : "text-signal-red"
+                    }
+                    title={d.reasons.join("; ") || d.reason}
+                  >
+                    {d.decision.toUpperCase()}
+                    {d.decision === "blocked" ? ` (${d.reason})` : ""}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
       </section>
 
       <section className="mb-6 rounded-lg border border-base-700 bg-base-900 p-4">

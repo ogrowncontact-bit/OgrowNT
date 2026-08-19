@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 
 from packages.portfolio.state import PortfolioState
 from packages.risk.engine import SignalForRisk, evaluate_signal
-from packages.shared.models import Asset, Position, Signal, StrategyRow, SystemState
+from packages.shared.models import Asset, Position, Signal, StrategyPerformance, StrategyRow, SystemState
 
 NOW = datetime.now(timezone.utc)
 
@@ -10,7 +10,8 @@ NOW = datetime.now(timezone.utc)
 def _portfolio_state(**overrides) -> PortfolioState:
     base = dict(
         ts=NOW, cash=10000, equity=10000, exposure_pct=0.0, daily_pnl=0.0,
-        daily_loss_pct=0.0, weekly_loss_pct=0.0, drawdown_pct=0.0, unrealized_pnl=0.0, open_positions=[],
+        daily_loss_pct=0.0, weekly_pnl=0.0, weekly_loss_pct=0.0, monthly_pnl=0.0, monthly_loss_pct=0.0,
+        drawdown_pct=0.0, unrealized_pnl=0.0, open_positions=[],
     )
     base.update(overrides)
     return PortfolioState(**base)
@@ -31,8 +32,8 @@ def _signal_for_risk(db_session, asset, **overrides) -> SignalForRisk:
     db_session.commit()
 
     base = dict(
-        signal_id=signal_row.id, asset_id=asset.id, direction="long", entry_price=100.0, stop_price=95.0,
-        target_price=115.0, risk_reward=3.0, confidence=0.9, volatility_factor=1.0,
+        signal_id=signal_row.id, asset_id=asset.id, strategy_id=strategy.id, direction="long", entry_price=100.0,
+        stop_price=95.0, target_price=115.0, risk_reward=3.0, confidence=0.9, volatility_factor=1.0,
         data_quality="high", data_ts=NOW, tier="high_quality",
     )
     base.update(overrides)
@@ -135,6 +136,15 @@ def test_daily_loss_limit_blocks_new_trades(db_session):
     assert verdict.reason == "daily_loss_limit"
 
 
+def test_monthly_loss_limit_blocks_new_trades(db_session):
+    asset = _asset(db_session, "RISKMONTHLYLOSS")
+    sfr = _signal_for_risk(db_session, asset)
+    state = _portfolio_state(monthly_loss_pct=10.5)  # above max_monthly_loss_pct(10)
+    verdict = evaluate_signal(db_session, sfr, state, SystemState(id=True, trading_enabled=True))
+    assert not verdict.approved
+    assert verdict.reason == "monthly_loss_limit"
+
+
 def test_defensive_belt_rejects_below_high_quality(db_session):
     asset = _asset(db_session, "RISKBELT")
     sfr = _signal_for_risk(db_session, asset, tier="possible")
@@ -153,6 +163,39 @@ def test_emergency_belt_blocks_all_new_trades(db_session):
     verdict = evaluate_signal(db_session, sfr, state, SystemState(id=True, trading_enabled=True))
     assert not verdict.approved
     assert verdict.reason == "safety_belt_emergency"
+
+
+def test_degraded_strategy_health_reduces_size_not_blocks(db_session):
+    # Both signals share the same (reused-by-code) strategy -- the point is
+    # comparing the same strategy's sizing before vs after its health_score
+    # drops into the degraded band, not two different strategies.
+    baseline_sfr = _signal_for_risk(db_session, _asset(db_session, "RISKDEGRADEDBASE"))
+    baseline = evaluate_signal(db_session, baseline_sfr, _portfolio_state(), SystemState(id=True, trading_enabled=True))
+    assert baseline.approved and baseline.approved_quantity is not None
+
+    db_session.add(StrategyPerformance(strategy_id=baseline_sfr.strategy_id, window_trades=20, total_trades=20, health_score=40.0))
+    db_session.commit()
+
+    degraded_sfr = _signal_for_risk(db_session, _asset(db_session, "RISKDEGRADEDSTRAT"))
+    verdict = evaluate_signal(db_session, degraded_sfr, _portfolio_state(), SystemState(id=True, trading_enabled=True))
+    assert verdict.approved
+    assert verdict.approved_quantity is not None
+    assert verdict.approved_quantity == baseline.approved_quantity * 0.5
+
+
+def test_quarantine_level_health_score_blocks_as_defense_in_depth(db_session):
+    # apps/worker/strategy_runner.py already filters lifecycle_stage=
+    # 'quarantine' strategies out before a signal is generated -- this
+    # exercises the Risk Engine's own independent defensive check on the
+    # same health_score threshold.
+    asset = _asset(db_session, "RISKQUARANTINESTRAT")
+    sfr = _signal_for_risk(db_session, asset)
+    db_session.add(StrategyPerformance(strategy_id=sfr.strategy_id, window_trades=20, total_trades=20, health_score=20.0))
+    db_session.commit()
+
+    verdict = evaluate_signal(db_session, sfr, _portfolio_state(), SystemState(id=True, trading_enabled=True))
+    assert not verdict.approved
+    assert verdict.reason == "strategy_degraded"
 
 
 def test_every_check_is_persisted_for_audit(db_session):

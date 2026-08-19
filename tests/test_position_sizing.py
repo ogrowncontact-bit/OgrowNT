@@ -6,6 +6,7 @@ from packages.risk.config import (
     PerTradeConfig,
     PortfolioLimitsConfig,
     RiskLimits,
+    SafetyBeltMultipliersConfig,
 )
 from packages.risk.position_sizing import calculate_position_size
 
@@ -16,10 +17,14 @@ LIMITS = RiskLimits(
         max_exposure_pct=60, max_single_asset_pct=15, max_correlated_cluster_pct=25, correlation_threshold=0.7
     ),
     loss_limits=LossLimitsConfig(
-        max_daily_loss_pct=3, max_weekly_loss_pct=6, max_strategy_drawdown_pct=10, max_portfolio_drawdown_pct=15
+        max_daily_loss_pct=3, max_weekly_loss_pct=6, max_monthly_loss_pct=10,
+        max_strategy_drawdown_pct=10, max_portfolio_drawdown_pct=15,
     ),
     liquidity=LiquidityConfig(max_spread_bps=50, min_orderbook_depth_multiple=3),
     data_quality=DataQualityConfig(max_staleness_seconds=120),
+    safety_belt_multipliers=SafetyBeltMultipliersConfig(
+        normal=1.0, caution=0.75, defensive=0.5, emergency=0.0, kill_switch=0.0
+    ),
 )
 
 

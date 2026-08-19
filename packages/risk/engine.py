@@ -20,7 +20,8 @@ from packages.risk.config import RiskLimits, load_risk_limits
 from packages.risk.correlation_guard import check_correlation_guard
 from packages.risk.position_sizing import calculate_position_size
 from packages.risk.safety_belt import evaluate_safety_belt, policy_for, tier_meets_floor
-from packages.shared.models import RiskCheck, SystemState
+from packages.risk.strategy_health import classify_strategy_health
+from packages.shared.models import RiskCheck, StrategyPerformance, SystemState
 from packages.shared.models import RiskDecision as RiskDecisionRow
 
 
@@ -28,6 +29,7 @@ from packages.shared.models import RiskDecision as RiskDecisionRow
 class SignalForRisk:
     signal_id: int
     asset_id: int
+    strategy_id: int
     direction: str
     entry_price: float
     stop_price: float
@@ -38,6 +40,16 @@ class SignalForRisk:
     data_quality: str
     data_ts: datetime
     tier: str
+
+
+def _latest_health_score(db: Session, strategy_id: int) -> float | None:
+    row = (
+        db.query(StrategyPerformance)
+        .filter(StrategyPerformance.strategy_id == strategy_id)
+        .order_by(StrategyPerformance.as_of.desc())
+        .first()
+    )
+    return row.health_score if row is not None else None
 
 
 @dataclass(frozen=True)
@@ -77,7 +89,7 @@ def evaluate_signal(
     limits = limits or load_risk_limits()
     checks: list[RiskCheckOutcome] = []
     belt = evaluate_safety_belt(portfolio_state, limits)
-    policy = policy_for(belt)
+    policy = policy_for(belt, limits)
 
     def blocked(name: str, detail: dict, reason: str) -> RiskVerdict:
         checks.append(RiskCheckOutcome(name, False, detail))
@@ -168,19 +180,42 @@ def evaluate_signal(
     # with docs/blueprint/00-overview.md's "no hallucinated data" rule.
     ok("liquidity", {"note": "spread/orderbook depth check pending a real market data provider"})
 
-    # 9. Daily / weekly loss limits
+    # 9. Daily / weekly / monthly loss limits — equity-based (includes
+    # unrealized P&L), not just closed-trade P&L, per docs/blueprint/
+    # 08-risk-engine.md.
     if portfolio_state.daily_loss_pct >= limits.loss_limits.max_daily_loss_pct:
         return blocked("daily_loss_limit", {"daily_loss_pct": portfolio_state.daily_loss_pct}, "daily_loss_limit")
     if portfolio_state.weekly_loss_pct >= limits.loss_limits.max_weekly_loss_pct:
         return blocked("weekly_loss_limit", {"weekly_loss_pct": portfolio_state.weekly_loss_pct}, "weekly_loss_limit")
-    ok("loss_limits", {"daily_loss_pct": portfolio_state.daily_loss_pct, "weekly_loss_pct": portfolio_state.weekly_loss_pct})
+    if portfolio_state.monthly_loss_pct >= limits.loss_limits.max_monthly_loss_pct:
+        return blocked("monthly_loss_limit", {"monthly_loss_pct": portfolio_state.monthly_loss_pct}, "monthly_loss_limit")
+    ok(
+        "loss_limits",
+        {
+            "daily_loss_pct": portfolio_state.daily_loss_pct,
+            "weekly_loss_pct": portfolio_state.weekly_loss_pct,
+            "monthly_loss_pct": portfolio_state.monthly_loss_pct,
+        },
+    )
 
-    # 10. Strategy drawdown — no closed-trade history yet per strategy
-    # (Strategy Memory arrives Phase 5). Same honest pass-through as liquidity.
-    ok("strategy_drawdown", {"note": "strategy performance tracking pending Phase 5"})
+    # 10. Strategy health — consults packages/quant/learning/strategy_stats.py's
+    # health_score (Phase 5). apps/worker/strategy_runner.py already filters
+    # lifecycle_stage='quarantine' strategies out before a signal reaches
+    # here; "quarantined" below is a defensive second check on the same
+    # threshold, not the primary enforcement point.
+    health_score = _latest_health_score(db, signal.strategy_id)
+    health_verdict = classify_strategy_health(health_score)
+    if health_verdict.blocked:
+        return blocked(
+            "strategy_health",
+            {"health_score": health_score, "status": health_verdict.status},
+            "strategy_degraded",
+        )
+    ok("strategy_health", {"health_score": health_score, "status": health_verdict.status})
 
     # Position sizing — always the smallest of every applicable cap, then
-    # scaled down further by the current safety belt's multiplier.
+    # scaled down further by the current safety belt's multiplier and, if
+    # the strategy is degraded, by the strategy health multiplier too.
     sizing = calculate_position_size(
         capital=equity,
         entry_price=signal.entry_price,
@@ -191,13 +226,18 @@ def evaluate_signal(
         correlation_headroom_pct=correlation_headroom_pct,
         limits=limits,
     )
-    approved_quantity = sizing.quantity * policy.size_multiplier
+    approved_quantity = sizing.quantity * policy.size_multiplier * health_verdict.size_multiplier
 
     if approved_quantity <= 0:
         return blocked("position_sizing", {"sizing": sizing.detail}, "zero_size")
     ok(
         "position_sizing",
-        {"quantity": approved_quantity, "binding_constraint": sizing.binding_constraint, "belt_multiplier": policy.size_multiplier},
+        {
+            "quantity": approved_quantity,
+            "binding_constraint": sizing.binding_constraint,
+            "belt_multiplier": policy.size_multiplier,
+            "strategy_health_multiplier": health_verdict.size_multiplier,
+        },
     )
 
     _persist(db, signal.signal_id, checks, approved=True, approved_size=approved_quantity, reason="approved", belt=belt)

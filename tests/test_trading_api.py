@@ -45,7 +45,13 @@ def _seed_trade(db_session, symbol: str):
         signal_id=signal.id, technical=90, pattern=50, regime_fit=100, historical_edge=50, liquidity=80,
         news=50, risk_reward=70, strategy_performance=50, final_score=85.0, tier="high_quality", notes={},
     ))
-    db_session.add(RiskCheck(signal_id=signal.id, check_name="risk_reward", passed=True, detail={}))
+    db_session.add(RiskCheck(signal_id=signal.id, check_name="risk_reward", passed=True, detail={"risk_reward": 3.0}))
+    db_session.add(
+        RiskCheck(
+            signal_id=signal.id, check_name="position_sizing", passed=True,
+            detail={"quantity": 1.0, "binding_constraint": "risk_budget", "belt_multiplier": 1.0, "strategy_health_multiplier": 1.0},
+        )
+    )
     db_session.add(RiskDecision(signal_id=signal.id, approved=True, approved_size=1.0, reason="approved", safety_belt_level="normal"))
     db_session.commit()
 
@@ -127,6 +133,10 @@ def test_trade_why_returns_full_audit_trail(client, db_session):
     assert body["opportunity"]["score"]["final_score"] == 85.0
     assert body["risk_decision"] is not None
     assert body["risk_decision"]["approved"] is True
+    assert body["risk_decision"]["decision"] == "approved"
+    assert body["risk_decision"]["reasons"] == []
+    assert body["risk_decision"]["risk_reward"] == 3.0
+    assert body["risk_decision"]["risk_amount"] == 1.0 * abs(100.0 - 95.0)
 
 
 def test_trade_why_404_for_unknown_trade(client, db_session):
@@ -157,5 +167,65 @@ def test_risk_state_reports_limits_and_recent_decisions(client, db_session):
     assert resp.status_code == 200
     body = resp.json()
     assert "per_trade" in body["limits"]
+    assert "safety_belt_multipliers" in body["limits"]
     assert isinstance(body["recent_decisions"], list)
     assert len(body["recent_decisions"]) > 0
+    decision = body["recent_decisions"][0]
+    assert decision["decision"] == "approved"
+    assert decision["reasons"] == []
+
+
+def test_risk_state_marks_reduced_and_blocked_decisions(client, db_session):
+    from apps.api.security import create_access_token
+
+    admin = db_session.query(AdminUser).first()
+    if admin is None:
+        admin = AdminUser(email="riskreduced@example.com", hashed_password=hash_password("x"))
+        db_session.add(admin)
+        db_session.commit()
+    token, _ = create_access_token(subject=admin.email)
+
+    asset = Asset(symbol="APIREDUCEDBLOCKED", asset_class="crypto", is_active=True)
+    strategy = StrategyRow(code="api_reduced_blocked", name="API Reduced", family="trend", version="1.0")
+    db_session.add_all([asset, strategy])
+    db_session.commit()
+
+    reduced_signal = Signal(
+        strategy_id=strategy.id, asset_id=asset.id, ts=datetime.now(timezone.utc), direction="long",
+        entry_price=100.0, stop_price=95.0, target_price=115.0, status="approved",
+    )
+    blocked_signal = Signal(
+        strategy_id=strategy.id, asset_id=asset.id, ts=datetime.now(timezone.utc), direction="long",
+        entry_price=100.0, stop_price=95.0, target_price=115.0, status="risk_rejected",
+    )
+    db_session.add_all([reduced_signal, blocked_signal])
+    db_session.commit()
+
+    db_session.add(RiskCheck(signal_id=reduced_signal.id, check_name="risk_reward", passed=True, detail={"risk_reward": 2.0}))
+    db_session.add(
+        RiskCheck(
+            signal_id=reduced_signal.id, check_name="position_sizing", passed=True,
+            detail={"quantity": 0.5, "binding_constraint": "risk_budget", "belt_multiplier": 0.5, "strategy_health_multiplier": 1.0},
+        )
+    )
+    db_session.add(RiskDecision(signal_id=reduced_signal.id, approved=True, approved_size=0.5, reason="approved", safety_belt_level="defensive"))
+
+    db_session.add(RiskCheck(signal_id=blocked_signal.id, check_name="daily_loss_limit", passed=False, detail={"daily_loss_pct": 5.0}))
+    db_session.add(RiskDecision(signal_id=blocked_signal.id, approved=False, approved_size=None, reason="daily_loss_limit", safety_belt_level="normal"))
+    db_session.commit()
+
+    resp = client.get("/api/risk?limit=50", headers={"Authorization": f"Bearer {token}"})
+    assert resp.status_code == 200
+    by_signal = {d["signal_id"]: d for d in resp.json()["recent_decisions"]}
+
+    reduced = by_signal[reduced_signal.id]
+    assert reduced["decision"] == "reduced"
+    assert "safety_belt_size_reduction" in reduced["reasons"]
+    assert reduced["risk_amount"] == 0.5 * abs(100.0 - 95.0)
+    assert reduced["position_size"] == 0.5
+
+    blocked = by_signal[blocked_signal.id]
+    assert blocked["decision"] == "blocked"
+    assert blocked["reasons"] == ["daily_loss_limit"]
+    assert blocked["risk_amount"] is None
+    assert blocked["position_size"] is None

@@ -818,6 +818,134 @@ Nenhuma `Opportunity` executa uma `Order` nesta fase (§29) — nada neste
 trabalho toca `packages/execution`; o pipeline continua a terminar em
 `OpportunityScore` persistido, exatamente como antes.
 
+## "PROMPT 4" — Risk Engine + Portfolio Intelligence (pós-Fase 7) — **status: implementada e validada nesta sessão**
+
+O "PROMPT 4" pede um Risk Engine independente com poder de veto sobre
+qualquer operação — já existente desde a Fase real 3 deste repositório
+(`packages/risk/engine.py`'s `evaluate_signal()`, um pipeline de decisão em
+10 passos com `RiskCheck`/`RiskDecision` persistidos para auditoria, 5
+Safety Belts com multiplicadores de tamanho, Position Sizing pela menor de 4
+margens, Correlation Guard com correlação de Pearson real, Kill Switch
+manual/automático nunca autolimpo, limites diário/semanal por equity — não
+só P&L de trades fechados). Analisado o spec ponto a ponto (secções 1-39)
+contra o código real, os gaps genuínos encontrados e corrigidos foram:
+
+- [x] **`refresh_snapshot()` não era genuinamente periódico** (§16) — o
+      próprio docstring do módulo (`packages/portfolio/state.py`) já
+      afirmava que o worker "chama-o na sua própria cadência para
+      equity/drawdown se manterem atuais mesmo entre fills", mas na
+      realidade só era chamado nos dois pontos de fill em
+      `packages/execution/order_manager.py` — nunca de forma independente
+      de uma ordem. `apps/worker/main.py` passou a chamá-lo a cada ciclo de
+      scan, logo a seguir a `update_safety_belt()`. **Bug relacionado
+      corrigido na mesma alteração**: nenhum dos dois call-sites de fill
+      alguma vez passava `safety_belt_level`, pelo que todo snapshot
+      persistido gravava silenciosamente `"normal"` independentemente do
+      estado de risco real do sistema — ambos os call-sites passaram a ler
+      `system_state.safety_belt_level` real antes de gravar
+- [x] **Strategy Health nunca chegava ao Risk Engine** (§20) — o passo 10
+      do pipeline (`engine.py`) ainda tinha o comentário honesto mas
+      desatualizado "strategy performance tracking pending Phase 5", apesar
+      da Fase 5 real (Learning Agent, `StrategyPerformance.health_score`,
+      quarentena) já estar implementada há muito nesta sessão. Novo módulo
+      `packages/risk/strategy_health.py` classifica
+      healthy/warning/degraded/quarantined a partir do mesmo
+      `health_score` e do mesmo limiar que a quarentena já usa
+      (`HEALTH_SCORE_QUARANTINE_THRESHOLD`); uma estratégia degradada tem o
+      tamanho reduzido a 0.5x, uma "quarentinada" é bloqueada — em defesa
+      adicional, já que `apps/worker/strategy_runner.py` filtra estratégias
+      em quarentena antes de gerar sinal, mas um módulo com poder de veto
+      nunca deve confiar apenas num filtro a montante
+- [x] **Multiplicadores dos Safety Belts estavam hardcoded em Python**
+      (§35, "Esses valores devem ser configuráveis") — nova secção
+      `safety_belt_multipliers` em `config/risk_limits.yaml`
+      (`SafetyBeltMultipliersConfig` em `packages/risk/config.py`);
+      `policy_for()` passou a ler o multiplicador da config, mantendo o
+      tier-floor/`allow_new_trades` de cada estado (comportamento
+      estrutural, não um número de risco) como estava
+- [x] **DEFENSIVE nunca reduzia — só bloqueava** (encontrado ao escrever a
+      simulação matemática do §37) — `evaluate_safety_belt()` ativava
+      DEFENSIVE exatamente no mesmo limiar (`daily_loss_pct >=
+      max_daily_loss_pct`) em que o passo 9 do `engine.py` já bloqueia
+      tudo — a ação "reduzir tamanho, exigir high_quality+" do estado
+      DEFENSIVE era código morto, coincidindo sempre com o bloqueio duro.
+      Corrigido para ativar a 70% do limite diário (o mesmo fator que
+      CAUTION já usa sobre o limite semanal), abrindo uma janela real onde
+      DEFENSIVE reduz sem bloquear — cada estado passou a ter mesmo uma
+      ação distinta, como o spec pede
+- [x] **P&L/perda mensal não existiam** (§16/§29) — `PortfolioState` ganhou
+      `weekly_pnl`/`monthly_pnl`/`monthly_loss_pct`, derivados por leitura
+      (via `_equity_n_days_ago(db, now, 30)`) tal como o semanal já era —
+      sem nova coluna na tabela `portfolio_snapshots`, mesma lógica que já
+      evitava redundância no semanal. Novo limite `max_monthly_loss_pct`
+      em `config/risk_limits.yaml`, com um passo extra no `engine.py` a
+      bloquear novas operações quando ultrapassado
+- [x] **`refresh_correlation_matrix()` nunca era chamado** — a função já
+      existia em `packages/risk/correlation_guard.py`, com o próprio
+      docstring a dizer que era "para o dashboard/audit trail", mas nenhum
+      código a chamava — a tabela `correlation_matrix` ficava sempre vazia.
+      Passou a ser chamada a cada ciclo de estratégia do worker
+      (`apps/worker/main.py`), alimentando agora o Risk Heatmap real
+- [x] **RiskDecision devolvia só um `reason`, nunca uma lista nem
+      `risk_amount`** (§25-26) — em vez de alterar o schema da tabela
+      (`reason` continua uma string singular, o pipeline já para no
+      primeiro bloqueio), `apps/api/risk_view.py`'s `derive_decision_view()`
+      deriva na camada de API um `decision` (`approved`/`reduced`/
+      `blocked`), uma lista `reasons`, e `risk_amount`/`position_size`/
+      `risk_reward` — o mesmo padrão de enriquecimento na API sem
+      renomear a tabela usado no `evidence`/`confidence` do "PROMPT 3".
+      `reduced` é um estado novo e real: aprovado mas com tamanho cortado
+      pelo multiplicador do belt e/ou da saúde da estratégia
+- [x] **Dashboard sem Risk Center nem Risk Heatmap** (§30-31) — só existia
+      um badge "Risk State" + botão do kill switch. Novo endpoint `GET
+      /api/portfolio/exposure` (exposição real por asset/estratégia/
+      direção a partir das posições abertas, mais a matriz de correlação
+      persistida) e `GET /api/portfolio` ganhou `weekly_pnl`/`monthly_pnl`.
+      Painel "Risk Center" expandido no dashboard: Risk State, Daily/
+      Weekly/Monthly P&L, Drawdown, Exposure, Available Cash, e um
+      `RiskHeatmap` novo (`apps/dashboard/components/RiskHeatmap.tsx`) —
+      células coloridas por concentração de asset/estratégia/direção e por
+      força da correlação — mais as decisões de risco recentes com o
+      `decision`/`reasons` novos
+- [x] **Divergências deliberadamente não alteradas**: `MIN_DATA_QUALITY`
+      do spec não ganhou um limiar numérico próprio — já é coberto por
+      `data_quality != "high"` mais `max_staleness_seconds`, dois sinais
+      reais em vez de um número inventado sem uma escala natural definida
+      pelo spec; `MAX_STRATEGY_EXPOSURE` não ganhou um campo de config
+      próprio — distinto de `max_strategy_drawdown_pct` (já existente, um
+      conceito diferente: drawdown da própria estratégia, não um teto de
+      exposição), decidir o valor certo exigiria um julgamento de produto
+      que o spec não define, ao contrário dos outros limites cujos valores
+      de exemplo já eram diretamente aproveitáveis
+- [x] 12 novos testes automatizados (427/427 no total da suite): saúde de
+      estratégia degradada reduz sem bloquear e nível de quarentena bloqueia
+      em defesa (2), multiplicador dos belts configurável (1), DEFENSIVE
+      ativa antes do bloqueio duro (1), limite mensal bloqueia (1), decisão
+      de risco "reduced"/"blocked" com `reasons`/`risk_amount` corretos via
+      API (2), exposição por asset/estratégia/direção via API (1), kill
+      switch nunca se autolimpa mesmo após recuperação de drawdown +
+      release exige admin (2), e a simulação completa matematicamente
+      validada do §37 — EUR 10.000 → tamanho de posição derivado à mão
+      (15.0 unidades) → DEFENSIVE reduz exatamente para 7.5 → limite diário
+      bloqueia → EMERGENCY bloqueia → Kill Switch bloqueia
+      independentemente do belt → multiplicador nunca sobe com o drawdown a
+      subir (1)
+- [x] **verificado ao vivo** contra Postgres real: worker real gerou um
+      `correlation_matrix` real (mais de 50 pares), `GET
+      /api/portfolio/exposure` devolveu exposição real por asset (15% cada
+      em NDX/XAG/GOOGL) e por estratégia, `GET /api/risk` devolveu uma
+      decisão real `"decision": "blocked", "reasons": ["correlation_guard"]`
+      e outra `"decision": "approved"` com `risk_amount`/`risk_reward`
+      genuínos; dashboard testado num browser real (Playwright/Chromium) —
+      painel "Risk Center" completo visível com todos os stat cards e o
+      Risk Heatmap colorido por concentração real. `ruff`/`mypy`/`npm run
+      lint`/`npm run build` (implícito no `tsc --noEmit` limpo) limpos
+
+Nenhuma migração Alembic nova nesta fase — todas as alterações de schema
+foram evitadas deliberadamente (campos derivados por leitura, não
+persistidos, como o resto do padrão semanal já estabelecido) ou já cabiam
+em colunas/tabelas existentes.
+
 ## Evolução futura (fora de âmbito até validação completa)
 
 Live brokers, exchanges reais (crypto/forex/ações), ML avançado, deep learning,

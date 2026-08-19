@@ -60,3 +60,22 @@ def test_manual_kill_switch_release_writes_info_alert(client, db_session):
     alert = db_session.query(Alert).filter(Alert.category == "emergency", Alert.message.like("%released%")).first()
     assert alert is not None
     assert alert.severity == "info"
+
+
+def test_kill_switch_release_requires_admin_auth(client, db_session):
+    # Prompt 4 §33/36 "recovery-admin-only" -- release is gated behind the
+    # same get_current_admin dependency as every other admin mutation.
+    resp = client.post("/api/system/kill-switch/release")
+    assert resp.status_code == 401
+
+
+def test_kill_switch_never_auto_clears_even_after_drawdown_recovers(db_session):
+    # Once triggered, only the admin-gated release endpoint may clear it --
+    # update_safety_belt (the worker's per-cycle monitor) must never do so on
+    # its own, even after the portfolio recovers back to a healthy state.
+    refresh_snapshot(db_session, cash=1_000_000.0)
+    refresh_snapshot(db_session, cash=100.0)  # ~99.99% drawdown -> auto kill switch
+    assert update_safety_belt(db_session) == KILL_SWITCH
+
+    refresh_snapshot(db_session, cash=1_000_000.0)  # equity fully recovers
+    assert update_safety_belt(db_session) == KILL_SWITCH

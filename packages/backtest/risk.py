@@ -46,7 +46,7 @@ def evaluate_signal_for_backtest(
         return BacktestRiskVerdict(False, None, "kill_switch")
 
     belt = evaluate_safety_belt(portfolio_state, limits)
-    policy = policy_for(belt)
+    policy = policy_for(belt, limits)
     if not policy.allow_new_trades:
         return BacktestRiskVerdict(False, None, f"safety_belt_{belt}")
     if not tier_meets_floor(tier, policy.min_tier):

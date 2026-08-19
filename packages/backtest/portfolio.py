@@ -84,6 +84,15 @@ class SimulatedPortfolio:
         weekly_pnl = equity - equity_week_start
         weekly_loss_pct = max(0.0, -weekly_pnl) / equity_week_start * 100 if equity_week_start > 0 else 0.0
 
+        month_cutoff = ts - timedelta(days=30)
+        equity_month_start = equity
+        for hist_ts, hist_equity in self._equity_history:
+            if hist_ts > month_cutoff:
+                break
+            equity_month_start = hist_equity
+        monthly_pnl = equity - equity_month_start
+        monthly_loss_pct = max(0.0, -monthly_pnl) / equity_month_start * 100 if equity_month_start > 0 else 0.0
+
         exposure_notional = (open_position.entry_price * open_position.size) if open_position else 0.0
         exposure_pct = (exposure_notional / equity * 100) if equity > 0 else 0.0
         unrealized_pnl = equity - self.cash - exposure_notional
@@ -91,7 +100,9 @@ class SimulatedPortfolio:
         return PortfolioState(
             ts=ts, cash=self.cash, equity=equity, exposure_pct=round(exposure_pct, 4),
             daily_pnl=round(daily_pnl, 2), daily_loss_pct=round(daily_loss_pct, 4),
-            weekly_loss_pct=round(weekly_loss_pct, 4), drawdown_pct=round(drawdown_pct, 4),
+            weekly_pnl=round(weekly_pnl, 2), weekly_loss_pct=round(weekly_loss_pct, 4),
+            monthly_pnl=round(monthly_pnl, 2), monthly_loss_pct=round(monthly_loss_pct, 4),
+            drawdown_pct=round(drawdown_pct, 4),
             unrealized_pnl=round(unrealized_pnl, 2), open_positions=[],
         )
 

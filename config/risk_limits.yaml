@@ -15,6 +15,7 @@ portfolio:
 loss_limits:
   max_daily_loss_pct: 3
   max_weekly_loss_pct: 6
+  max_monthly_loss_pct: 10
   max_strategy_drawdown_pct: 10
   max_portfolio_drawdown_pct: 15
 liquidity:
@@ -22,3 +23,11 @@ liquidity:
   min_orderbook_depth_multiple: 3
 data_quality:
   max_staleness_seconds: 120
+# Risk-per-trade multiplier applied at each Safety Belt state — Prompt 4
+# §35 requires this be configurable, not hardcoded in Python.
+safety_belt_multipliers:
+  normal: 1.0
+  caution: 0.75
+  defensive: 0.5
+  emergency: 0.0
+  kill_switch: 0.0

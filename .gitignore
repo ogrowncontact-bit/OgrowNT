@@ -15,6 +15,9 @@ node_modules/
 apps/dashboard/.next/
 apps/dashboard/out/
 apps/dashboard/next-env.d.ts
+apps/dashboard/tsconfig.tsbuildinfo
+apps/dashboard/AGENTS.md
+apps/dashboard/CLAUDE.md
 npm-debug.log*
 
 # OS

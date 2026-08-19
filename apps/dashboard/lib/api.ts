@@ -16,6 +16,42 @@ export type Portfolio = {
   drawdown_pct: number;
   safety_belt_level: string;
   as_of: string;
+  weekly_pnl: number;
+  weekly_loss_pct: number;
+  monthly_pnl: number;
+  monthly_loss_pct: number;
+};
+export type ExposureItem = { key: string; notional: number; pct_of_equity: number };
+export type CorrelationPair = { asset_symbol_a: string; asset_symbol_b: string; correlation: number; ts: string };
+export type PortfolioExposure = {
+  equity: number;
+  by_asset: ExposureItem[];
+  by_strategy: ExposureItem[];
+  by_direction: ExposureItem[];
+  correlations: CorrelationPair[];
+};
+export type RiskCheckEntry = { check_name: string; passed: boolean; detail: Record<string, unknown> };
+export type RiskDecisionEntry = {
+  signal_id: number;
+  asset_symbol: string;
+  strategy_code: string;
+  approved: boolean;
+  approved_size: number | null;
+  reason: string;
+  safety_belt_level: string;
+  created_at: string;
+  checks: RiskCheckEntry[];
+  decision: "approved" | "reduced" | "blocked";
+  reasons: string[];
+  risk_amount: number | null;
+  position_size: number | null;
+  risk_reward: number | null;
+};
+export type RiskState = {
+  safety_belt_level: string;
+  trading_enabled: boolean;
+  limits: Record<string, Record<string, number>>;
+  recent_decisions: RiskDecisionEntry[];
 };
 export type Asset = {
   id: number;
@@ -265,6 +301,8 @@ async function apiFetch<T>(path: string, token?: string): Promise<T | null> {
 export const getHealth = () => apiFetch<HealthResponse>("/api/system/health");
 export const getSystemStatus = (token: string) => apiFetch<SystemStatus>("/api/system/status", token);
 export const getPortfolio = (token: string) => apiFetch<Portfolio>("/api/portfolio", token);
+export const getPortfolioExposure = (token: string) => apiFetch<PortfolioExposure>("/api/portfolio/exposure", token);
+export const getRiskState = (token: string, limit = 10) => apiFetch<RiskState>(`/api/risk?limit=${limit}`, token);
 export const getAssets = (token: string) => apiFetch<Asset[]>("/api/assets", token);
 export const getStrategies = (token: string) => apiFetch<Strategy[]>("/api/strategies", token);
 export const getMarketOverview = (token: string) => apiFetch<MarketOverview>("/api/market/overview", token);

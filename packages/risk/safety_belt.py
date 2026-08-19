@@ -24,7 +24,15 @@ KILL_SWITCH = "kill_switch"
 def evaluate_safety_belt(state: PortfolioState, limits: RiskLimits) -> str:
     if state.drawdown_pct >= limits.loss_limits.max_portfolio_drawdown_pct:
         return EMERGENCY
-    if state.daily_loss_pct >= limits.loss_limits.max_daily_loss_pct:
+    # 0.7x, not the full daily-loss limit: packages/risk/engine.py's loss_limits
+    # check hard-blocks every new trade once daily_loss_pct reaches 100% of
+    # max_daily_loss_pct, so triggering DEFENSIVE at that same 100% would make
+    # its "reduce size, require high_quality+" action dead code -- it would
+    # always coincide with the hard block. The 70% warning zone (same fraction
+    # CAUTION already uses for weekly loss) gives DEFENSIVE genuine room to
+    # actually reduce risk before the hard stop, matching Prompt 4's "cada
+    # estado com ações diferentes" requirement.
+    if state.daily_loss_pct >= limits.loss_limits.max_daily_loss_pct * 0.7:
         return DEFENSIVE
     if state.weekly_loss_pct >= limits.loss_limits.max_weekly_loss_pct * 0.7:
         return CAUTION
@@ -49,17 +57,26 @@ class SafetyBeltPolicy:
 
 _TIER_RANK = {"ignore": 0, "watch": 1, "possible": 2, "high_quality": 3, "exceptional": 4}
 
-_POLICIES: dict[str, SafetyBeltPolicy] = {
-    NORMAL: SafetyBeltPolicy(size_multiplier=1.0, min_tier="possible", allow_new_trades=True),
-    CAUTION: SafetyBeltPolicy(size_multiplier=0.75, min_tier="possible", allow_new_trades=True),
-    DEFENSIVE: SafetyBeltPolicy(size_multiplier=0.5, min_tier="high_quality", allow_new_trades=True),
-    EMERGENCY: SafetyBeltPolicy(size_multiplier=0.0, min_tier="exceptional", allow_new_trades=False),
-    KILL_SWITCH: SafetyBeltPolicy(size_multiplier=0.0, min_tier="exceptional", allow_new_trades=False),
+# Opportunity-tier floor and new-trade permission per belt level. The risk
+# multiplier itself is NOT here — it comes from limits.safety_belt_multipliers
+# (config/risk_limits.yaml), operator-tunable per Prompt 4 §35, unlike these
+# two which are structural behavior rather than a risk-limit number.
+_POLICY_META: dict[str, tuple[str, bool]] = {
+    NORMAL: ("possible", True),
+    CAUTION: ("possible", True),
+    DEFENSIVE: ("high_quality", True),
+    EMERGENCY: ("exceptional", False),
+    KILL_SWITCH: ("exceptional", False),
 }
 
 
-def policy_for(level: str) -> SafetyBeltPolicy:
-    return _POLICIES.get(level, _POLICIES[NORMAL])
+def policy_for(level: str, limits: RiskLimits) -> SafetyBeltPolicy:
+    min_tier, allow_new_trades = _POLICY_META.get(level, _POLICY_META[NORMAL])
+    # Field names on SafetyBeltMultipliersConfig match the belt-level string
+    # constants exactly, so this is a direct attribute read, not a dict
+    # lookup that could silently fall through to a default.
+    multiplier = getattr(limits.safety_belt_multipliers, level, limits.safety_belt_multipliers.normal)
+    return SafetyBeltPolicy(size_multiplier=multiplier, min_tier=min_tier, allow_new_trades=allow_new_trades)
 
 
 def tier_meets_floor(tier: str, min_tier: str) -> bool:

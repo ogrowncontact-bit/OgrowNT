@@ -11,7 +11,10 @@ Runs three independent cadences (docs/blueprint/05-event-flow.md §Cadência):
 - Every STRATEGY_INTERVAL_SECONDS: history backfill for new assets, the
   Strategy Engine cycle (regime -> patterns -> strategies -> scoring), and —
   for any signal scoring "possible" or better — the Risk Engine and, if
-  approved, the Execution Engine (paper only).
+  approved, the Execution Engine (paper only). Also refreshes the full
+  pairwise correlation_matrix (packages/risk/correlation_guard.py) for the
+  dashboard's Risk Heatmap — the Risk Engine's own correlation_guard check
+  computes its pair fresh, so this is audit/display only.
 - Every RESEARCH_INTERVAL_SECONDS: Research Agent — proposes candidate
   learned_rules for underperforming patterns/strategies and runs the DET
   validation pass (packages/quant/learning/research.py). The Learning
@@ -54,7 +57,9 @@ from packages.data.connectors.news.factory import get_news_provider
 from packages.execution.adapters.paper import PaperExecutionProvider
 from packages.llm.client import LLMClient
 from packages.notifications.dispatcher import NotificationDispatcher
+from packages.portfolio.state import refresh_snapshot
 from packages.quant.learning.research import run_research_cycle
+from packages.risk.correlation_guard import refresh_correlation_matrix
 from packages.risk.monitor import update_safety_belt
 from packages.shared.db import SessionLocal
 from packages.shared.logging import configure_logging
@@ -122,7 +127,12 @@ def main() -> None:
             try:
                 run_scan_cycle(db, provider, market_alert_tracker)
                 run_trade_monitor_cycle(db, exec_provider, llm_client)
-                update_safety_belt(db)
+                belt_level = update_safety_belt(db)
+                # Genuinely periodic, not just fill-triggered — equity/drawdown
+                # move with price even between fills, and portfolio_snapshots
+                # must record the real current safety_belt_level, not the
+                # refresh_snapshot() default (docs/blueprint/08-risk-engine.md).
+                refresh_snapshot(db, safety_belt_level=belt_level)
                 tracker.record_success("scan_monitor")
             except Exception as exc:  # noqa: BLE001 - isolate this cadence, keep the others running
                 logger.exception("scan_monitor cadence failed")
@@ -141,6 +151,11 @@ def main() -> None:
                 try:
                     backfill_active_assets(db, provider)
                     run_strategy_cycle(db, provider=exec_provider)
+                    # Dashboard/audit trail only (packages/risk/correlation_guard.py) —
+                    # check_correlation_guard above computes fresh pairwise
+                    # correlation for whatever it needs on the hot path; this
+                    # persists the full matrix for the Risk Heatmap (Prompt 4 §31).
+                    refresh_correlation_matrix(db)
                     tracker.record_success("strategy")
                 except Exception as exc:  # noqa: BLE001
                     logger.exception("strategy cadence failed")

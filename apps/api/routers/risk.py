@@ -5,6 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from apps.api.deps import get_current_admin, get_session
+from apps.api.risk_view import derive_decision_view
 from apps.api.schemas import RiskCheckOut, RiskDecisionOut, RiskStateOut
 from packages.risk.config import load_risk_limits
 from packages.shared.models import AdminUser, Asset, RiskCheck, RiskDecision, Signal, StrategyRow, SystemState
@@ -31,12 +32,17 @@ def get_risk_state(
     decisions = []
     for decision, signal, asset, strategy in rows:
         checks = db.query(RiskCheck).filter(RiskCheck.signal_id == signal.id).order_by(RiskCheck.id).all()
+        view = derive_decision_view(
+            approved=decision.approved, reason=decision.reason, approved_size=decision.approved_size,
+            checks=checks, signal=signal,
+        )
         decisions.append(
             RiskDecisionOut(
                 signal_id=signal.id, asset_symbol=asset.symbol, strategy_code=strategy.code,
                 approved=decision.approved, approved_size=decision.approved_size, reason=decision.reason,
                 safety_belt_level=decision.safety_belt_level, created_at=decision.created_at,
                 checks=[RiskCheckOut(check_name=c.check_name, passed=c.passed, detail=c.detail) for c in checks],
+                **view,
             )
         )
 
@@ -50,6 +56,7 @@ def get_risk_state(
             "loss_limits": asdict(limits.loss_limits),
             "liquidity": asdict(limits.liquidity),
             "data_quality": asdict(limits.data_quality),
+            "safety_belt_multipliers": asdict(limits.safety_belt_multipliers),
         },
         recent_decisions=decisions,
     )

@@ -77,6 +77,37 @@ class PortfolioResponse(BaseModel):
     drawdown_pct: float
     safety_belt_level: str
     as_of: datetime
+    # Prompt 4 §16/§29 — computed fresh via packages/portfolio/state.py's
+    # compute_state() (not persisted per-row, same as weekly already wasn't:
+    # both are cheap to re-derive from portfolio_snapshots equity history).
+    weekly_pnl: float
+    weekly_loss_pct: float
+    monthly_pnl: float
+    monthly_loss_pct: float
+
+
+class ExposureItem(BaseModel):
+    key: str
+    notional: float
+    pct_of_equity: float
+
+
+class CorrelationPairOut(BaseModel):
+    asset_symbol_a: str
+    asset_symbol_b: str
+    correlation: float
+    ts: datetime
+
+
+class PortfolioExposureOut(BaseModel):
+    """Risk Center concentration breakdown — docs/blueprint/08-risk-engine.md
+    §Concentration Guard. Powers the dashboard's Risk Heatmap (Prompt 4 §31)."""
+
+    equity: float
+    by_asset: list[ExposureItem]
+    by_strategy: list[ExposureItem]
+    by_direction: list[ExposureItem]
+    correlations: list[CorrelationPairOut]
 
 
 class PortfolioSnapshotOut(BaseModel):
@@ -203,6 +234,15 @@ class RiskDecisionOut(BaseModel):
     safety_belt_level: str
     created_at: datetime
     checks: list[RiskCheckOut] = []
+    # Prompt 4 §25/26 enrichment, derived from the same persisted checks
+    # above (never a schema/column rename) — decision is "blocked" when not
+    # approved, "reduced" when approved at less than full size (belt and/or
+    # strategy-health multiplier < 1.0), "approved" otherwise.
+    decision: str
+    reasons: list[str] = []
+    risk_amount: float | None = None
+    position_size: float | None = None
+    risk_reward: float | None = None
 
 
 class RiskStateOut(BaseModel):
@@ -222,6 +262,7 @@ class RiskLimitsUpdate(BaseModel):
     loss_limits: dict | None = None
     liquidity: dict | None = None
     data_quality: dict | None = None
+    safety_belt_multipliers: dict | None = None
 
 
 class PositionOut(BaseModel):

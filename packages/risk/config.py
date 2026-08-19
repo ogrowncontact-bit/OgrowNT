@@ -32,6 +32,7 @@ class PortfolioLimitsConfig:
 class LossLimitsConfig:
     max_daily_loss_pct: float
     max_weekly_loss_pct: float
+    max_monthly_loss_pct: float
     max_strategy_drawdown_pct: float
     max_portfolio_drawdown_pct: float
 
@@ -48,6 +49,23 @@ class DataQualityConfig:
 
 
 @dataclass(frozen=True)
+class SafetyBeltMultipliersConfig:
+    """Risk-per-trade multiplier applied at each Safety Belt state
+    (docs/blueprint/08-risk-engine.md#risk-states-safety-belts) — field names
+    match packages/risk/safety_belt.py's state constants exactly so
+    policy_for() can read one via getattr(this, level) without a lookup
+    table. Operator-tunable like every other number in this file (Prompt 4
+    §35: "Esses valores devem ser configuráveis"), not hardcoded in Python.
+    """
+
+    normal: float
+    caution: float
+    defensive: float
+    emergency: float
+    kill_switch: float
+
+
+@dataclass(frozen=True)
 class RiskLimits:
     capital: CapitalConfig
     per_trade: PerTradeConfig
@@ -55,6 +73,7 @@ class RiskLimits:
     loss_limits: LossLimitsConfig
     liquidity: LiquidityConfig
     data_quality: DataQualityConfig
+    safety_belt_multipliers: SafetyBeltMultipliersConfig
 
 
 def load_risk_limits(path: Path = CONFIG_PATH) -> RiskLimits:
@@ -66,4 +85,5 @@ def load_risk_limits(path: Path = CONFIG_PATH) -> RiskLimits:
         loss_limits=LossLimitsConfig(**raw["loss_limits"]),
         liquidity=LiquidityConfig(**raw["liquidity"]),
         data_quality=DataQualityConfig(**raw["data_quality"]),
+        safety_belt_multipliers=SafetyBeltMultipliersConfig(**raw["safety_belt_multipliers"]),
     )

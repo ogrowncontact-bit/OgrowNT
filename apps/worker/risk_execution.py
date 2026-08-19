@@ -67,6 +67,7 @@ def maybe_execute(
     signal_for_risk = SignalForRisk(
         signal_id=signal_row.id,
         asset_id=asset.id,
+        strategy_id=signal_row.strategy_id,
         direction=signal.direction,
         entry_price=signal.entry_price,
         stop_price=signal.stop_price,

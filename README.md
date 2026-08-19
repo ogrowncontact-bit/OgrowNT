@@ -4,7 +4,7 @@
 **paper trading only** — no real orders are ever sent. See the full engineering
 specification in [`docs/blueprint/`](docs/blueprint/00-overview.md).
 
-## Status: Phase 7 (Advanced Analytics, Alerts, Optimization) + post-Phase-7 security hardening + Supervisor 24/7 + Market Data Engine + Scanner + Pattern/Strategy/Opportunity confidence & evidence
+## Status: Phase 7 (Advanced Analytics, Alerts, Optimization) + post-Phase-7 security hardening + Supervisor 24/7 + Market Data Engine + Scanner + Pattern/Strategy/Opportunity confidence & evidence + Risk Engine/Portfolio Intelligence hardening (Risk Center, Risk Heatmap, Strategy Health, configurable Safety Belts)
 
 Per [`docs/blueprint/12-roadmap.md`](docs/blueprint/12-roadmap.md):
 
@@ -14,8 +14,10 @@ Per [`docs/blueprint/12-roadmap.md`](docs/blueprint/12-roadmap.md):
   4 pluggable strategies (Trend Following, Momentum, Breakout, Mean Reversion), and
   a deterministic Opportunity Scoring Engine.
 - **Phase 3 (Risk & Execution):** Portfolio Engine, Risk Engine (position sizing,
-  real Pearson correlation guard, Safety Belts, a 10-step decision pipeline with
-  veto power), a `PaperExecutionProvider` (simulated spread/slippage/fees), and a
+  real Pearson correlation guard, Safety Belts, a multi-step decision pipeline
+  with veto power — see "Risk Engine/Portfolio Intelligence hardening" below
+  for the Strategy Health/monthly-loss/configurable-belt additions), a
+  `PaperExecutionProvider` (simulated spread/slippage/fees), and a
   Trade Monitor that closes positions on stop/target hits or an invalidated
   thesis. The worker runs the full `SIGNAL → RISK → PAPER ORDER → POSITION →
   MONITOR → CLOSE` loop on its own.
@@ -175,6 +177,36 @@ and a real browser click-through. See `docs/blueprint/12-roadmap.md`'s
 "PROMPT 3" section for details, including which spec divergences (tier/
 signal-status naming) were deliberately left alone as cosmetic-only.
 
+**Risk Engine/Portfolio Intelligence hardening.** The Risk Engine, Safety
+Belts, Position Sizing, and Correlation Guard already existed from this
+repo's real Phase 3; this pass closed the gaps a point-by-point spec review
+found, plus one bug the review surfaced. `refresh_snapshot()` — the sole
+writer of portfolio history — is now genuinely called every worker cycle
+(not just on a fill) and always with the real current `safety_belt_level`
+(both fill call-sites were silently defaulting to `"normal"`). Strategy
+Health (`packages/quant/learning`'s `health_score`, built in this repo's
+real Phase 5) now actually reaches the Risk Engine's decision pipeline —
+a degraded strategy gets its size cut in half, a quarantine-level one is
+blocked as a defense-in-depth check. Safety Belt size multipliers moved
+from a hardcoded Python dict into `config/risk_limits.yaml`
+(`safety_belt_multipliers`), and the DEFENSIVE belt state — which
+previously triggered at the exact same threshold as the hard daily-loss
+block, making its "reduce size" action dead code — now triggers at 70% of
+that limit, so it genuinely reduces risk before the hard stop. Monthly
+P&L/loss tracking was added (derived, like weekly already was — no new
+column). `refresh_correlation_matrix()` — defined since Phase 3 but never
+actually called — now runs every strategy cycle, feeding a new Risk Center
+dashboard panel (Risk State, Daily/Weekly/Monthly P&L, Drawdown, Exposure,
+Available Cash) and a Risk Heatmap visualizing concentration by
+asset/strategy/direction/correlation. `GET /api/risk`'s decisions now carry
+a `decision` (`approved`/`reduced`/`blocked`), a `reasons` list, and
+`risk_amount`/`position_size`/`risk_reward` — API-layer enrichment, no
+column renames. Live-verified against real Postgres (a real worker run
+produced 50+ real pairwise correlations and real exposure/risk-decision
+data) and a real browser click-through of the new Risk Center. See
+`docs/blueprint/12-roadmap.md`'s "PROMPT 4" section for the full list,
+including the mathematically-validated €10,000 drawdown simulation test.
+
 ## Architecture at a glance
 
 ```text
@@ -303,7 +335,7 @@ cd apps/dashboard && npm install && npm run dev
 unused imports, undefined names, mutable-default footguns — not a style
 rewrite; see `[tool.ruff]` in `pyproject.toml`), `mypy packages apps scripts`
 (type-checked with the `pydantic.mypy` plugin so FastAPI response models
-type-check correctly), then the full pytest suite (417 tests) against a real
+type-check correctly), then the full pytest suite (427 tests) against a real
 `postgres:16-alpine` service container, migrated from scratch via `alembic
 upgrade head`; separately, the dashboard's `eslint` + `next build`; and
 separately again, a plain `docker build` of all three

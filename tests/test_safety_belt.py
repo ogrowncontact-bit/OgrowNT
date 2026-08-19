@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import datetime, timezone
 
 from packages.portfolio.state import PortfolioState
@@ -9,6 +10,7 @@ from packages.risk.config import (
     PerTradeConfig,
     PortfolioLimitsConfig,
     RiskLimits,
+    SafetyBeltMultipliersConfig,
 )
 from packages.risk.safety_belt import (
     CAUTION,
@@ -28,17 +30,22 @@ LIMITS = RiskLimits(
         max_exposure_pct=60, max_single_asset_pct=15, max_correlated_cluster_pct=25, correlation_threshold=0.7
     ),
     loss_limits=LossLimitsConfig(
-        max_daily_loss_pct=3, max_weekly_loss_pct=6, max_strategy_drawdown_pct=10, max_portfolio_drawdown_pct=15
+        max_daily_loss_pct=3, max_weekly_loss_pct=6, max_monthly_loss_pct=10,
+        max_strategy_drawdown_pct=10, max_portfolio_drawdown_pct=15,
     ),
     liquidity=LiquidityConfig(max_spread_bps=50, min_orderbook_depth_multiple=3),
     data_quality=DataQualityConfig(max_staleness_seconds=120),
+    safety_belt_multipliers=SafetyBeltMultipliersConfig(
+        normal=1.0, caution=0.75, defensive=0.5, emergency=0.0, kill_switch=0.0
+    ),
 )
 
 
 def _state(**overrides) -> PortfolioState:
     base = dict(
         ts=datetime.now(timezone.utc), cash=10000, equity=10000, exposure_pct=0.0,
-        daily_pnl=0.0, daily_loss_pct=0.0, weekly_loss_pct=0.0, drawdown_pct=0.0,
+        daily_pnl=0.0, daily_loss_pct=0.0, weekly_pnl=0.0, weekly_loss_pct=0.0,
+        monthly_pnl=0.0, monthly_loss_pct=0.0, drawdown_pct=0.0,
         unrealized_pnl=0.0, open_positions=[],
     )
     base.update(overrides)
@@ -58,6 +65,14 @@ def test_defensive_when_daily_loss_at_limit():
     assert evaluate_safety_belt(_state(daily_loss_pct=3.0), LIMITS) == DEFENSIVE
 
 
+def test_defensive_triggers_before_the_hard_daily_loss_block():
+    # 0.7 * max_daily_loss_pct(3) = 2.1 -- below packages/risk/engine.py's
+    # hard daily_loss_limit block (>= 3), so DEFENSIVE's reduce-size action
+    # is actually reachable, not dead code that always coincides with a block.
+    assert evaluate_safety_belt(_state(daily_loss_pct=2.5), LIMITS) == DEFENSIVE
+    assert evaluate_safety_belt(_state(daily_loss_pct=2.0), LIMITS) == NORMAL
+
+
 def test_emergency_when_drawdown_at_limit():
     assert evaluate_safety_belt(_state(drawdown_pct=15.0), LIMITS) == EMERGENCY
 
@@ -75,12 +90,20 @@ def test_kill_switch_trigger_is_well_past_emergency():
 
 
 def test_policy_progressively_restricts_size_and_tier_floor():
-    normal, caution, defensive = policy_for(NORMAL), policy_for(CAUTION), policy_for(DEFENSIVE)
+    normal, caution, defensive = policy_for(NORMAL, LIMITS), policy_for(CAUTION, LIMITS), policy_for(DEFENSIVE, LIMITS)
     assert normal.size_multiplier == 1.0
     assert caution.size_multiplier < normal.size_multiplier
     assert defensive.size_multiplier < caution.size_multiplier
     assert defensive.allow_new_trades
-    assert not policy_for(EMERGENCY).allow_new_trades
+    assert not policy_for(EMERGENCY, LIMITS).allow_new_trades
+
+
+def test_policy_multiplier_is_configurable_not_hardcoded():
+    custom = replace(LIMITS, safety_belt_multipliers=SafetyBeltMultipliersConfig(
+        normal=1.0, caution=0.9, defensive=0.3, emergency=0.0, kill_switch=0.0
+    ))
+    assert policy_for(CAUTION, custom).size_multiplier == 0.9
+    assert policy_for(DEFENSIVE, custom).size_multiplier == 0.3
 
 
 def test_tier_meets_floor_ordering():
