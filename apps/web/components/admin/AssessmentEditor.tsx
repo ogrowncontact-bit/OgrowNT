@@ -19,6 +19,7 @@ const input =
 const label = "mb-1 block text-[12px] font-medium text-[var(--inner-muted)]";
 const smallBtn = "rounded-[var(--inner-radius-sm)] border border-[var(--inner-line)] px-3 py-1.5 text-[13px] text-[var(--inner-ink-soft)] hover:border-[var(--inner-accent-soft)]";
 const removeBtn = "text-[12px] text-[var(--inner-accent)]";
+const CURRENCIES = ["EUR", "USD", "GBP", "BRL"];
 
 function Section({ title, children, defaultOpen = false }: { title: string; children: React.ReactNode; defaultOpen?: boolean }) {
   return (
@@ -275,9 +276,32 @@ export function AssessmentEditor({ assessmentId, initialConfig, hasDraft, status
       </Section>
 
       <Section title="Pricing">
+        <div className="mb-3">
+          <label className={label}>Currency</label>
+          <select
+            className={input}
+            value={config.pricing.individual?.currency ?? config.pricing.deep?.currency ?? "EUR"}
+            onChange={(e) => {
+              const currency = e.target.value;
+              patch({
+                pricing: {
+                  ...config.pricing,
+                  ...(config.pricing.individual ? { individual: { ...config.pricing.individual, currency } } : {}),
+                  ...(config.pricing.deep ? { deep: { ...config.pricing.deep, currency } } : {}),
+                },
+              });
+            }}
+          >
+            {CURRENCIES.map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
+          </select>
+        </div>
         <div className="grid gap-3 sm:grid-cols-2">
           <div>
-            <label className={label}>Individual report (€)</label>
+            <label className={label}>Individual report</label>
             <input
               type="number"
               step="0.01"
@@ -287,14 +311,18 @@ export function AssessmentEditor({ assessmentId, initialConfig, hasDraft, status
                 patch({
                   pricing: {
                     ...config.pricing,
-                    individual: { productType: "individual", amountCents: Math.round(Number(e.target.value) * 100), currency: "EUR" },
+                    individual: {
+                      productType: "individual",
+                      amountCents: Math.round(Number(e.target.value) * 100),
+                      currency: config.pricing.individual?.currency ?? config.pricing.deep?.currency ?? "EUR",
+                    },
                   },
                 })
               }
             />
           </div>
           <div>
-            <label className={label}>Deep report (€)</label>
+            <label className={label}>Deep report</label>
             <input
               type="number"
               step="0.01"
@@ -304,7 +332,11 @@ export function AssessmentEditor({ assessmentId, initialConfig, hasDraft, status
                 patch({
                   pricing: {
                     ...config.pricing,
-                    deep: { productType: "deep", amountCents: Math.round(Number(e.target.value) * 100), currency: "EUR" },
+                    deep: {
+                      productType: "deep",
+                      amountCents: Math.round(Number(e.target.value) * 100),
+                      currency: config.pricing.deep?.currency ?? config.pricing.individual?.currency ?? "EUR",
+                    },
                   },
                 })
               }

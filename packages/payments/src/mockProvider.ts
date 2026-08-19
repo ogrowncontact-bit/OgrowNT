@@ -1,4 +1,12 @@
-import type { CheckoutSession, CreateCheckoutSessionParams, PaymentCompletedEvent, PaymentProvider, RefundParams, RefundResult } from "./types";
+import type {
+  CheckoutSession,
+  CreateCheckoutSessionParams,
+  PaymentProvider,
+  PaymentStatus,
+  PaymentWebhookEvent,
+  RefundParams,
+  RefundResult,
+} from "./types";
 
 /**
  * Dev-only stand-in for local testing without real Stripe keys. Points the
@@ -17,12 +25,17 @@ export class MockProvider implements PaymentProvider {
     };
   }
 
-  async parseWebhookEvent(): Promise<PaymentCompletedEvent | null> {
+  async parseWebhookEvent(): Promise<PaymentWebhookEvent | null> {
     // The mock flow completes orders via a direct app route, not a webhook.
     return null;
   }
 
   async refund(params: RefundParams): Promise<RefundResult> {
     return { ok: true, providerRef: `mock_refund_${params.providerRef}` };
+  }
+
+  async getPaymentStatus(): Promise<PaymentStatus> {
+    // The mock flow has no independent provider-side state to reconcile against — completeOrder() is the only source of truth.
+    return "unknown";
   }
 }

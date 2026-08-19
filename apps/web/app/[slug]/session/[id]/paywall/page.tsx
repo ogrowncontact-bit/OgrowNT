@@ -5,6 +5,7 @@ import { Screen, Button } from "@inner/ui";
 import { getAssessmentConfig } from "@/lib/assessments";
 import { readAnonymousSessionId } from "@/lib/anonymousSession";
 import { track } from "@/lib/analytics";
+import { formatPrice } from "@/lib/money";
 
 const INCLUDED = [
   "Your dominant pattern",
@@ -57,7 +58,7 @@ export default async function PaywallPage({
             {paymentFailed
               ? "Try Again"
               : price
-                ? `Unlock My Profile — €${(price.amountCents / 100).toFixed(2)}`
+                ? `Unlock My Profile — ${formatPrice(price.amountCents, price.currency)}`
                 : "Unlock My Profile"}
           </Button>
         </Link>

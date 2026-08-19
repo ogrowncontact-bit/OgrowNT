@@ -1,5 +1,13 @@
 import Stripe from "stripe";
-import type { CheckoutSession, CreateCheckoutSessionParams, PaymentCompletedEvent, PaymentProvider, RefundParams, RefundResult } from "./types";
+import type {
+  CheckoutSession,
+  CreateCheckoutSessionParams,
+  PaymentProvider,
+  PaymentStatus,
+  PaymentWebhookEvent,
+  RefundParams,
+  RefundResult,
+} from "./types";
 
 export class StripeProvider implements PaymentProvider {
   readonly name = "stripe";
@@ -34,12 +42,15 @@ export class StripeProvider implements PaymentProvider {
     return { url: session.url, providerRef: session.id };
   }
 
-  async parseWebhookEvent(rawBody: string, signature: string | null): Promise<PaymentCompletedEvent | null> {
+  async parseWebhookEvent(rawBody: string, signature: string | null): Promise<PaymentWebhookEvent | null> {
     if (!signature) return null;
     const event = this.stripe.webhooks.constructEvent(rawBody, signature, this.webhookSecret);
-    if (event.type !== "checkout.session.completed") return null;
     const session = event.data.object as Stripe.Checkout.Session;
-    return { type: "payment_completed", providerRef: session.id };
+
+    if (event.type === "checkout.session.completed") return { type: "payment_completed", providerRef: session.id };
+    // Fired ~24h after an unpaid session's default expiry — the real, provider-confirmed signal for an abandoned checkout.
+    if (event.type === "checkout.session.expired") return { type: "payment_cancelled", providerRef: session.id };
+    return null;
   }
 
   async refund(params: RefundParams): Promise<RefundResult> {
@@ -56,6 +67,17 @@ export class StripeProvider implements PaymentProvider {
       return { ok: true, providerRef: refund.id };
     } catch (error) {
       return { ok: false, reason: error instanceof Error ? error.message : "Unknown refund error" };
+    }
+  }
+
+  async getPaymentStatus(providerRef: string): Promise<PaymentStatus> {
+    try {
+      const session = await this.stripe.checkout.sessions.retrieve(providerRef);
+      if (session.payment_status === "paid") return "paid";
+      if (session.status === "expired") return "cancelled";
+      return "pending";
+    } catch {
+      return "unknown";
     }
   }
 }

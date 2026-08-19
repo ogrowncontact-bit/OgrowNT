@@ -106,7 +106,20 @@ export async function POST(request: NextRequest) {
   });
 
   await prisma.order.update({ where: { id: order.id }, data: { providerRef: checkoutSession.providerRef } });
-  await track({ anonymousSessionId, eventName: "checkout_started", assessmentId: session.assessmentId, userId: user.id });
+  await track({
+    anonymousSessionId,
+    eventName: "checkout_started",
+    assessmentId: session.assessmentId,
+    userId: user.id,
+    properties: { orderId: order.id, productId: price.id, priceId: price.id, currency: price.currency, amountCents: price.amountCents },
+    utm: {
+      utmSource: anonymous?.utmSource ?? undefined,
+      utmMedium: anonymous?.utmMedium ?? undefined,
+      utmCampaign: anonymous?.utmCampaign ?? undefined,
+      utmContent: anonymous?.utmContent ?? undefined,
+      utmTerm: anonymous?.utmTerm ?? undefined,
+    },
+  });
 
   return NextResponse.json({ checkoutUrl: checkoutSession.url });
 }

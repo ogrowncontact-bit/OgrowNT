@@ -23,6 +23,9 @@ export default async function AdminDashboardLayout({ children }: { children: Rea
               <Link href="/admin/reports" className="hover:text-[var(--inner-ink)]">
                 Reports
               </Link>
+              <Link href="/admin/orders" className="hover:text-[var(--inner-ink)]">
+                Orders
+              </Link>
               <Link href="/admin/users" className="hover:text-[var(--inner-ink)]">
                 Users
               </Link>
@@ -42,6 +45,7 @@ export default async function AdminDashboardLayout({ children }: { children: Rea
           <Link href="/admin/assessments">Assessments</Link>
           <Link href="/admin/recommendations">Recommendations</Link>
           <Link href="/admin/reports">Reports</Link>
+          <Link href="/admin/orders">Orders</Link>
           <Link href="/admin/users">Users</Link>
           <Link href="/admin/analytics">Analytics</Link>
         </nav>

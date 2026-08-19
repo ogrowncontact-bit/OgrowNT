@@ -24,6 +24,16 @@ export interface PaymentCompletedEvent {
   providerRef: string; // the checkout session id the provider gave us
 }
 
+/** Fired when a checkout session expires unpaid — the real, provider-confirmed signal for an abandoned checkout, as opposed to a guess based on elapsed time. */
+export interface PaymentCancelledEvent {
+  type: "payment_cancelled";
+  providerRef: string;
+}
+
+export type PaymentWebhookEvent = PaymentCompletedEvent | PaymentCancelledEvent;
+
+export type PaymentStatus = "pending" | "paid" | "cancelled" | "unknown";
+
 export interface RefundParams {
   /** The checkout session id from CheckoutSession.providerRef — providers that need the underlying charge/payment-intent id look it up from this. */
   providerRef: string;
@@ -41,6 +51,8 @@ export interface PaymentProvider {
   readonly name: string;
   createCheckoutSession(params: CreateCheckoutSessionParams): Promise<CheckoutSession>;
   /** Verifies and parses a webhook payload. Returns null for events we don't act on. */
-  parseWebhookEvent(rawBody: string, signature: string | null): Promise<PaymentCompletedEvent | null>;
+  parseWebhookEvent(rawBody: string, signature: string | null): Promise<PaymentWebhookEvent | null>;
   refund(params: RefundParams): Promise<RefundResult>;
+  /** Manual reconciliation for a stuck order — e.g. an admin checking a "pending" order whose webhook may have been missed. Never the primary confirmation path; the webhook is. */
+  getPaymentStatus(providerRef: string): Promise<PaymentStatus>;
 }

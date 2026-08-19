@@ -3,6 +3,7 @@ import { prisma } from "@inner/db";
 import { getAssessmentConfig } from "@/lib/assessments";
 import { readAnonymousSessionId } from "@/lib/anonymousSession";
 import { CheckoutForm } from "@/components/CheckoutForm";
+import { formatPrice } from "@/lib/money";
 
 export default async function CheckoutPage({ params }: { params: Promise<{ slug: string; id: string }> }) {
   const { slug, id } = await params;
@@ -23,5 +24,11 @@ export default async function CheckoutPage({ params }: { params: Promise<{ slug:
 
   const price = config.pricing.individual;
 
-  return <CheckoutForm slug={slug} assessmentSessionId={id} priceLabel={price ? `€${(price.amountCents / 100).toFixed(2)}` : ""} />;
+  return (
+    <CheckoutForm
+      slug={slug}
+      assessmentSessionId={id}
+      priceLabel={price ? formatPrice(price.amountCents, price.currency) : ""}
+    />
+  );
 }

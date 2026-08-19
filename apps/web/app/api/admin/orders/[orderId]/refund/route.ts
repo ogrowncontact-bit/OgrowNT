@@ -8,10 +8,12 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const { orderId } = await params;
   const body = await request.json().catch(() => null);
   const reason = (body?.reason as string | undefined)?.trim() || undefined;
+  const rawAmount = body?.amountCents;
+  const amountCents = typeof rawAmount === "number" && Number.isFinite(rawAmount) && rawAmount > 0 ? Math.round(rawAmount) : undefined;
 
-  const result = await issueRefund(orderId, reason);
+  const result = await issueRefund(orderId, reason, amountCents);
   if (!result.ok) return NextResponse.json({ error: result.error }, { status: 400 });
 
-  await logAdminAction({ adminUserId: admin.id, action: "refund", entityType: "Order", entityId: orderId, diff: { reason } });
+  await logAdminAction({ adminUserId: admin.id, action: "refund", entityType: "Order", entityId: orderId, diff: { reason, amountCents } });
   return NextResponse.json({ ok: true });
 }

@@ -7,17 +7,12 @@ import {
   getFunnelSummary,
   getQuestionDropoff,
   getRecentAiFailures,
-  getRecentOrders,
   getRevenueSummary,
 } from "@/lib/admin/analyticsReader";
 import { getGlobalSegments, getPerAssessmentSegments } from "@/lib/admin/segmentsReader";
 import { getExperimentResults } from "@/lib/admin/experimentsReader";
 import { ReengagementRunner } from "@/components/admin/ReengagementRunner";
-import { RefundButton } from "@/components/admin/RefundButton";
-
-function formatMoney(cents: number, currency = "EUR") {
-  return new Intl.NumberFormat("en-IE", { style: "currency", currency }).format(cents / 100);
-}
+import { formatPrice as formatMoney } from "@/lib/money";
 
 function formatDate(d: Date) {
   return new Intl.DateTimeFormat("en-IE", { dateStyle: "medium", timeStyle: "short" }).format(d);
@@ -37,10 +32,9 @@ export default async function AdminAnalyticsPage({
     from: from ? new Date(`${from}T00:00:00.000Z`) : undefined,
     to: to ? new Date(`${to}T23:59:59.999Z`) : undefined,
   };
-  const [funnel, orders, revenue, consent, deletionRequests, aiStats, aiFailures, globalSegments, perAssessmentSegments, experimentResults] =
+  const [funnel, revenue, consent, deletionRequests, aiStats, aiFailures, globalSegments, perAssessmentSegments, experimentResults] =
     await Promise.all([
       getFunnelSummary(dateRange),
-      getRecentOrders(50),
       getRevenueSummary(),
       getConsentSummary(),
       getDeletionRequests(),
@@ -302,63 +296,19 @@ export default async function AdminAnalyticsPage({
         </div>
       )}
 
-      <div className="mb-3 flex items-center justify-between">
-        <h2 className="font-display text-[18px] text-[var(--inner-ink)]">Recent orders</h2>
+      <div className="mb-8 flex items-center justify-between">
+        <Link
+          href="/admin/orders"
+          className="rounded-[var(--inner-radius-lg)] border border-[var(--inner-line)] bg-[var(--inner-card)] px-5 py-4 text-[15px] text-[var(--inner-ink)] hover:border-[var(--inner-accent-soft)]"
+        >
+          View all orders — payment status, provider, refunds →
+        </Link>
         <a
           href="/api/admin/exports/orders"
           className="rounded-[var(--inner-radius-sm)] border border-[var(--inner-line)] px-3 py-1.5 text-[13px] text-[var(--inner-ink-soft)] hover:border-[var(--inner-accent-soft)]"
         >
           Export CSV
         </a>
-      </div>
-      <div className="overflow-x-auto rounded-[var(--inner-radius-lg)] border border-[var(--inner-line)] bg-[var(--inner-card)]">
-        <table className="w-full text-left text-[13px]">
-          <thead>
-            <tr className="border-b border-[var(--inner-line)] text-[var(--inner-muted)]">
-              <th className="px-4 py-3 font-medium">Date</th>
-              <th className="px-4 py-3 font-medium">Customer</th>
-              <th className="px-4 py-3 font-medium">Experience</th>
-              <th className="px-4 py-3 font-medium">Product</th>
-              <th className="px-4 py-3 font-medium">Amount</th>
-              <th className="px-4 py-3 font-medium">Status</th>
-              <th className="px-4 py-3 font-medium"></th>
-            </tr>
-          </thead>
-          <tbody>
-            {orders.length === 0 && (
-              <tr>
-                <td colSpan={7} className="px-4 py-6 text-center text-[var(--inner-muted)]">
-                  No orders yet.
-                </td>
-              </tr>
-            )}
-            {orders.map((o) => (
-              <tr key={o.id} className="border-b border-[var(--inner-line)] last:border-0">
-                <td className="whitespace-nowrap px-4 py-3 text-[var(--inner-ink-soft)]">{formatDate(o.createdAt)}</td>
-                <td className="whitespace-nowrap px-4 py-3 text-[var(--inner-ink-soft)]">{o.email}</td>
-                <td className="whitespace-nowrap px-4 py-3 text-[var(--inner-ink-soft)]">{o.assessmentName}</td>
-                <td className="whitespace-nowrap px-4 py-3 text-[var(--inner-ink-soft)]">{o.productType}</td>
-                <td className="whitespace-nowrap px-4 py-3 text-[var(--inner-ink)]">{formatMoney(o.amountCents, o.currency)}</td>
-                <td className="whitespace-nowrap px-4 py-3">
-                  <span
-                    className={
-                      o.status === "paid"
-                        ? "text-[var(--inner-accent)]"
-                        : o.status === "refunded" || o.status === "failed"
-                          ? "text-[var(--inner-muted)]"
-                          : "text-[var(--inner-ink-soft)]"
-                    }
-                  >
-                    {o.status}
-                  </span>
-                </td>
-                <td className="whitespace-nowrap px-4 py-3">
-                  {o.status === "paid" && <RefundButton orderId={o.id} amountLabel={formatMoney(o.amountCents, o.currency)} />}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
       </div>
 
       <h2 className="font-display mb-3 mt-8 text-[18px] text-[var(--inner-ink)]">AI cost &amp; latency</h2>

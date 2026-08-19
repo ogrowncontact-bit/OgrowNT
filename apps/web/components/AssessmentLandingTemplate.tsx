@@ -5,6 +5,7 @@ import { BeginButton } from "@/components/BeginButton";
 import { LandingViewTracker } from "@/components/LandingViewTracker";
 import { getDiscoveryPoints, getFaqItems, TRUST_POINTS } from "@/lib/landingContent";
 import { PublicNav } from "@/components/PublicNav";
+import { formatPrice } from "@/lib/money";
 
 const HOW_IT_WORKS = [
   "Answer a short, adaptive set of questions",
@@ -81,10 +82,7 @@ export function AssessmentLandingTemplate({ slug, config }: { slug: string; conf
       {price && (
         <section className="mt-12 rounded-[var(--inner-radius-lg)] border border-[var(--inner-line)] bg-[var(--inner-card)] p-6">
           <p className="text-xs font-medium uppercase tracking-[0.15em] text-[var(--inner-muted)]">Complete report</p>
-          <p className="font-display mt-2 text-[24px] text-[var(--inner-ink)]">
-            {price.currency === "EUR" ? "€" : `${price.currency} `}
-            {(price.amountCents / 100).toFixed(2)}
-          </p>
+          <p className="font-display mt-2 text-[24px] text-[var(--inner-ink)]">{formatPrice(price.amountCents, price.currency)}</p>
           <p className="mt-2 text-[14px] leading-relaxed text-[var(--inner-ink-soft)]">
             The free result gives you a short interpretation. The complete report goes deeper — a personalized, multi-section
             profile as a private web page and a downloadable PDF, both yours to keep.

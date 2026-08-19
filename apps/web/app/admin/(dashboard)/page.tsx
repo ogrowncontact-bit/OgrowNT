@@ -1,10 +1,7 @@
 import Link from "next/link";
 import { getDashboardOverview, getTopAcquisitionSources, getTopAssessments, getTopCampaigns, getTopRecommendations } from "@/lib/admin/dashboardReader";
 import { getReportStatusCounts } from "@/lib/admin/reportsReader";
-
-function formatMoney(cents: number, currency = "EUR") {
-  return new Intl.NumberFormat("en-IE", { style: "currency", currency }).format(cents / 100);
-}
+import { formatPrice as formatMoney } from "@/lib/money";
 
 const card = "rounded-[var(--inner-radius-lg)] border border-[var(--inner-line)] bg-[var(--inner-card)] p-5";
 const cardLabel = "text-[12px] text-[var(--inner-muted)]";
@@ -62,10 +59,10 @@ export default async function AdminHomePage() {
           <p className={cardLabel}>Email failed</p>
           <p className={`${cardValue} ${reportCounts.emailFailed > 0 ? "text-[var(--inner-accent)]" : ""}`}>{reportCounts.emailFailed}</p>
         </div>
-        <div className={card}>
+        <Link href="/admin/orders" className={`${card} hover:border-[var(--inner-accent-soft)]`}>
           <p className={cardLabel}>Payments pending</p>
           <p className={`${cardValue} ${overview.pendingOrders > 0 ? "text-[var(--inner-accent)]" : ""}`}>{overview.pendingOrders}</p>
-        </div>
+        </Link>
         <Link href="/admin/reports" className={`${card} flex items-center justify-center hover:border-[var(--inner-accent-soft)]`}>
           <p className="text-[13px] text-[var(--inner-ink-soft)]">View all reports →</p>
         </Link>

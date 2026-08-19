@@ -83,35 +83,6 @@ export async function getFunnelSummary(range?: DateRange): Promise<FunnelRow[]> 
   });
 }
 
-export interface OrderRow {
-  id: string;
-  email: string;
-  assessmentName: string;
-  productType: string;
-  amountCents: number;
-  currency: string;
-  status: string;
-  createdAt: Date;
-}
-
-export async function getRecentOrders(limit = 50): Promise<OrderRow[]> {
-  const orders = await prisma.order.findMany({
-    orderBy: { createdAt: "desc" },
-    take: limit,
-    include: { user: true, price: { include: { assessment: true } } },
-  });
-  return orders.map((o) => ({
-    id: o.id,
-    email: o.user.email,
-    assessmentName: o.price.assessment.name,
-    productType: o.price.productType,
-    amountCents: o.amountCents,
-    currency: o.currency,
-    status: o.status,
-    createdAt: o.createdAt,
-  }));
-}
-
 export interface RevenueSummary {
   totalPaidCents: number;
   paidCount: number;

@@ -15,6 +15,9 @@ export function getPaymentProvider(): PaymentProvider {
   const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
 
   if (stripeKey && webhookSecret) {
+    if (process.env.NODE_ENV === "production" && stripeKey.startsWith("sk_test_")) {
+      throw new Error("STRIPE_SECRET_KEY is a test-mode key (sk_test_...) but NODE_ENV is production — refusing to start");
+    }
     provider = new StripeProvider(stripeKey, webhookSecret);
     return provider;
   }
