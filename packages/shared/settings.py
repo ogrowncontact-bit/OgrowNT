@@ -132,6 +132,21 @@ class Settings(BaseSettings):
     # keep.
     health_snapshot_interval_seconds: int = 300
 
+    # "PROMPT 11" §92's UniverseWorker cadence — how often
+    # packages/market/universe.py's MarketUniverseManager re-evaluates every
+    # asset's data-quality/liquidity/status. Slower than scan_interval_seconds
+    # since liquidity/quality standing changes far less often than price does.
+    universe_interval_seconds: int = 300
+    # "PROMPT 11" §92's MarketScannerWorker/OpportunityWorker/AnomalyWorker/
+    # VolatilityWorker/MarketStructureWorker/WatchlistWorker cadence — one
+    # combined pass (apps/worker/market_intelligence.py) since they're
+    # sequential stages of the same fast-scan -> deep-scan-on-the-top-N
+    # pipeline, the same "single process, multiple cadences" pattern as
+    # every other agent in apps/worker/main.py. Not the prompt's literal
+    # 1s/5s ideal (§29) -- a private, modest-scale paper system has no need
+    # to scan sub-minute, and the mock provider ticks once a minute anyway.
+    market_intelligence_interval_seconds: int = 120
+
     # "PROMPT 8" §66 crash-loop protection (SystemState.worker_restart_count):
     # more worker-process restarts than this within restart_window_seconds
     # auto-pauses trading rather than letting a silently crash-looping

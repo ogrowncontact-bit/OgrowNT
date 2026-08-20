@@ -44,6 +44,17 @@ Runs three independent cadences (docs/blueprint/05-event-flow.md §Cadência):
   (packages/shared/worker_health.py's record_system_health_snapshot,
   "PROMPT 8" §62-66) — a persisted history GET /api/system/health's
   on-demand view doesn't keep.
+- Every UNIVERSE_INTERVAL_SECONDS: MarketUniverseManager re-evaluates every
+  asset's data quality/liquidity/status (packages/market/universe.py,
+  "PROMPT 11" §5-10) — the DISCOVERED -> ... -> PAPER ELIGIBLE pipeline.
+- Every MARKET_INTELLIGENCE_INTERVAL_SECONDS: the fast-scan -> deep-scan-
+  on-the-top-N pipeline (apps/worker/market_intelligence.py, "PROMPT 11"
+  §92) — FastMarketScanner's cheap universe-wide pass, then Structure/
+  Volatility/Anomaly/MultiTimeframe on just its Top-N, Dynamic Watchlist
+  auto-management, opportunity_type/fingerprint/expires_at enrichment of
+  whatever Signal the strategy cadence above already created, and
+  correlated-opportunity clustering. Runs after the strategy cadence in
+  the same iteration so it has this cycle's fresh Signals to enrich.
 
 Prompt 6 §37 asks for NewsIngestionWorker / NewsAnalysisWorker /
 EventDetectionWorker / SentimentWorker / MacroCalendarWorker /
@@ -83,6 +94,7 @@ from apps.worker.alerts import run_alert_delivery_cycle
 from apps.worker.history import backfill_active_assets
 from apps.worker.macro_agent import run_macro_calendar_cycle
 from apps.worker.market_alerts import MarketAlertTracker
+from apps.worker.market_intelligence import run_market_intelligence_cycle, run_universe_cycle
 from apps.worker.news_agent import run_news_cycle
 from apps.worker.scanner import run_scan_cycle
 from apps.worker.sentiment_agent import run_sentiment_shift_cycle
@@ -127,12 +139,14 @@ def main() -> None:
     logger.info(
         "Worker starting — market_data=%s news=%s macro=%s llm_configured=%s "
         "scan_interval=%ss news_interval=%ss strategy_interval=%ss research_interval=%ss "
-        "macro_calendar_interval=%ss sentiment_shift_interval=%ss alert_delivery_interval=%ss",
+        "macro_calendar_interval=%ss sentiment_shift_interval=%ss alert_delivery_interval=%ss "
+        "universe_interval=%ss market_intelligence_interval=%ss",
         provider.name, news_provider.name, macro_provider.name, llm_client.is_available(),
         settings.scan_interval_seconds, settings.news_interval_seconds,
         settings.strategy_interval_seconds, settings.research_interval_seconds,
         settings.macro_calendar_interval_seconds, settings.sentiment_shift_interval_seconds,
         settings.alert_delivery_interval_seconds,
+        settings.universe_interval_seconds, settings.market_intelligence_interval_seconds,
     )
     if not llm_client.is_available():
         logger.warning(
@@ -170,6 +184,8 @@ def main() -> None:
     last_alert_delivery_run = 0.0
     last_reconciliation_run = 0.0
     last_health_snapshot_run = 0.0
+    last_universe_run = 0.0
+    last_market_intelligence_run = 0.0
     tracker = CadenceFailureTracker()
     market_alert_tracker = MarketAlertTracker()
 
@@ -236,6 +252,27 @@ def main() -> None:
                     logger.exception("strategy cadence failed")
                     tracker.record_failure(db, "strategy", str(exc))
                 last_strategy_run = cycle_start
+
+            if cycle_start - last_universe_run >= settings.universe_interval_seconds:
+                try:
+                    run_universe_cycle(db, provider)
+                    tracker.record_success("universe")
+                except Exception as exc:  # noqa: BLE001
+                    logger.exception("universe cadence failed")
+                    tracker.record_failure(db, "universe", str(exc))
+                last_universe_run = cycle_start
+
+            if cycle_start - last_market_intelligence_run >= settings.market_intelligence_interval_seconds:
+                try:
+                    # Runs after the strategy cadence above so freshly-scored
+                    # Signals exist to enrich with an opportunity_type this
+                    # same pass (apps/worker/market_intelligence.py).
+                    run_market_intelligence_cycle(db)
+                    tracker.record_success("market_intelligence")
+                except Exception as exc:  # noqa: BLE001
+                    logger.exception("market_intelligence cadence failed")
+                    tracker.record_failure(db, "market_intelligence", str(exc))
+                last_market_intelligence_run = cycle_start
 
             if cycle_start - last_research_run >= settings.research_interval_seconds:
                 try:

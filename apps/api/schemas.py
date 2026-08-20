@@ -176,6 +176,14 @@ class OpportunityOut(BaseModel):
     confidence: float
     tier: str
     ts: datetime
+    # "PROMPT 11" §14/§20-24 -- closed-vocabulary classification, dedup key,
+    # and decay timestamp. All three are nullable: enrichment happens on the
+    # market_intelligence cadence (apps/worker/market_intelligence.py) after
+    # the Signal already exists, so a just-created Signal can briefly have
+    # none of them set yet -- an honest "not yet classified", not a bug.
+    opportunity_type: str | None = None
+    fingerprint: str | None = None
+    expires_at: datetime | None = None
 
 
 class ScoreBreakdown(BaseModel):
@@ -220,6 +228,10 @@ class OpportunityDetailOut(BaseModel):
     # Prompt 3 §23 — "WHY THIS OPPORTUNITY EXISTS": structured, deterministic
     # justifications only, never the model's private reasoning.
     evidence: list[EvidenceItemOut]
+    # "PROMPT 11" §14/§20-24 -- see OpportunityOut's matching fields.
+    opportunity_type: str | None = None
+    fingerprint: str | None = None
+    expires_at: datetime | None = None
 
 
 # --- Phase 3 -----------------------------------------------------------
@@ -1197,3 +1209,112 @@ class ResearchBudgetStatusOut(BaseModel):
     limit: float
     remaining: float
     exhausted: bool
+
+
+# --- "PROMPT 11" (Global Market Intelligence) ---------------------------
+
+
+class AssetUniverseOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    symbol: str
+    asset_class: str
+    exchange: str | None
+    status: str
+    liquidity_score: float | None
+    data_quality_score: float | None
+    is_active: bool
+
+
+class VolatilityEventOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    asset_id: int
+    ts: datetime
+    timeframe: str
+    event_type: str
+    realized_vol: float
+    percentile: float
+    regime: str
+
+
+class AnomalyOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    asset_id: int
+    ts: datetime
+    anomaly_type: str
+    score: float
+    evidence: dict
+    reviewed: bool
+    explanation: str | None
+
+
+class WatchlistEntryOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    asset_id: int
+    reason: str
+    status: str
+    added_at: datetime
+    updated_at: datetime
+    removed_at: datetime | None
+    removal_reason: str | None
+
+
+class OpportunityClusterOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    ts: datetime
+    signal_ids: list
+    asset_ids: list
+    direction: str
+    factor: str | None
+    avg_correlation: float
+    combined_risk: float
+    ranking_penalty: float
+
+
+class MarketSessionOut(BaseModel):
+    session: str
+    state: str
+    local_time: str
+    minutes_to_next_transition: int | None
+
+
+class GlobalMarketSnapshotOut(BaseModel):
+    ts: datetime
+    sessions: list[MarketSessionOut]
+    active_overlaps: list[list[str]]
+
+
+class StructureReadingOut(BaseModel):
+    symbol: str
+    structure: str
+    break_state: str
+    range_high: float | None
+    range_low: float | None
+    reason: str | None
+
+
+# Score ≠ probability -- see packages/market/pairs.py's module docstring:
+# this is experimental research, never an execution signal.
+class PairSignalOut(BaseModel):
+    symbol_a: str
+    symbol_b: str
+    hedge_ratio: float
+    zscore: float
+    looks_mean_reverting: bool
+    autocorrelation: float
+    sample_size: int
+    disclaimer: str
+
+
+class HistoricalAnalogOut(BaseModel):
+    sample_size: int
+    win_rate: float | None
+    outcome_counts: dict
+    realized_pnl_samples: list[float]
+    worst_pnl: float | None
+    quality: str
+    disclaimer: str

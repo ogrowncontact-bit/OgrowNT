@@ -47,6 +47,9 @@ def list_opportunities(
             confidence=score.confidence,
             tier=score.tier,
             ts=signal.ts,
+            opportunity_type=signal.opportunity_type,
+            fingerprint=signal.fingerprint,
+            expires_at=signal.expires_at,
         )
         for signal, asset, strategy, regime, score in rows
     ]
@@ -111,6 +114,9 @@ def get_opportunity(
             notes=score.notes,
         ),
         evidence=[EvidenceItemOut(kind=e.kind, text=e.text) for e in evidence],
+        opportunity_type=signal.opportunity_type,
+        fingerprint=signal.fingerprint,
+        expires_at=signal.expires_at,
     )
 
 
@@ -149,6 +155,9 @@ def list_signals(
             confidence=score.confidence,
             tier=score.tier,
             ts=signal.ts,
+            opportunity_type=signal.opportunity_type,
+            fingerprint=signal.fingerprint,
+            expires_at=signal.expires_at,
         )
         for signal, asset, strategy, regime, score in rows
     ]

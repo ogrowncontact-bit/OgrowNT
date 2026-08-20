@@ -9,14 +9,19 @@ import {
   getBacktests,
   getContradictions,
   getDecisions,
+  getDynamicWatchlist,
+  getGlobalMarketSessions,
   getHealth,
   getLearnedRules,
   getMacroEvents,
+  getMarketAnomalies,
   getMarketEvents,
   getMarketOverview,
+  getMarketUniverse,
   getNews,
   getNewsRisk,
   getOpportunities,
+  getOpportunityClusters,
   getPortfolio,
   getPortfolioExposure,
   getPositions,
@@ -30,6 +35,7 @@ import {
   getTradeJournal,
   getTrades,
   getTradingPerformance,
+  getVolatilityEvents,
 } from "@/lib/api";
 import { StatCard } from "@/components/StatCard";
 import { RiskBadge } from "@/components/RiskBadge";
@@ -46,6 +52,7 @@ import { EquitySparkline } from "@/components/EquitySparkline";
 import { NewsIntelligenceCenter } from "@/components/NewsIntelligenceCenter";
 import { AICommandCenter } from "@/components/AICommandCenter";
 import { AutonomousResearchLab } from "@/components/AutonomousResearchLab";
+import { GlobalMarketCommandCenter } from "@/components/GlobalMarketCommandCenter";
 import { StrategyLab } from "@/components/StrategyLab";
 import { AutonomousStatusBadge } from "@/components/AutonomousStatusBadge";
 import { PauseResumeButton } from "@/components/PauseResumeButton";
@@ -113,12 +120,19 @@ export default async function DashboardPage() {
       getContradictions(token, 20),
     ]);
 
-  const [backtests, promotionChecks, analytics, researchReport] = await Promise.all([
-    getBacktests(token, 8),
-    Promise.all((strategyLearning ?? []).map((s) => getPromotionCheck(token, s.strategy_id))),
-    getAnalyticsOverview(token),
-    getResearchReport(token),
-  ]);
+  const [backtests, promotionChecks, analytics, researchReport, marketUniverse, volatilityEvents, marketAnomalies, dynamicWatchlist, opportunityClusters, globalMarketSessions] =
+    await Promise.all([
+      getBacktests(token, 8),
+      Promise.all((strategyLearning ?? []).map((s) => getPromotionCheck(token, s.strategy_id))),
+      getAnalyticsOverview(token),
+      getResearchReport(token),
+      getMarketUniverse(token),
+      getVolatilityEvents(token, 20),
+      getMarketAnomalies(token, 20),
+      getDynamicWatchlist(token),
+      getOpportunityClusters(token, 20),
+      getGlobalMarketSessions(token),
+    ]);
   const promotionByStrategyId = new Map(
     (strategyLearning ?? []).map((s, i) => [s.strategy_id, promotionChecks[i]])
   );
@@ -448,6 +462,15 @@ export default async function DashboardPage() {
       <AICommandCenter agents={agents ?? []} decisions={decisions ?? []} contradictions={contradictions ?? []} />
 
       <AutonomousResearchLab report={researchReport} />
+
+      <GlobalMarketCommandCenter
+        universe={marketUniverse}
+        volatilityEvents={volatilityEvents}
+        anomalies={marketAnomalies}
+        watchlist={dynamicWatchlist}
+        clusters={opportunityClusters}
+        sessions={globalMarketSessions}
+      />
 
       <NewsIntelligenceCenter
         news={news ?? []}

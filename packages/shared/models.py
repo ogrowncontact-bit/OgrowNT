@@ -25,6 +25,10 @@ that uses them:
   Post-Phase-7 ("Prompt 10" autonomous research & evolution): research_hypotheses,
     experiments, strategy_versions, research_approvals, drift_detections,
     research_queue, research_budget_usage, research_knowledge_edges
+  Post-Phase-7 ("Prompt 11" global market intelligence): opportunity_clusters,
+    anomalies, volatility_events, watchlist_entries, plus metadata/status
+    columns added to assets and opportunity_type/fingerprint/expires_at
+    added to signals
 """
 from datetime import datetime, timezone
 
@@ -68,11 +72,28 @@ class AdminUser(Base):
 
 
 class Asset(Base):
+    """"PROMPT 11" §5 extends asset_class to allow architecture-ready-but-
+    not-yet-supported classes (etf/future/bond/option): the column accepts
+    them, but no engine in this codebase acts on them yet — a deliberate
+    divergence, not a claim of real support.
+
+    `status` (§5's richer ACTIVE/INACTIVE/SUSPENDED/DATA_UNAVAILABLE/
+    LOW_LIQUIDITY/QUARANTINED lifecycle) is additive: the existing
+    `is_active` boolean is kept untouched as a derived convenience column
+    (every current call site that reads it keeps working) and is kept in
+    sync wherever `status` is written. `status` is the new source of truth
+    going forward.
+    """
+
     __tablename__ = "assets"
     __table_args__ = (
         CheckConstraint(
-            "asset_class IN ('crypto','forex','equity','index','commodity')",
+            "asset_class IN ('crypto','forex','equity','index','commodity','etf','future','bond','option')",
             name="ck_assets_asset_class",
+        ),
+        CheckConstraint(
+            "status IN ('active','inactive','suspended','data_unavailable','low_liquidity','quarantined')",
+            name="ck_assets_status",
         ),
     )
 
@@ -83,6 +104,17 @@ class Asset(Base):
     base_currency: Mapped[str | None] = mapped_column(String)
     quote_currency: Mapped[str | None] = mapped_column(String)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    # -- "PROMPT 11" (global market intelligence) --
+    name: Mapped[str | None] = mapped_column(String)
+    currency: Mapped[str | None] = mapped_column(String)
+    country: Mapped[str | None] = mapped_column(String)
+    sector: Mapped[str | None] = mapped_column(String)
+    industry: Mapped[str | None] = mapped_column(String)
+    timezone: Mapped[str | None] = mapped_column(String)
+    trading_hours: Mapped[dict | None] = mapped_column(JSON)
+    status: Mapped[str] = mapped_column(String, default="active", nullable=False)
+    liquidity_score: Mapped[float | None] = mapped_column(Float)
+    data_quality_score: Mapped[float | None] = mapped_column(Float)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
 
@@ -329,12 +361,29 @@ class MarketRegime(Base):
 
 
 class Signal(Base):
+    """"PROMPT 11" §12/§17/§27: `Signal` + `OpportunityScore` together are
+    already ~90% of the prompt's "Opportunity" object (component-score
+    overlap: technical/pattern/regime_fit/historical_edge/liquidity/news/
+    risk_reward/strategy_performance/volatility_penalty against the same
+    ignore/watch/possible/high_quality/exceptional tiers). Rather than
+    create a parallel `Opportunity` table, the few genuinely missing fields
+    (closed-vocabulary `opportunity_type`, dedup `fingerprint`, decay
+    `expires_at`) are added directly here.
+    """
+
     __tablename__ = "signals"
     __table_args__ = (
         CheckConstraint("direction IN ('long','short')", name="ck_signals_direction"),
         CheckConstraint(
-            "status IN ('pending','scored','risk_rejected','approved','executed','expired')",
+            "status IN ('pending','scored','risk_rejected','approved','executed','expired','invalidated')",
             name="ck_signals_status",
+        ),
+        CheckConstraint(
+            "opportunity_type IS NULL OR opportunity_type IN "
+            "('breakout','breakdown','trend_continuation','reversal','mean_reversion','momentum',"
+            "'volatility_expansion','volatility_compression','relative_strength','relative_weakness',"
+            "'event_driven','statistical_arbitrage_candidate')",
+            name="ck_signals_opportunity_type",
         ),
     )
 
@@ -349,6 +398,10 @@ class Signal(Base):
     regime_id: Mapped[int | None] = mapped_column(ForeignKey("market_regimes.id"))
     pattern_id: Mapped[int | None] = mapped_column(ForeignKey("patterns.id"))
     status: Mapped[str] = mapped_column(String, default="pending", nullable=False)
+    # -- "PROMPT 11" (global market intelligence) --
+    opportunity_type: Mapped[str | None] = mapped_column(String)
+    fingerprint: Mapped[str | None] = mapped_column(String, index=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     strategy: Mapped["StrategyRow"] = relationship()
     asset: Mapped["Asset"] = relationship()
@@ -1555,3 +1608,147 @@ class ResearchKnowledgeEdge(Base):
     evidence: Mapped[dict] = mapped_column(JSON, default=dict)
     source_experiment_id: Mapped[int | None] = mapped_column(ForeignKey("experiments.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
+# -- "PROMPT 11" Global Market Intelligence & 24/7 Opportunity Discovery ----
+#
+# Deliberately only 4 new tables (+ the Asset/Signal ALTERs above). Most of
+# the prompt's "Data Storage" list (§89: MarketUniverse/Asset/MarketSnapshot/
+# ScanResult/Opportunity/OpportunityEvidence/EconomicEvent/MarketRegime/
+# VolatilityState/MarketAlert) already exists (Asset/OHLCV/Signal+
+# OpportunityScore/MacroEvent/MarketRegime/Alert respectively) or is a cheap
+# pure function that doesn't need persistence (MarketSession — see
+# packages/market/sessions.py). A persisted `ScanResult` table was
+# deliberately rejected: unbounded per-scan-cycle growth with no retention
+# story, and every scan's output already lands in Signal/OpportunityScore
+# (the durable record) or nowhere (a rejected candidate, honestly discarded).
+
+
+class OpportunityCluster(Base):
+    """A group of correlated same-direction opportunities detected together
+    (e.g. BTC/ETH/SOL longs) — "PROMPT 11" §33-35. Reuses
+    `packages/risk/correlation_guard.py::refresh_correlation_matrix`'s
+    output rather than computing correlation again. Evidence for a combined-
+    risk penalty applied at ranking time (`packages/market/ranking.py`), not
+    a claim of a causal relationship between the clustered assets.
+    """
+
+    __tablename__ = "opportunity_clusters"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, nullable=False, index=True)
+    signal_ids: Mapped[list] = mapped_column(JSON, nullable=False)
+    asset_ids: Mapped[list] = mapped_column(JSON, nullable=False)
+    direction: Mapped[str] = mapped_column(String, nullable=False)
+    factor: Mapped[str | None] = mapped_column(String)
+    avg_correlation: Mapped[float] = mapped_column(Float, nullable=False)
+    combined_risk: Mapped[float] = mapped_column(Float, nullable=False)
+    ranking_penalty: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+
+    __table_args__ = (
+        CheckConstraint("direction IN ('long','short')", name="ck_opportunity_clusters_direction"),
+    )
+
+
+class Anomaly(Base):
+    """An unusual price/volume/volatility/spread/correlation/news move —
+    "PROMPT 11" §45-49. Reuses `packages/quant/patterns/detector.py`'s
+    `detect_anomaly`/`detect_cross_asset` z-score primitives; this table
+    adds only the persisted 0-100 `AnomalyScore` and review status.
+
+    An anomaly is explicitly NOT a trade signal — see the module docstring
+    in `packages/market/anomaly.py`: "an anomaly means INVESTIGATE, not
+    TRADE." `reviewed`/`explanation` exist so a human (or a later research
+    cycle) can record what a flagged anomaly turned out to be, never so the
+    system auto-trades it.
+    """
+
+    __tablename__ = "anomalies"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    asset_id: Mapped[int] = mapped_column(ForeignKey("assets.id"), nullable=False, index=True)
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, nullable=False, index=True)
+    anomaly_type: Mapped[str] = mapped_column(String, nullable=False)
+    score: Mapped[float] = mapped_column(Float, nullable=False)
+    evidence: Mapped[dict] = mapped_column(JSON, default=dict)
+    reviewed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    explanation: Mapped[str | None] = mapped_column(Text)
+
+    asset: Mapped["Asset"] = relationship()
+
+    __table_args__ = (
+        CheckConstraint(
+            "anomaly_type IN ('price_move','volume_spike','volatility_spike','spread_expansion',"
+            "'correlation_breakdown','news_shock')",
+            name="ck_anomalies_anomaly_type",
+        ),
+        CheckConstraint("score >= 0 AND score <= 100", name="ck_anomalies_score_range"),
+    )
+
+
+class VolatilityEvent(Base):
+    """A compression/expansion/spike/collapse transition in an asset's
+    volatility regime — "PROMPT 11" §54-57. Reuses
+    `packages/quant/indicators/core.py::atr`/`realized_volatility` for the
+    underlying measurement; this table adds only the percentile ranking and
+    the persisted regime-transition record.
+    """
+
+    __tablename__ = "volatility_events"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    asset_id: Mapped[int] = mapped_column(ForeignKey("assets.id"), nullable=False, index=True)
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, nullable=False, index=True)
+    timeframe: Mapped[str] = mapped_column(String, nullable=False)
+    event_type: Mapped[str] = mapped_column(String, nullable=False)
+    realized_vol: Mapped[float] = mapped_column(Float, nullable=False)
+    percentile: Mapped[float] = mapped_column(Float, nullable=False)
+    regime: Mapped[str] = mapped_column(String, nullable=False)
+
+    asset: Mapped["Asset"] = relationship()
+
+    __table_args__ = (
+        CheckConstraint(
+            "event_type IN ('compression','expansion','spike','collapse')",
+            name="ck_volatility_events_event_type",
+        ),
+        CheckConstraint(
+            "regime IN ('low','normal','high','extreme')",
+            name="ck_volatility_events_regime",
+        ),
+    )
+
+
+class WatchlistEntry(Base):
+    """The Dynamic Watchlist — "PROMPT 11" §77-79. One row per asset
+    (re-triggering an already-active entry updates `reason`/`updated_at`
+    in place rather than inserting a duplicate). Removed, not deleted, so
+    `removal_reason` stays available for the Discovery Memory feedback loop
+    (§85-86).
+    """
+
+    __tablename__ = "watchlist_entries"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    asset_id: Mapped[int] = mapped_column(ForeignKey("assets.id"), nullable=False, unique=True)
+    reason: Mapped[str] = mapped_column(String, nullable=False)
+    status: Mapped[str] = mapped_column(String, default="active", nullable=False)
+    added_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, nullable=False)
+    removed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    removal_reason: Mapped[str | None] = mapped_column(String)
+
+    asset: Mapped["Asset"] = relationship()
+
+    __table_args__ = (
+        CheckConstraint(
+            "reason IN ('anomaly','news','volume','volatility','opportunity','manual')",
+            name="ck_watchlist_entries_reason",
+        ),
+        CheckConstraint("status IN ('active','removed')", name="ck_watchlist_entries_status"),
+        CheckConstraint(
+            "removal_reason IS NULL OR removal_reason IN "
+            "('opportunity_disappeared','liquidity_deterioration','data_quality_deterioration','manual')",
+            name="ck_watchlist_entries_removal_reason",
+        ),
+    )

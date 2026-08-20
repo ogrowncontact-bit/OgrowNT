@@ -4,7 +4,7 @@
 **paper trading only** — no real orders are ever sent. See the full engineering
 specification in [`docs/blueprint/`](docs/blueprint/00-overview.md).
 
-## Status: Phase 7 (Advanced Analytics, Alerts, Optimization) + post-Phase-7 security hardening + Supervisor 24/7 + Market Data Engine + Scanner + Pattern/Strategy/Opportunity confidence & evidence + Risk Engine/Portfolio Intelligence hardening (Risk Center, Risk Heatmap, Strategy Health, configurable Safety Belts) + News Intelligence Center (sentiment, macro calendar, event risk, source consensus) + Strategy Lab (walk-forward optimization, Monte Carlo, stress testing, robustness/quality scoring, async backtest job system) + Autonomous Paper Trading (TradingMode gate, Portfolio Manager allocation cap, trailing stops, HOLD/REDUCE/CLOSE position risk policy, anti-martingale loss-streak protection, idempotency keys, event sourcing, reconciliation engine, RBAC, manual trading controls, Autonomous Trading Center dashboard) + Multi-Agent Quant Intelligence (18 named specialist agents, Consensus/Contradiction/Chief Decision Engine, reliability/calibration/quarantine, AI Command Center dashboard) + Autonomous Research & Evolution Engine (hypothesis generation, ExperimentEngine, bounded genetic search, StrategyVersion Champion/Challenger, drift detection, knowledge graph, human-approval-gated promotion, Autonomous Research Lab dashboard)
+## Status: Phase 7 (Advanced Analytics, Alerts, Optimization) + post-Phase-7 security hardening + Supervisor 24/7 + Market Data Engine + Scanner + Pattern/Strategy/Opportunity confidence & evidence + Risk Engine/Portfolio Intelligence hardening (Risk Center, Risk Heatmap, Strategy Health, configurable Safety Belts) + News Intelligence Center (sentiment, macro calendar, event risk, source consensus) + Strategy Lab (walk-forward optimization, Monte Carlo, stress testing, robustness/quality scoring, async backtest job system) + Autonomous Paper Trading (TradingMode gate, Portfolio Manager allocation cap, trailing stops, HOLD/REDUCE/CLOSE position risk policy, anti-martingale loss-streak protection, idempotency keys, event sourcing, reconciliation engine, RBAC, manual trading controls, Autonomous Trading Center dashboard) + Multi-Agent Quant Intelligence (18 named specialist agents, Consensus/Contradiction/Chief Decision Engine, reliability/calibration/quarantine, AI Command Center dashboard) + Autonomous Research & Evolution Engine (hypothesis generation, ExperimentEngine, bounded genetic search, StrategyVersion Champion/Challenger, drift detection, knowledge graph, human-approval-gated promotion, Autonomous Research Lab dashboard) + Global Market Intelligence & 24/7 Opportunity Discovery (global session clock, asset universe manager, fast-scan → deep-scan pipeline, multi-timeframe agreement/conflict, market structure, volatility regime transitions, anomaly scanner, closed-vocabulary opportunity classification, correlated-opportunity clustering, risk-adjusted ranking, dynamic watchlist, Global Market Command Center dashboard)
 
 Per [`docs/blueprint/12-roadmap.md`](docs/blueprint/12-roadmap.md):
 
@@ -377,6 +377,38 @@ end-to-end scenario simulation of the research loop. See
 [`docs/autonomous-research-lab.md`](docs/autonomous-research-lab.md) for
 the as-built reference.
 
+**Global Market Intelligence & 24/7 Opportunity Discovery.** "O robô NÃO
+deve tentar operar tudo" — a `MarketUniverseManager`
+(`packages/market/universe.py`) runs every asset through DISCOVERED →
+DATA VALIDATION → LIQUIDITY VALIDATION → CLASSIFICATION → PAPER ELIGIBLE
+before anything else considers it. A cheap `FastMarketScanner` scores the
+whole paper-eligible universe and keeps only its Top-N; just that subset
+gets the heavier per-asset engines — market structure (swing points,
+break-of-structure vs. change-of-character), volatility regime
+transitions (percentile-ranked against the asset's own history, persisted
+only on a real transition), a 5-of-6-closed-type anomaly scanner ("an
+anomaly means INVESTIGATE, not TRADE" — nothing here ever creates an
+order from one), and multi-timeframe agreement — resampled honestly from
+real 1m OHLCV rather than trusting the mock provider's mislabeled
+higher-timeframe output. A pure classifier maps the evidence onto a closed
+12-value opportunity-type vocabulary with a geometric-bucket dedup
+fingerprint and a per-type expiry; same-direction correlated opportunities
+get clustered (reusing the existing correlation matrix, never
+recomputing) into a proportional ranking penalty, so the final ranking is
+risk-adjusted attractiveness, never raw return potential — and "SCORE ≠
+PROBABILIDADE" stays true of every one of these numbers, same as the
+Phase 2/3 Opportunity Score. Two new cadences inside the same `apps/worker`
+process (no 13 separate OS processes); experimental pairs research
+(spread/z-score, an honestly-labeled mean-reversion heuristic, explicitly
+"não executar arbitragem real") is on-demand only, never a periodic
+cadence, since it has no dedicated table to write into. 168 new tests
+(1084/1084 in the full suite), including a 150-synthetic-asset scale
+smoke test, per-asset engine-failure isolation, and a real dashboard
+click-through. See `docs/blueprint/12-roadmap.md`'s "PROMPT 11" section
+for the full list and
+[`docs/global-market-intelligence.md`](docs/global-market-intelligence.md)
+for the as-built reference.
+
 ## Architecture at a glance
 
 ```text
@@ -388,15 +420,22 @@ apps/
                reality-gap, failure-check, compare), alerts, analytics, trading
                control — autonomous status/activity/performance, pause/resume/
                close-position/cancel-order/reset-account manual controls,
-               agents (AI Command Center), research-lab (Autonomous Research Lab))
+               agents (AI Command Center), research-lab (Autonomous Research Lab),
+               global-market (universe/volatility/anomalies/watchlist/clusters/
+               sessions/structure/pairs/historical-analog))
   worker/      24/7 loop: Market Data Agent (scan), Trade Monitor + safety-belt
                refresh + Learning Agent (per trade close, every scan), News
                Intelligence Agent (ingestion + DET analysis, own cadence),
                Macro Calendar Worker (own cadence), Sentiment Worker (shift
                detection, own cadence), Strategy Engine cycle (history
                backfill, regime, patterns, strategies, scoring, Risk Engine, paper
-               execution), Research Agent + News Learning (own, longer cadence),
-               Alert delivery cycle (own cadence) — never imports packages/backtest
+               execution), Universe cycle (own cadence), Global Market
+               Intelligence cycle (fast-scan → structure/volatility/anomaly/
+               multi-timeframe on the Top-N → opportunity classification →
+               clustering, own cadence, after Strategy so it can enrich this
+               cycle's fresh Signals), Research Agent + News Learning (own,
+               longer cadence), Alert delivery cycle (own cadence) — never
+               imports packages/backtest
   backtest_worker/ separate process (deliberately not a cadence inside worker/
                above — see packages/backtest below): polls backtest_jobs and
                dispatches by kind (backtest/walk_forward/walk_forward_optimization/
@@ -448,6 +487,17 @@ packages/
                drift detection, knowledge graph, budget, human-approval-gated
                promotion — never imports packages/execution, structurally
                proven (test_research_dsl_sandbox.py)
+  market/      Global Market Intelligence — sessions (global clock), liquidity
+               (score + tiers, no order book), universe (MarketUniverseManager),
+               fast_scanner (cheap Top-N cut), multi_timeframe (honest 1m
+               resampling), structure (swing points, BOS/CHoCH), volatility
+               (regime transitions), anomaly (5 detectors, never a trade
+               signal), opportunity_types (closed 12-value classifier +
+               fingerprint + expiry), clustering (correlated-exposure
+               penalty), historical_analog (Market Memory wrapper), pairs
+               (experimental, on-demand only, never executes), watchlist
+               (Dynamic Watchlist), ranking (risk-adjusted, not raw return)
+               — never imports packages/execution
 infra/
   docker/      docker-compose + Dockerfiles
   migrations/  Alembic

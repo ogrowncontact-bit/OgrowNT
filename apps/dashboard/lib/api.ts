@@ -724,6 +724,82 @@ export async function decideResearchApproval(token: string, approvalId: number, 
   return { ok: true as const, result: body as ResearchReportApproval };
 }
 
+// --- "PROMPT 11" (Global Market Intelligence) ---------------------------
+
+export type AssetUniverseEntry = {
+  id: number;
+  symbol: string;
+  asset_class: string;
+  exchange: string | null;
+  status: string;
+  liquidity_score: number | null;
+  data_quality_score: number | null;
+  is_active: boolean;
+};
+export type VolatilityEventEntry = {
+  id: number;
+  asset_id: number;
+  ts: string;
+  timeframe: string;
+  event_type: string;
+  realized_vol: number;
+  percentile: number;
+  regime: string;
+};
+export type AnomalyEntry = {
+  id: number;
+  asset_id: number;
+  ts: string;
+  anomaly_type: string;
+  score: number;
+  evidence: Record<string, unknown>;
+  reviewed: boolean;
+  explanation: string | null;
+};
+export type WatchlistEntryItem = {
+  id: number;
+  asset_id: number;
+  reason: string;
+  status: string;
+  added_at: string;
+  updated_at: string;
+  removed_at: string | null;
+  removal_reason: string | null;
+};
+export type OpportunityClusterEntry = {
+  id: number;
+  ts: string;
+  signal_ids: number[];
+  asset_ids: number[];
+  direction: string;
+  factor: string | null;
+  avg_correlation: number;
+  combined_risk: number;
+  ranking_penalty: number;
+};
+export type MarketSessionEntry = {
+  session: string;
+  state: string;
+  local_time: string;
+  minutes_to_next_transition: number | null;
+};
+export type GlobalMarketSnapshot = {
+  ts: string;
+  sessions: MarketSessionEntry[];
+  active_overlaps: string[][];
+};
+
+export const getMarketUniverse = (token: string) => apiFetch<AssetUniverseEntry[]>("/api/global-market/universe", token);
+export const getVolatilityEvents = (token: string, limit = 20) =>
+  apiFetch<VolatilityEventEntry[]>(`/api/global-market/volatility?limit=${limit}`, token);
+export const getMarketAnomalies = (token: string, limit = 20) =>
+  apiFetch<AnomalyEntry[]>(`/api/global-market/anomalies?limit=${limit}`, token);
+export const getDynamicWatchlist = (token: string) => apiFetch<WatchlistEntryItem[]>("/api/global-market/watchlist", token);
+export const getOpportunityClusters = (token: string, limit = 20) =>
+  apiFetch<OpportunityClusterEntry[]>(`/api/global-market/clusters?limit=${limit}`, token);
+export const getGlobalMarketSessions = (token: string) =>
+  apiFetch<GlobalMarketSnapshot>("/api/global-market/sessions", token);
+
 export async function login(email: string, password: string) {
   const res = await fetch(`${API_URL}/api/auth/login`, {
     method: "POST",

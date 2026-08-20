@@ -10,6 +10,7 @@ from apps.api.routers import (
     assets,
     auth,
     backtests,
+    global_market,
     learning,
     market,
     market_data,
@@ -79,6 +80,7 @@ app.include_router(agents.router)
 app.include_router(agents.decisions_router)
 app.include_router(agents.contradictions_router)
 app.include_router(research_lab.router)
+app.include_router(global_market.router)
 
 
 @app.get("/")

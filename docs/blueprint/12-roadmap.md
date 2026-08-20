@@ -1805,6 +1805,205 @@ Divergências deliberadas, documentadas (não silenciosas):
    inferência estatística sobre um lote de hipóteses, o outro limita
    consumo bruto de compute; nenhum substitui o outro.
 
+## "PROMPT 11" — Global Market Intelligence + 24/7 Opportunity Discovery (pós-Fase 10) — **status: implementada e validada nesta sessão**
+
+O "PROMPT 11" pede um sistema de descoberta de oportunidades que cobre o
+mercado global (crypto/forex/equity/index/commodity agora, arquitetura
+pronta para etf/future/bond/option quando houver dados) através de um
+pipeline `GLOBAL MARKET → UNIVERSE → DATA QUALITY → FAST SCAN → DEEP SCAN
+→ PATTERN DETECTION → REGIME ANALYSIS → NEWS/MACRO → OPPORTUNITY SCORE →
+RISK FILTER → PORTFOLIO FILTER → TOP OPPORTUNITIES → CHIEF DECISION
+ENGINE`, com o princípio explícito citado literalmente no prompt: **"O
+robô NÃO deve tentar operar tudo."** Duas restrições estruturais citadas
+literalmente: **"O scanner: NUNCA executa trades. Ele somente produz:
+MARKET INFORMATION, OPPORTUNITIES, ALERTS"** e **"SCORE ≠ PROBABILIDADE —
+Não interpretar: Opportunity Score 80 como: 80% chance of profit."**
+Mapeando os 100 §§ contra o código já existente das Fases 1-10: o
+universo multi-classe (`Asset` + `MockMarketDataProvider` + 22 ativos
+seeded), o par `Signal`+`OpportunityScore` (Fase 2/3, ~90% de overlap com
+o "Opportunity" do prompt), `CorrelationMatrixEntry` +
+`refresh_correlation_matrix` (Fase 3), `MacroEvent` (Prompt 6, quase
+idêntico a "EconomicEvent"), `detect_anomaly`/`detect_cross_asset`
+(Fase 4, nunca antes ligados a nada), Market Memory (Fase 5) e
+`atr`/`realized_volatility`/`trend_strength`/`avg_volume` (Fase 2) já
+cobriam uma fracção grande do pedido — este prompt não reconstrói um
+sistema de inteligência de mercado do zero, constrói uma camada fina e
+genuinamente nova de orquestração/persistência/classificação em cima
+dessa infraestrutura extensa já provada.
+
+- [x] **DB — `Asset`/`Signal` estendidos + migração `0018`** (§5, §9,
+      §14, §20-24) — `Asset` ganha `name`/`currency`/`country`/`sector`/
+      `industry`/`timezone`/`trading_hours`/`status`/`liquidity_score`/
+      `data_quality_score` (mantendo `is_active` intocado como coluna de
+      conveniência derivada) e `asset_class` alargado para aceitar
+      `etf`/`future`/`bond`/`option` (arquitetura pronta, sem suporte
+      real ainda); `Signal` ganha `opportunity_type`/`fingerprint`/
+      `expires_at` mais `invalidated` no vocabulário de `status`. 4
+      tabelas novas (`opportunity_clusters`, `anomalies`,
+      `volatility_events`, `watchlist_entries`) — upgrade→downgrade→upgrade
+      verificado contra Postgres real
+- [x] **`packages/market/sessions.py` — MarketSessionEngine +
+      GlobalMarketClock** (§16-20) — 6 sessões nomeadas (New
+      York/London/Frankfurt/Tokyo/Hong Kong/Sydney) via `zoneinfo` (sem
+      dependência nova), disciplina UTC-interno/conversão-só-na-interface,
+      detecção de overlaps nomeados (London/New York, Tokyo/London);
+      forex tratado como 24/5 contínuo em vez de horas de uma única bolsa
+- [x] **`packages/market/liquidity.py`** (§9-10, §71-73) — score 0-100 +
+      tiers (TIER_A/B/C/UNTRADABLE) a partir de um percentil de volume
+      entre pares da mesma classe + qualidade de dados; sem order book em
+      lado nenhum do código, `OrderBookSnapshot` é um input opcional
+      aditivo para quando um provider real existir
+- [x] **`packages/market/universe.py` — MarketUniverseManager** (§5-10,
+      §67-70) — pipeline DISCOVERED → DATA VALIDATION → LIQUIDITY
+      VALIDATION → CLASSIFICATION → PAPER ELIGIBLE reutilizando
+      `packages/data/quality.py` e o liquidity.py acima; quarentena por
+      eventos `INVALID_MARKET_DATA` repetidos; nunca toca `is_active`
+      (flag histórica que controla os ciclos ao vivo) nem os estados
+      operador-only `inactive`/`suspended`
+- [x] **`packages/market/fast_scanner.py` — FastMarketScanner** (§6-7,
+      §25-32) — `InitialOpportunityScore` barato (momentum/volatilidade/
+      volume/breakout-proximity/range-position/liquidity/news-activity)
+      sobre todo o universo paper-eligible, cortado ao Top-N antes do
+      DeepMarketScanner (o `apps/worker/strategy_runner.py` já existente)
+      correr só nesse subconjunto
+- [x] **`packages/market/multi_timeframe.py`** (§39-43) — como nenhuma
+      tabela deste sistema alguma vez guardou uma barra realmente
+      diferente de 1m (o `MockMarketDataProvider` ignora o parâmetro
+      `timeframe` no bucketing), este módulo faz resample honesto de 1m
+      real para 5m/15m/1h/4h/1D em vez de confiar em dados fabricados;
+      estado `TIMEFRAME_CONFLICT` explícito, nunca escondido numa média
+- [x] **`packages/market/structure.py`** (§58-61) — detector de swing
+      points (fractal simples), classificação HH/HL/LH/LL →
+      uptrend/downtrend/ranging, BREAK_OF_STRUCTURE vs.
+      CHANGE_OF_CHARACTER
+- [x] **`packages/market/volatility.py`** (§54-57) — percentil de
+      `realized_volatility` (Fase 2) contra a própria história do activo,
+      regime low/normal/high/extreme, evento persistido só numa
+      TRANSIÇÃO real de regime (não a cada ciclo) — mesma disciplina de
+      `packages/research/drift.py`
+- [x] **`packages/market/anomaly.py` — AnomalyScanner** (§45-49) — 5 dos
+      6 tipos fechados ligados a detecção real (price_move via
+      `detect_anomaly`, volume_spike via `MarketEvent` já existente,
+      volatility_spike via o módulo acima, correlation_breakdown via
+      `detect_cross_asset` — nunca chamado antes em lado nenhum —,
+      news_shock via `NewsEvent.importance=critical`); spread_expansion
+      nunca é emitido (sem order book, ver liquidity.py). "Uma anomalia
+      significa INVESTIGATE, não TRADE" — `reviewed`/`explanation`
+      existem para revisão humana, não para auto-trading
+- [x] **`packages/market/opportunity_types.py`** (§14-15, §20-24) —
+      classificador puro para o vocabulário fechado de 12 valores
+      (BREAKOUT/BREAKDOWN/TREND_CONTINUATION/REVERSAL/MEAN_REVERSION/
+      MOMENTUM/VOLATILITY_EXPANSION/VOLATILITY_COMPRESSION/
+      RELATIVE_STRENGTH/RELATIVE_WEAKNESS/EVENT_DRIVEN/
+      STATISTICAL_ARBITRAGE_CANDIDATE) a partir de evidência já computada
+      pelos módulos acima; fingerprint de dedup por bucket geométrico de
+      preço + bucket de tempo (não aritmética ingénua — um bucket
+      proporcional ao próprio preço degenera para a mesma razão sempre,
+      um bug real encontrado e corrigido durante os testes desta fase);
+      `expires_at` por tipo
+- [x] **`packages/market/clustering.py`** (§33-35) — union-find sobre a
+      matriz de correlação já persistida (nunca recomputa), só
+      mesma-direcção; penalidade de ranking proporcional a tamanho do
+      cluster × correlação média, capada em 1.0
+- [x] **`packages/market/historical_analog.py`** (§62-63) — wrapper fino
+      sobre `find_similar_contexts`/`similar_context_win_rate` (Fase 5),
+      P&L real via `Position.realized_pnl` (nunca fabricado), qualidade
+      degrada honestamente abaixo de 5 amostras; disclaimer fixo em todo
+      resultado — nunca "will happen again"
+- [x] **`packages/market/pairs.py`** (§36-38) — spread/hedge-ratio/
+      z-score/heurística de mean-reversion (autocorrelação lag-1,
+      explicitamente NÃO um teste ADF/Engle-Granger real — sem biblioteca
+      estatística além de Python puro neste repositório) só sobre pares
+      já correlacionados; **nunca ligado a um cadence periódico** (sem
+      tabela dedicada — decisão de "economia de tabelas" — rodar num
+      relógio seria compute desperdiçado); exposto só sob-pedido via
+      `GET /api/global-market/pairs`. "Mas: não executar arbitragem real"
+- [x] **`packages/market/watchlist.py` — DynamicWatchlist** (§77-79) —
+      uma linha por activo (`UniqueConstraint`), reativar em vez de
+      duplicar; decaimento por TTL como complemento passivo às 3 razões
+      de remoção explícitas do prompt
+- [x] **`packages/market/ranking.py` — OpportunityRankingEngine** (§26-29)
+      — reordena por `final_score` (já ajustado a risco, Fase 2/3) ×
+      desconto proporcional do cluster penalty acima — nunca por retorno
+      bruto
+- [x] **`apps/worker/market_intelligence.py` + wiring** (§92) — 2
+      cadências novas no mesmo processo único (`universe_interval_seconds`,
+      `market_intelligence_interval_seconds`) em vez dos 13 processos
+      nomeados do prompt — mesma divergência deliberada já estabelecida
+      desde a Fase 2 ("single process, multiple independently-cadenced
+      logical workers"); a cadência de market intelligence corre depois
+      da cadência de strategy no mesmo ciclo para poder enriquecer os
+      Signals recém-criados com `opportunity_type` no mesmo passe
+- [x] **API — `apps/api/routers/global_market.py`** (§91) — prefixo
+      `/api/global-market/*` deliberadamente distinto (universe/
+      volatility/anomalies/watchlist/clusters/sessions/structure/pairs/
+      historical-analog); `GET /api/opportunities` e `/api/regime`
+      (já existentes) estendidos in-place com
+      `opportunity_type`/`fingerprint`/`expires_at` em vez de duplicados;
+      `/api/economic-events` e `/api/alerts` já cobertos por
+      `/api/macro` e `/api/alerts` existentes
+- [x] **Dashboard "Global Market Command Center"** — painel construído
+      sobre os novos endpoints, deliberadamente sem duplicar secções que
+      já existem noutros painéis (Top Opportunities/Regimes/News/Macro/
+      Correlation/Exposure/Risk); cobre só o genuinamente novo: universo,
+      watchlist, anomalias, eventos de volatilidade, clusters, relógio
+      global de sessões
+- [x] **Testes** — 168 novos (1084/1084 no total): modelos + migração
+      (13), sessions (16), liquidity (8), universe (7), fast_scanner (7),
+      multi_timeframe (7), structure (9), volatility (12), anomaly (6),
+      opportunity_types incluindo o bug de bucketing geométrico (24),
+      clustering (6), historical_analog (5), pairs (11), watchlist (7),
+      ranking (5), worker wiring end-to-end incluindo classificação real
+      BREAKOUT sobre um zigzag verificado à mão (5), API com login real
+      (14), stress/scale/integração cruzada — 150 activos sintéticos,
+      isolamento de falha por-activo, exclusão real de um activo
+      DATA_UNAVAILABLE pelo FastMarketScanner, dedup de fingerprint,
+      fecho de mercado forex ao fim-de-semana (6)
+- [x] **verificado ao vivo** contra Postgres real: `run_universe_cycle` e
+      `run_market_intelligence_cycle` corridos directamente contra os 25
+      activos + 3236 candles reais da base de dev antes dos testes
+      automatizados existirem, produzindo transições de status reais e
+      uma entrada de watchlist real (`BNBUSDT — volume`); API real com
+      token admin real; dashboard real (login real via browser,
+      screenshot do painel "Global Market Command Center" com dados reais
+      — sessões ao vivo, 25 activos classificados, watchlist populada).
+      `ruff`/`mypy`/suite completa limpos (1084/1084) — três corridas
+      inflacionadas (16 e 424 falsas falhas) vieram de processos pytest
+      concorrentes disputando a mesma base de teste, não de regressões
+      reais; confirmado com uma corrida exclusiva limpa
+
+Divergências deliberadas, documentadas (não silenciosas):
+
+1. `is_active` (booleano histórico que controla os ciclos ao vivo desde a
+   Fase 1) nunca é escrito por `MarketUniverseManager` — só `status`
+   (campo novo, aditivo) é. Sincronizar os dois automaticamente pararia o
+   scanner de tentar recuperar dados de um activo `data_unavailable`/
+   `quarantined`, exactamente o oposto do que uma reavaliação automática
+   devia permitir.
+2. `packages/market/pairs.py` não corre num cadence periódico — sem
+   tabela dedicada (decisão de economia de tabelas), rodar no relógio
+   produziria compute sem destino persistido. Exposto só sob-pedido via
+   API.
+3. `packages/market/multi_timeframe.py` resample honesto de 1m em vez de
+   confiar em timeframes "nativos" do provider mock, que na realidade
+   ignora o parâmetro `timeframe` no bucketing — usar esses dados
+   diretamente teria sido um bug de dados fabricados, não uma feature.
+4. Cointegração em `pairs.py` é uma heurística de autocorrelação lag-1,
+   não um teste ADF/Engle-Granger real — sem biblioteca estatística além
+   de Python puro neste repositório (mesma restrição de
+   `packages/research/significance.py`), documentado explicitamente como
+   proxy, nunca apresentado como teste rigoroso.
+5. 13 workers nomeados do §92 viram 2 cadências novas dentro do único
+   processo `apps/worker` já existente — mesma divergência "single
+   process, multiple cadences" estabelecida desde a Fase 2 e reutilizada
+   em todos os prompts subsequentes; 3 dos 13 (EconomicCalendarWorker/
+   NewsScannerWorker/AlertWorker) já existiam como cadências
+   macro/news/alert-delivery antes deste prompt.
+6. Um teste de escala a 10.000 activos (§93) não foi corrido — este é um
+   sistema privado de um único utilizador; o smoke test de 150 activos
+   sintéticos prova ausência de blowup O(n²) ou query sem limite sem
+   fingir que este ambiente tem infraestrutura ao nível de uma bolsa.
+
 ## Evolução futura (fora de âmbito até validação completa)
 
 Live brokers, exchanges reais (crypto/forex/ações), ML avançado, deep learning,
