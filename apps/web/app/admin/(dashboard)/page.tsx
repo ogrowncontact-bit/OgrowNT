@@ -26,43 +26,60 @@ export default async function AdminHomePage() {
 
       <div className="mb-8 grid grid-cols-2 gap-3 sm:grid-cols-4">
         <div className={card}>
-          <p className={cardLabel}>Revenue (paid)</p>
-          <p className={cardValue}>{formatMoney(overview.totalRevenueCents)}</p>
-          <p className={cardLabel}>{overview.totalPaidOrders} orders</p>
+          <p className={cardLabel}>Today&apos;s visitors</p>
+          <p className={cardValue}>{overview.todaysVisitors}</p>
         </div>
         <div className={card}>
-          <p className={cardLabel}>Completion → paid</p>
+          <p className={cardLabel}>Assessment starts</p>
+          <p className={cardValue}>{overview.totalStartedSessions}</p>
+        </div>
+        <div className={card}>
+          <p className={cardLabel}>Completed assessments</p>
+          <p className={cardValue}>{overview.totalCompletedSessions}</p>
+        </div>
+        <div className={card}>
+          <p className={cardLabel}>Purchases</p>
+          <p className={cardValue}>{overview.totalPaidOrders}</p>
+        </div>
+      </div>
+
+      <div className="mb-8 grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <div className={card}>
+          <p className={cardLabel}>Revenue (paid)</p>
+          <p className={cardValue}>{formatMoney(overview.totalRevenueCents)}</p>
+        </div>
+        <div className={card}>
+          <p className={cardLabel}>Conversion (completed → paid)</p>
           <p className={cardValue}>{overview.completionToPaidConversionPct}%</p>
-          <p className={cardLabel}>{overview.totalCompletedSessions} completed</p>
         </div>
         <div className={card}>
           <p className={cardLabel}>Experiences live</p>
           <p className={cardValue}>{overview.publishedAssessments}</p>
           <p className={cardLabel}>{overview.totalAssessments} total</p>
         </div>
-        <div className={card}>
-          <p className={cardLabel}>Sessions started</p>
-          <p className={cardValue}>{overview.totalStartedSessions}</p>
-        </div>
+        <Link href="/admin/orders" className={`${card} hover:border-[var(--inner-accent-soft)]`}>
+          <p className={cardLabel}>Payments pending</p>
+          <p className={`${cardValue} ${overview.pendingOrders > 0 ? "text-[var(--inner-accent)]" : ""}`}>{overview.pendingOrders}</p>
+        </Link>
       </div>
 
       <div className="mb-8 grid grid-cols-2 gap-3 sm:grid-cols-5">
+        <Link href="/admin/reports" className={`${card} hover:border-[var(--inner-accent-soft)]`}>
+          <p className={cardLabel}>Reports pending</p>
+          <p className={cardValue}>{reportCounts.pending + reportCounts.generating}</p>
+        </Link>
         <div className={card}>
           <p className={cardLabel}>Reports ready</p>
           <p className={cardValue}>{reportCounts.ready}</p>
         </div>
         <div className={card}>
-          <p className={cardLabel}>Generation failed</p>
+          <p className={cardLabel}>Reports failed</p>
           <p className={`${cardValue} ${reportCounts.failed > 0 ? "text-[var(--inner-accent)]" : ""}`}>{reportCounts.failed}</p>
         </div>
         <div className={card}>
-          <p className={cardLabel}>Email failed</p>
+          <p className={cardLabel}>Emails failed</p>
           <p className={`${cardValue} ${reportCounts.emailFailed > 0 ? "text-[var(--inner-accent)]" : ""}`}>{reportCounts.emailFailed}</p>
         </div>
-        <Link href="/admin/orders" className={`${card} hover:border-[var(--inner-accent-soft)]`}>
-          <p className={cardLabel}>Payments pending</p>
-          <p className={`${cardValue} ${overview.pendingOrders > 0 ? "text-[var(--inner-accent)]" : ""}`}>{overview.pendingOrders}</p>
-        </Link>
         <Link href="/admin/reports" className={`${card} flex items-center justify-center hover:border-[var(--inner-accent-soft)]`}>
           <p className="text-[13px] text-[var(--inner-ink-soft)]">View all reports →</p>
         </Link>

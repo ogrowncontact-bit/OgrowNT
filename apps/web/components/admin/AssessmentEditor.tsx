@@ -14,6 +14,7 @@ import type {
   RecommendationCandidate,
 } from "@inner/assessment-engine";
 import type { LandingContentOverrides, FaqItem } from "@/lib/landingContent";
+import type { AssessmentVersionSummary } from "@/lib/admin/catalogReader";
 
 const input =
   "w-full rounded-[var(--inner-radius-sm)] border border-[var(--inner-line)] bg-[var(--inner-card)] px-3 py-2 text-[14px] text-[var(--inner-ink)] focus:border-[var(--inner-accent)] focus:outline-none";
@@ -39,6 +40,7 @@ interface Props {
   dimensionPool: DimensionDefinition[];
   otherAssessmentSlugs: string[];
   initialLandingContent: LandingContentOverrides;
+  versionHistory: AssessmentVersionSummary[];
 }
 
 export function AssessmentEditor({
@@ -49,6 +51,7 @@ export function AssessmentEditor({
   dimensionPool,
   otherAssessmentSlugs,
   initialLandingContent,
+  versionHistory,
 }: Props) {
   const router = useRouter();
   const [config, setConfig] = useState<AssessmentConfig>(initialConfig);
@@ -318,6 +321,20 @@ export function AssessmentEditor({
             {savingLanding ? "Saving..." : "Save landing content"}
           </button>
           {landingSavedMessage && <p className="text-[13px] text-[var(--inner-accent)]">{landingSavedMessage}</p>}
+        </div>
+      </Section>
+
+      <Section title={`Version History (${versionHistory.length})`}>
+        <div className="space-y-2">
+          {versionHistory.map((v) => (
+            <div key={v.id} className="flex items-center justify-between rounded-[var(--inner-radius-sm)] border border-[var(--inner-line)] px-3 py-2 text-[13px]">
+              <span className="font-medium text-[var(--inner-ink)]">Version {v.versionNumber}</span>
+              <span className="text-[var(--inner-ink-soft)]">
+                {v.publishedAt ? `Published ${new Date(v.publishedAt).toLocaleString()}` : "Draft — not published"}
+              </span>
+            </div>
+          ))}
+          {versionHistory.length === 0 && <p className="text-[13px] text-[var(--inner-muted)]">No versions yet.</p>}
         </div>
       </Section>
 
@@ -596,6 +613,13 @@ function QuestionListEditor({
   function remove(i: number) {
     onChange(questions.filter((_, idx) => idx !== i));
   }
+  function move(i: number, direction: -1 | 1) {
+    const target = i + direction;
+    if (target < 0 || target >= questions.length) return;
+    const next = [...questions];
+    [next[i], next[target]] = [next[target], next[i]];
+    onChange(next);
+  }
   function add() {
     onChange([
       ...questions,
@@ -637,6 +661,22 @@ function QuestionListEditor({
                 </option>
               ))}
             </select>
+            <button
+              onClick={() => move(i, -1)}
+              disabled={i === 0}
+              aria-label="Move up"
+              className={`${smallBtn} px-2 disabled:opacity-30`}
+            >
+              ↑
+            </button>
+            <button
+              onClick={() => move(i, 1)}
+              disabled={i === questions.length - 1}
+              aria-label="Move down"
+              className={`${smallBtn} px-2 disabled:opacity-30`}
+            >
+              ↓
+            </button>
             <button onClick={() => remove(i)} className={removeBtn}>
               Remove
             </button>

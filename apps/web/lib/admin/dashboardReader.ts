@@ -9,18 +9,25 @@ export interface DashboardOverview {
   totalRevenueCents: number;
   completionToPaidConversionPct: number;
   pendingOrders: number;
+  todaysVisitors: number;
 }
 
 export async function getDashboardOverview(): Promise<DashboardOverview> {
-  const [totalAssessments, publishedAssessments, totalStartedSessions, totalCompletedSessions, paidAgg, pendingOrders] = await Promise.all([
-    prisma.assessment.count(),
-    prisma.assessment.count({ where: { status: "published" } }),
-    prisma.assessmentSession.count(),
-    prisma.assessmentSession.count({ where: { status: "completed" } }),
-    prisma.order.aggregate({ where: { status: "paid" }, _sum: { amountCents: true }, _count: { _all: true } }),
-    // An order can sit "pending" if a webhook never lands (or a mock-payment click never completes) — worth an operator's attention if this creeps up.
-    prisma.order.count({ where: { status: "pending" } }),
-  ]);
+  const startOfToday = new Date();
+  startOfToday.setHours(0, 0, 0, 0);
+
+  const [totalAssessments, publishedAssessments, totalStartedSessions, totalCompletedSessions, paidAgg, pendingOrders, todaysVisitors] =
+    await Promise.all([
+      prisma.assessment.count(),
+      prisma.assessment.count({ where: { status: "published" } }),
+      prisma.assessmentSession.count(),
+      prisma.assessmentSession.count({ where: { status: "completed" } }),
+      prisma.order.aggregate({ where: { status: "paid" }, _sum: { amountCents: true }, _count: { _all: true } }),
+      // An order can sit "pending" if a webhook never lands (or a mock-payment click never completes) — worth an operator's attention if this creeps up.
+      prisma.order.count({ where: { status: "pending" } }),
+      // lastSeenAt (not createdAt) — counts anyone active today, new or returning, matching what "Today's Visitors" actually implies.
+      prisma.anonymousSession.count({ where: { lastSeenAt: { gte: startOfToday } } }),
+    ]);
 
   const totalPaidOrders = paidAgg._count._all;
   const totalRevenueCents = paidAgg._sum.amountCents ?? 0;
@@ -34,6 +41,7 @@ export async function getDashboardOverview(): Promise<DashboardOverview> {
     totalRevenueCents,
     completionToPaidConversionPct: totalCompletedSessions > 0 ? Math.round((totalPaidOrders / totalCompletedSessions) * 1000) / 10 : 0,
     pendingOrders,
+    todaysVisitors,
   };
 }
 

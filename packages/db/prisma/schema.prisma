@@ -140,6 +140,7 @@ model Assessment {
   recommendedFrom  RecommendationRule[] @relation("RecommendationFrom")
   recommendedTo    RecommendationRule[] @relation("RecommendationTo")
   assessmentSessions AssessmentSession[]
+  campaigns        Campaign[]
 
   @@schema("catalog")
 }
@@ -312,6 +313,39 @@ enum JournalPostStatus {
   draft
   published
   archived
+
+  @@schema("catalog")
+}
+
+enum CampaignStatus {
+  draft
+  active
+  paused
+  ended
+
+  @@schema("catalog")
+}
+
+/**
+ * Attribution management only (FASE 25 §CAMPAIGN CENTER) — no advertising
+ * API integration. `campaignParam` is the utm_campaign value this record
+ * tracks; performance is computed live from real AnonymousSession/Order
+ * UTM data (see lib/admin/campaignsReader.ts), never stored here.
+ */
+model Campaign {
+  id            String         @id @default(cuid())
+  name          String
+  source        String
+  medium        String
+  campaignParam String
+  landingSlug   String?
+  assessmentId  String?
+  assessment    Assessment?    @relation(fields: [assessmentId], references: [id])
+  status        CampaignStatus @default(draft)
+  budgetNotes   String?
+  creativeName  String?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
 
   @@schema("catalog")
 }
@@ -636,6 +670,18 @@ enum AdminRole {
   owner
   editor
   viewer
+  // FASE 25 role prep — additive only, existing owner/editor/viewer rows and
+  // every requireAdmin()/requireAdminWriter() gate keep working unchanged.
+  // These map onto the same coarse read/write split (see lib/adminAuth.ts):
+  // founder/admin/content_editor behave like owner/editor (write-capable),
+  // support/analyst behave like viewer (read-only). No per-resource ACL
+  // exists yet — that would mean auditing every write route individually,
+  // which is a real gap, not something to fake here.
+  founder
+  admin
+  content_editor
+  support
+  analyst
 
   @@schema("admin")
 }

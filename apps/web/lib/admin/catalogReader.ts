@@ -80,3 +80,20 @@ export async function loadAssessmentForEdit(
 
   return { config: mapVersionToConfig(assessment, version, recommendations, prices), hasDraft: !!draft };
 }
+
+export interface AssessmentVersionSummary {
+  id: string;
+  versionNumber: number;
+  publishedAt: Date | null;
+  createdAt: Date;
+}
+
+/** Every publish snapshots a new AssessmentVersion row (docs/ARCHITECTURE.md §10) — this just makes that existing history visible. */
+export async function listVersionHistory(assessmentId: string): Promise<AssessmentVersionSummary[]> {
+  const versions = await prisma.assessmentVersion.findMany({
+    where: { assessmentId },
+    orderBy: { versionNumber: "desc" },
+    select: { id: true, versionNumber: true, publishedAt: true, createdAt: true },
+  });
+  return versions;
+}
