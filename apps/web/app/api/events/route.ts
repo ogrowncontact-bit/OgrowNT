@@ -9,6 +9,10 @@ const ALLOWED_CLIENT_EVENTS = new Set([
   "checkout_started",
   "share_clicked",
   "recommendation_viewed",
+  "hero_cta_clicked",
+  "scroll_depth",
+  "faq_opened",
+  "premium_preview_viewed",
 ]);
 
 /** Lightweight beacon endpoint for client-fired funnel events. Never accepts arbitrary/raw-text properties. */

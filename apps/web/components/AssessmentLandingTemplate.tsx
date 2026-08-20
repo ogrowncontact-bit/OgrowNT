@@ -1,11 +1,15 @@
 import { Suspense } from "react";
 import type { AssessmentConfig } from "@inner/assessment-engine";
 import { Screen } from "@inner/ui";
-import { BeginButton } from "@/components/BeginButton";
 import { LandingViewTracker } from "@/components/LandingViewTracker";
-import { getDiscoveryPoints, getFaqItems, TRUST_POINTS } from "@/lib/landingContent";
+import { getDiscoveryPoints, getFaqItems, getPremiumPreviewItems, TRUST_POINTS, type LandingContentOverrides } from "@/lib/landingContent";
+import type { AssessmentCtaState } from "@/lib/assessmentCtaState";
 import { PublicNav } from "@/components/PublicNav";
-import { formatPrice } from "@/lib/money";
+import { ExampleInsight } from "@/components/landing/ExampleInsight";
+import { FaqAccordion } from "@/components/landing/FaqAccordion";
+import { PremiumReportPreview } from "@/components/landing/PremiumReportPreview";
+import { AssessmentCTA } from "@/components/landing/AssessmentCTA";
+import { ScrollDepthTracker } from "@/components/landing/ScrollDepthTracker";
 
 const HOW_IT_WORKS = [
   "Answer a short, adaptive set of questions",
@@ -14,17 +18,28 @@ const HOW_IT_WORKS = [
   "Unlock the complete report if you want to go deeper",
 ];
 
+interface Props {
+  slug: string;
+  assessmentId: string;
+  config: AssessmentConfig;
+  landingContent: LandingContentOverrides;
+  ctaState: AssessmentCtaState;
+}
+
 /**
- * The one reusable template every /[slug] landing page renders through —
- * all copy beyond the assessment's own name/hook/description is generic
- * and identical across experiences, and the "what you'll discover" list
- * comes from the assessment's own real report structure (see
- * lib/landingContent.ts), not invented teaser copy.
+ * The one reusable template every /[slug] landing page renders through
+ * (FASE 23 §LANDING STRUCTURE, 9 sections) — all copy beyond the
+ * assessment's own real data is either generic-and-identical across
+ * experiences, or admin-editable CMS copy (lib/landingContent.ts's
+ * LandingContentOverrides) with a code-level fallback, never fabricated.
  */
-export function AssessmentLandingTemplate({ slug, config }: { slug: string; config: AssessmentConfig }) {
+export function AssessmentLandingTemplate({ slug, assessmentId, config, landingContent, ctaState }: Props) {
   const discoveryPoints = getDiscoveryPoints(config);
-  const faqItems = getFaqItems(config);
+  const faqItems = getFaqItems(config, landingContent.extraFaqItems);
+  const premiumPreviewItems = getPremiumPreviewItems(config);
   const price = config.pricing.individual;
+  const headline = landingContent.headline?.trim() || config.name;
+  const subheadline = landingContent.subheadline?.trim() || config.hook;
 
   return (
     <Screen
@@ -32,20 +47,30 @@ export function AssessmentLandingTemplate({ slug, config }: { slug: string; conf
       eyebrow={<PublicNav />}
       footer={
         <Suspense fallback={null}>
-          <BeginButton slug={slug} />
+          <AssessmentCTA slug={slug} ctaState={ctaState} label={landingContent.ctaLabel ?? undefined} />
         </Suspense>
       }
     >
       <Suspense fallback={null}>
         <LandingViewTracker slug={slug} />
       </Suspense>
+      <ScrollDepthTracker slug={slug} />
 
-      <h1 className="font-display text-[34px] leading-[1.15] text-[var(--inner-ink)]">{config.name}</h1>
-      <p className="mt-5 text-[18px] leading-relaxed text-[var(--inner-ink-soft)]">{config.hook}</p>
+      {/* SECTION 1 — Hero */}
+      <h1 className="font-display text-[34px] leading-[1.15] text-[var(--inner-ink)]">{headline}</h1>
+      <p className="mt-5 text-[18px] leading-relaxed text-[var(--inner-ink-soft)]">{subheadline}</p>
       <p className="mt-6 text-sm text-[var(--inner-muted)]">
         About {config.recommendedQuestions} short questions · roughly 4–7 minutes · private, no account needed
       </p>
 
+      {/* SECTION 2 — Curiosity Hook */}
+      {landingContent.curiosityHook?.trim() && (
+        <section className="mt-10 border-l-2 border-[var(--inner-accent)] pl-4">
+          <p className="text-[16px] italic leading-relaxed text-[var(--inner-ink)]">{landingContent.curiosityHook}</p>
+        </section>
+      )}
+
+      {/* SECTION 3 — What You'll Discover */}
       {discoveryPoints.length > 0 && (
         <section className="mt-12">
           <h2 className="font-display text-[13px] font-medium uppercase tracking-[0.15em] text-[var(--inner-muted)]">
@@ -62,6 +87,7 @@ export function AssessmentLandingTemplate({ slug, config }: { slug: string; conf
         </section>
       )}
 
+      {/* SECTION 4 — How It Works */}
       <section className="mt-12">
         <h2 className="font-display text-[13px] font-medium uppercase tracking-[0.15em] text-[var(--inner-muted)]">How it works</h2>
         <ol className="mt-4 space-y-3">
@@ -79,17 +105,20 @@ export function AssessmentLandingTemplate({ slug, config }: { slug: string; conf
         </ol>
       </section>
 
+      {/* SECTION 5 — Example Insight */}
+      {landingContent.exampleInsight?.trim() && <ExampleInsight text={landingContent.exampleInsight} />}
+
+      {/* SECTION 6 — Premium Report Preview */}
       {price && (
-        <section className="mt-12 rounded-[var(--inner-radius-lg)] border border-[var(--inner-line)] bg-[var(--inner-card)] p-6">
-          <p className="text-xs font-medium uppercase tracking-[0.15em] text-[var(--inner-muted)]">Complete report</p>
-          <p className="font-display mt-2 text-[24px] text-[var(--inner-ink)]">{formatPrice(price.amountCents, price.currency)}</p>
-          <p className="mt-2 text-[14px] leading-relaxed text-[var(--inner-ink-soft)]">
-            The free result gives you a short interpretation. The complete report goes deeper — a personalized, multi-section
-            profile as a private web page and a downloadable PDF, both yours to keep.
-          </p>
-        </section>
+        <PremiumReportPreview
+          items={premiumPreviewItems}
+          priceCents={price.amountCents}
+          currency={price.currency}
+          assessmentId={assessmentId}
+        />
       )}
 
+      {/* SECTION 7 — Privacy & Trust */}
       <section className="mt-12">
         <h2 className="font-display text-[13px] font-medium uppercase tracking-[0.15em] text-[var(--inner-muted)]">Privacy</h2>
         <ul className="mt-4 space-y-2">
@@ -101,17 +130,24 @@ export function AssessmentLandingTemplate({ slug, config }: { slug: string; conf
         </ul>
       </section>
 
-      <section className="mb-8 mt-12">
+      {/* SECTION 8 — FAQ */}
+      <section className="mt-12">
         <h2 className="font-display text-[13px] font-medium uppercase tracking-[0.15em] text-[var(--inner-muted)]">
           Frequently asked
         </h2>
-        <div className="mt-4 space-y-5">
-          {faqItems.map((item) => (
-            <div key={item.question}>
-              <p className="text-[15px] font-medium text-[var(--inner-ink)]">{item.question}</p>
-              <p className="mt-1 text-[14px] leading-relaxed text-[var(--inner-ink-soft)]">{item.answer}</p>
-            </div>
-          ))}
+        <FaqAccordion items={faqItems} assessmentId={assessmentId} />
+      </section>
+
+      {/* SECTION 9 — Final CTA */}
+      <section className="mb-8 mt-14 rounded-[var(--inner-radius-lg)] border border-[var(--inner-line)] bg-[var(--inner-paper-dim)] p-6 text-center">
+        <p className="font-display text-[19px] text-[var(--inner-ink)]">Ready to see your pattern?</p>
+        <p className="mt-2 text-[14px] leading-relaxed text-[var(--inner-ink-soft)]">
+          A few minutes, no account needed — your free result is waiting on the other side.
+        </p>
+        <div className="mt-5">
+          <Suspense fallback={null}>
+            <AssessmentCTA slug={slug} ctaState={ctaState} label={landingContent.ctaLabel ?? undefined} />
+          </Suspense>
         </div>
       </section>
     </Screen>

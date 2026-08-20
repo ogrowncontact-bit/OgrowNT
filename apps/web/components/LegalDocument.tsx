@@ -40,6 +40,7 @@ export function LegalDocument({ title, lastUpdated, children }: LegalDocumentPro
         See also: <Link href="/terms" className="underline">Terms of Service</Link> ·{" "}
         <Link href="/privacy-policy" className="underline">Privacy Policy</Link> ·{" "}
         <Link href="/cookies" className="underline">Cookie Policy</Link> ·{" "}
+        <Link href="/refund" className="underline">Refund Policy</Link> ·{" "}
         <Link href="/privacy" className="underline">Access, export or delete your data</Link>
       </p>
     </Screen>

@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { prisma } from "@inner/db";
 import { dimensionPool } from "@inner/content/dimensions";
 import { loadAssessmentForEdit, listAssessmentsForAdmin } from "@/lib/admin/catalogReader";
+import { getLandingContentOverrides } from "@/lib/landingContent";
 import { AssessmentEditor } from "@/components/admin/AssessmentEditor";
 
 export default async function AssessmentBuilderPage({ params }: { params: Promise<{ id: string }> }) {
@@ -13,7 +14,10 @@ export default async function AssessmentBuilderPage({ params }: { params: Promis
   const loaded = await loadAssessmentForEdit(id);
   if (!loaded) notFound();
 
-  const otherAssessments = (await listAssessmentsForAdmin()).filter((a) => a.id !== id);
+  const [otherAssessments, initialLandingContent] = await Promise.all([
+    listAssessmentsForAdmin(),
+    getLandingContentOverrides(assessment.slug),
+  ]);
 
   return (
     <AssessmentEditor
@@ -22,7 +26,8 @@ export default async function AssessmentBuilderPage({ params }: { params: Promis
       hasDraft={loaded.hasDraft}
       status={assessment.status}
       dimensionPool={dimensionPool}
-      otherAssessmentSlugs={otherAssessments.map((a) => a.slug)}
+      otherAssessmentSlugs={otherAssessments.filter((a) => a.id !== id).map((a) => a.slug)}
+      initialLandingContent={initialLandingContent}
     />
   );
 }

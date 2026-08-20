@@ -8,13 +8,21 @@ import Link from "next/link";
  */
 export function PublicNav() {
   return (
-    <nav className="flex items-center justify-between">
+    <nav className="flex items-center justify-between gap-4">
       <Link href="/" className="text-xs font-medium uppercase tracking-[0.2em] text-[var(--inner-muted)]">
         INNER
       </Link>
-      <Link href="/explore" className="text-xs font-medium text-[var(--inner-muted)] underline underline-offset-4">
-        Explore
-      </Link>
+      <div className="flex items-center gap-4">
+        <Link href="/how-it-works" className="text-xs font-medium text-[var(--inner-muted)] underline underline-offset-4">
+          How it works
+        </Link>
+        <Link href="/about" className="text-xs font-medium text-[var(--inner-muted)] underline underline-offset-4">
+          About
+        </Link>
+        <Link href="/explore" className="text-xs font-medium text-[var(--inner-muted)] underline underline-offset-4">
+          Explore
+        </Link>
+      </div>
     </nav>
   );
 }

@@ -7,6 +7,9 @@ import { readAccessUserId } from "@/lib/access";
 import { rankExploreCandidates } from "@/lib/explorePersonalization";
 import { getMasterProfile } from "@/lib/masterProfile";
 import { PublicNav } from "@/components/PublicNav";
+import { ExploreViewTracker } from "@/components/ExploreViewTracker";
+import { ScrollDepthTracker } from "@/components/landing/ScrollDepthTracker";
+import { EXPLORE_CATEGORIES, categoryForSlug } from "@/lib/exploreCategories";
 
 export const metadata: Metadata = {
   title: "Explore all experiences",
@@ -53,6 +56,8 @@ export default async function ExplorePage() {
 
   return (
     <Screen align="top" eyebrow={<PublicNav />}>
+      <ExploreViewTracker />
+      <ScrollDepthTracker />
       <p className="mb-3 text-xs font-medium uppercase tracking-[0.2em] text-[var(--inner-muted)]">Explore INNER</p>
       <h1 className="font-display text-[28px] leading-tight text-[var(--inner-ink)]">
         Every pattern is a different door in.
@@ -75,27 +80,58 @@ export default async function ExplorePage() {
       )}
 
       <div className="mt-8 space-y-4 pb-12">
-        {orderedSlugs.map((slug) => {
-          const config = configBySlug.get(slug);
-          if (!config) return null;
-          const completed = completedSlugs.has(slug);
-          const recommended = recommendedSlugs.has(slug);
-          return (
-            <Link
-              key={config.slug}
-              href={`/${config.slug}`}
-              className="block rounded-[var(--inner-radius-lg)] border border-[var(--inner-line)] bg-[var(--inner-card)] p-5"
-            >
-              {(completed || recommended) && (
-                <p className="mb-1 text-[11px] font-medium uppercase tracking-[0.15em] text-[var(--inner-accent)]">
-                  {completed ? "Completed" : "Recommended for you"}
-                </p>
-              )}
-              <h2 className="font-display text-[19px] text-[var(--inner-ink)]">{config.name}</h2>
-              <p className="mt-2 text-[14px] leading-relaxed text-[var(--inner-ink-soft)]">{config.hook}</p>
-            </Link>
-          );
-        })}
+        {/* Returning users with real history: keep the single prioritized list —
+            recommendations first, same as before. New visitors with nothing
+            completed yet: curated categories instead, per FASE 23's Explore
+            Page spec ("New visitors see curated categories"). */}
+        {completedSlugs.size > 0
+          ? orderedSlugs.map((slug) => {
+              const config = configBySlug.get(slug);
+              if (!config) return null;
+              const completed = completedSlugs.has(slug);
+              const recommended = recommendedSlugs.has(slug);
+              return (
+                <Link
+                  key={config.slug}
+                  href={`/${config.slug}`}
+                  className="block rounded-[var(--inner-radius-lg)] border border-[var(--inner-line)] bg-[var(--inner-card)] p-5"
+                >
+                  {(completed || recommended) && (
+                    <p className="mb-1 text-[11px] font-medium uppercase tracking-[0.15em] text-[var(--inner-accent)]">
+                      {completed ? "Completed" : "Recommended for you"}
+                    </p>
+                  )}
+                  <h2 className="font-display text-[19px] text-[var(--inner-ink)]">{config.name}</h2>
+                  <p className="mt-2 text-[14px] leading-relaxed text-[var(--inner-ink-soft)]">{config.hook}</p>
+                </Link>
+              );
+            })
+          : EXPLORE_CATEGORIES.map((category) => {
+              const inCategory = orderedSlugs.filter((slug) => categoryForSlug(slug) === category && configBySlug.has(slug));
+              if (inCategory.length === 0) return null;
+              return (
+                <div key={category} className="pt-4 first:pt-0">
+                  <h2 className="font-display mb-3 text-[13px] font-medium uppercase tracking-[0.15em] text-[var(--inner-muted)]">
+                    {category}
+                  </h2>
+                  <div className="space-y-4">
+                    {inCategory.map((slug) => {
+                      const config = configBySlug.get(slug)!;
+                      return (
+                        <Link
+                          key={config.slug}
+                          href={`/${config.slug}`}
+                          className="block rounded-[var(--inner-radius-lg)] border border-[var(--inner-line)] bg-[var(--inner-card)] p-5"
+                        >
+                          <h3 className="font-display text-[19px] text-[var(--inner-ink)]">{config.name}</h3>
+                          <p className="mt-2 text-[14px] leading-relaxed text-[var(--inner-ink-soft)]">{config.hook}</p>
+                        </Link>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
       </div>
     </Screen>
   );

@@ -3,6 +3,7 @@ import { Screen } from "@inner/ui";
 import { getAssessmentConfig, listPublishedSlugs } from "@/lib/assessments";
 import { TRUST_POINTS } from "@/lib/landingContent";
 import { PublicNav } from "@/components/PublicNav";
+import { EXPLORE_CATEGORIES, categoryForSlug } from "@/lib/exploreCategories";
 
 const HOW_IT_WORKS = [
   "Pick an experience that matches how you want to understand yourself",
@@ -31,17 +32,23 @@ export default async function Home() {
   return (
     <Screen align="top" eyebrow={<PublicNav />}>
       <h1 className="font-display text-[34px] leading-[1.15] text-[var(--inner-ink)]">
-        Discover what makes you, you.
+        Discover the patterns shaping how you connect, communicate and experience yourself.
       </h1>
       <p className="mt-5 text-[18px] leading-relaxed text-[var(--inner-ink-soft)]">
-        Short, adaptive conversations that reveal real patterns in how you love, decide, connect, and show up —
-        no account needed, results in minutes.
+        INNER is a personal discovery platform — short, adaptive conversations that reveal real patterns in how you
+        love, decide, connect, and show up. No account needed, results in minutes.
       </p>
       <Link
         href="/explore"
         className="mt-8 block rounded-[var(--inner-radius-md)] bg-[var(--inner-accent)] px-6 py-4 text-center text-[16px] font-medium text-[var(--inner-accent-contrast)]"
       >
-        Explore all experiences →
+        Explore Your First Discovery
+      </Link>
+      <Link
+        href="/how-it-works"
+        className="mt-3 block rounded-[var(--inner-radius-md)] border border-[var(--inner-line)] px-6 py-4 text-center text-[16px] font-medium text-[var(--inner-ink)]"
+      >
+        How INNER Works
       </Link>
 
       {configs.length > 0 && (
@@ -49,17 +56,28 @@ export default async function Home() {
           <h2 className="font-display text-[13px] font-medium uppercase tracking-[0.15em] text-[var(--inner-muted)]">
             Choose where to start
           </h2>
-          <div className="mt-4 space-y-4">
-            {configs.map((config) => (
-              <Link
-                key={config.slug}
-                href={`/${config.slug}`}
-                className="block rounded-[var(--inner-radius-lg)] border border-[var(--inner-line)] bg-[var(--inner-card)] p-5"
-              >
-                <h3 className="font-display text-[19px] text-[var(--inner-ink)]">{config.name}</h3>
-                <p className="mt-2 text-[14px] leading-relaxed text-[var(--inner-ink-soft)]">{config.hook}</p>
-              </Link>
-            ))}
+          <div className="mt-4 space-y-6">
+            {EXPLORE_CATEGORIES.map((category) => {
+              const inCategory = configs.filter((c) => categoryForSlug(c.slug) === category);
+              if (inCategory.length === 0) return null;
+              return (
+                <div key={category}>
+                  <p className="mb-3 text-[11px] font-medium uppercase tracking-[0.15em] text-[var(--inner-muted)]">{category}</p>
+                  <div className="space-y-3">
+                    {inCategory.map((config) => (
+                      <Link
+                        key={config.slug}
+                        href={`/${config.slug}`}
+                        className="block rounded-[var(--inner-radius-lg)] border border-[var(--inner-line)] bg-[var(--inner-card)] p-5"
+                      >
+                        <h3 className="font-display text-[19px] text-[var(--inner-ink)]">{config.name}</h3>
+                        <p className="mt-2 text-[14px] leading-relaxed text-[var(--inner-ink-soft)]">{config.hook}</p>
+                      </Link>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </section>
       )}

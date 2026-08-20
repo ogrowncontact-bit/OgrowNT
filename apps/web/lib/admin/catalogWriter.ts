@@ -72,6 +72,35 @@ export async function createAssessment(input: CreateAssessmentInput): Promise<{ 
   return { id: assessment.id };
 }
 
+export interface LandingContentInput {
+  landingHeadline?: string | null;
+  landingSubheadline?: string | null;
+  curiosityHook?: string | null;
+  exampleInsight?: string | null;
+  ctaLabel?: string | null;
+  extraFaqItems?: { question: string; answer: string }[];
+}
+
+/**
+ * Separate, lighter save path from saveAssessmentDraft — landing copy lives
+ * directly on Assessment (unversioned, matches hook/name/description), not
+ * inside AssessmentConfig, so it never needs draft/publish snapshotting or
+ * validateAssessmentConfig's scoring-config checks.
+ */
+export async function updateLandingContent(assessmentId: string, input: LandingContentInput): Promise<void> {
+  await prisma.assessment.update({
+    where: { id: assessmentId },
+    data: {
+      landingHeadline: input.landingHeadline?.trim() || null,
+      landingSubheadline: input.landingSubheadline?.trim() || null,
+      curiosityHook: input.curiosityHook?.trim() || null,
+      exampleInsight: input.exampleInsight?.trim() || null,
+      ctaLabel: input.ctaLabel?.trim() || null,
+      extraFaqItems: (input.extraFaqItems ?? []).filter((f) => f.question.trim() && f.answer.trim()) as any,
+    },
+  });
+}
+
 /** Deletes every nested row under a draft version, then the draft version row itself — used before either recreating or discarding it. */
 async function deleteVersion(versionId: string): Promise<void> {
   await prisma.questionOption.deleteMany({ where: { question: { assessmentVersionId: versionId } } });

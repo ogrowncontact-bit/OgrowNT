@@ -1,30 +1,36 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
+import { prisma } from "@inner/db";
 import { getAssessmentConfig } from "@/lib/assessments";
 import { AssessmentLandingTemplate } from "@/components/AssessmentLandingTemplate";
-import { getFaqItems } from "@/lib/landingContent";
+import { getFaqItems, getLandingContentOverrides } from "@/lib/landingContent";
+import { getAssessmentCtaState } from "@/lib/assessmentCtaState";
+import { readAnonymousSessionId } from "@/lib/anonymousSession";
 import { getSiteUrl } from "@/lib/siteUrl";
 
 export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
   const { slug } = await params;
   const config = await getAssessmentConfig(slug);
   if (!config) return {};
+  const landingContent = await getLandingContentOverrides(slug);
 
+  const title = landingContent.headline?.trim() || config.name;
+  const description = landingContent.subheadline?.trim() || config.hook;
   const url = `${getSiteUrl()}/${slug}`;
   return {
-    title: config.name,
-    description: config.hook,
+    title,
+    description,
     alternates: { canonical: url },
     openGraph: {
-      title: config.name,
-      description: config.hook,
+      title,
+      description,
       url,
       type: "website",
     },
     twitter: {
       card: "summary_large_image",
-      title: config.name,
-      description: config.hook,
+      title,
+      description,
     },
   };
 }
@@ -34,10 +40,19 @@ export default async function ExperienceLanding({ params }: { params: Promise<{ 
   const config = await getAssessmentConfig(slug);
   if (!config) notFound();
 
+  const [assessment, landingContent, anonymousSessionId] = await Promise.all([
+    prisma.assessment.findUnique({ where: { slug }, select: { id: true } }),
+    getLandingContentOverrides(slug),
+    readAnonymousSessionId(),
+  ]);
+  if (!assessment) notFound();
+
+  const ctaState = await getAssessmentCtaState({ anonymousSessionId, slug, assessmentId: assessment.id });
+
   const faqJsonLd = {
     "@context": "https://schema.org",
     "@type": "FAQPage",
-    mainEntity: getFaqItems(config).map((item) => ({
+    mainEntity: getFaqItems(config, landingContent.extraFaqItems).map((item) => ({
       "@type": "Question",
       name: item.question,
       acceptedAnswer: { "@type": "Answer", text: item.answer },
@@ -47,7 +62,13 @@ export default async function ExperienceLanding({ params }: { params: Promise<{ 
   return (
     <>
       <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(faqJsonLd) }} />
-      <AssessmentLandingTemplate slug={slug} config={config} />
+      <AssessmentLandingTemplate
+        slug={slug}
+        assessmentId={assessment.id}
+        config={config}
+        landingContent={landingContent}
+        ctaState={ctaState}
+      />
     </>
   );
 }

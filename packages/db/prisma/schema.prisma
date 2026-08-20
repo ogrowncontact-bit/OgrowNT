@@ -120,6 +120,18 @@ model Assessment {
   hook             String
   targetAudience   String
   status           AssessmentStatus  @default(draft)
+  // Landing-page-specific CMS copy — all optional, all with sensible
+  // code-level fallbacks (see apps/web/lib/landingContent.ts) so an
+  // unedited assessment still renders a complete landing page. Lives
+  // directly on Assessment, unversioned, matching how name/hook/description
+  // already work — not on AssessmentVersion, since this is presentation
+  // copy, not scoring config that needs draft/publish snapshotting.
+  landingHeadline    String?
+  landingSubheadline String?
+  curiosityHook      String?
+  exampleInsight     String?
+  ctaLabel           String?
+  extraFaqItems      Json?   // { question, answer }[] — appended after the generated base FAQ
   createdAt        DateTime          @default(now())
   updatedAt        DateTime          @updatedAt
 
@@ -292,6 +304,29 @@ model Price {
   effectiveFrom DateTime    @default(now())
 
   orders        Order[]
+
+  @@schema("catalog")
+}
+
+enum JournalPostStatus {
+  draft
+  published
+  archived
+
+  @@schema("catalog")
+}
+
+/** Blog foundation (FASE 23 §BLOG FOUNDATION) — CMS + template only, not a full editorial system. */
+model JournalPost {
+  id          String            @id @default(cuid())
+  slug        String            @unique
+  title       String
+  excerpt     String
+  body        String            @db.Text
+  status      JournalPostStatus @default(draft)
+  publishedAt DateTime?
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
 
   @@schema("catalog")
 }

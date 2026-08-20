@@ -13,6 +13,7 @@ import type {
   ReportSection,
   RecommendationCandidate,
 } from "@inner/assessment-engine";
+import type { LandingContentOverrides, FaqItem } from "@/lib/landingContent";
 
 const input =
   "w-full rounded-[var(--inner-radius-sm)] border border-[var(--inner-line)] bg-[var(--inner-card)] px-3 py-2 text-[14px] text-[var(--inner-ink)] focus:border-[var(--inner-accent)] focus:outline-none";
@@ -37,15 +38,46 @@ interface Props {
   status: "draft" | "published" | "archived";
   dimensionPool: DimensionDefinition[];
   otherAssessmentSlugs: string[];
+  initialLandingContent: LandingContentOverrides;
 }
 
-export function AssessmentEditor({ assessmentId, initialConfig, hasDraft, status, dimensionPool, otherAssessmentSlugs }: Props) {
+export function AssessmentEditor({
+  assessmentId,
+  initialConfig,
+  hasDraft,
+  status,
+  dimensionPool,
+  otherAssessmentSlugs,
+  initialLandingContent,
+}: Props) {
   const router = useRouter();
   const [config, setConfig] = useState<AssessmentConfig>(initialConfig);
   const [errors, setErrors] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [savedMessage, setSavedMessage] = useState<string | null>(null);
+  const [landingContent, setLandingContent] = useState<LandingContentOverrides>(initialLandingContent);
+  const [savingLanding, setSavingLanding] = useState(false);
+  const [landingSavedMessage, setLandingSavedMessage] = useState<string | null>(null);
+
+  async function handleSaveLanding() {
+    setSavingLanding(true);
+    setLandingSavedMessage(null);
+    try {
+      const res = await fetch(`/api/admin/assessments/${assessmentId}/landing`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(landingContent),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error ?? "Failed to save");
+      setLandingSavedMessage("Landing content saved — live immediately, no publish needed.");
+    } catch (e) {
+      setLandingSavedMessage(e instanceof Error ? e.message : "Something went wrong.");
+    } finally {
+      setSavingLanding(false);
+    }
+  }
 
   const chosenDimensionKeys = config.dimensions.map((d) => d.key);
 
@@ -183,6 +215,109 @@ export function AssessmentEditor({ assessmentId, initialConfig, hasDraft, status
               onChange={(e) => patch({ scoringModel: { ...config.scoringModel, aiInfluenceCap: Number(e.target.value) } })}
             />
           </div>
+        </div>
+      </Section>
+
+      <Section title="Landing Page">
+        <p className="mb-3 text-[12px] text-[var(--inner-muted)]">
+          Overrides the /{config.slug} landing page. Saves immediately — separate from the draft/publish flow above,
+          since this is presentation copy, not scoring config. Leave a field blank to fall back to Name/Hook above.
+        </p>
+        <div className="space-y-3">
+          <div>
+            <label className={label}>Headline (overrides Name)</label>
+            <input
+              className={input}
+              value={landingContent.headline ?? ""}
+              onChange={(e) => setLandingContent((prev) => ({ ...prev, headline: e.target.value }))}
+            />
+          </div>
+          <div>
+            <label className={label}>Subheadline (overrides Hook)</label>
+            <input
+              className={input}
+              value={landingContent.subheadline ?? ""}
+              onChange={(e) => setLandingContent((prev) => ({ ...prev, subheadline: e.target.value }))}
+            />
+          </div>
+          <div>
+            <label className={label}>Curiosity hook</label>
+            <textarea
+              className={input}
+              rows={2}
+              value={landingContent.curiosityHook ?? ""}
+              onChange={(e) => setLandingContent((prev) => ({ ...prev, curiosityHook: e.target.value }))}
+            />
+          </div>
+          <div>
+            <label className={label}>Example insight (clearly labeled on the page as illustrative, never the visitor's own result)</label>
+            <textarea
+              className={input}
+              rows={2}
+              value={landingContent.exampleInsight ?? ""}
+              onChange={(e) => setLandingContent((prev) => ({ ...prev, exampleInsight: e.target.value }))}
+            />
+          </div>
+          <div>
+            <label className={label}>CTA label (overrides the default per state, e.g. "Start Discovery")</label>
+            <input
+              className={input}
+              value={landingContent.ctaLabel ?? ""}
+              onChange={(e) => setLandingContent((prev) => ({ ...prev, ctaLabel: e.target.value }))}
+            />
+          </div>
+
+          <div>
+            <label className={label}>Extra FAQ items (appended after the standard ones)</label>
+            <div className="space-y-2">
+              {landingContent.extraFaqItems.map((item, i) => (
+                <div key={i} className="rounded-[var(--inner-radius-sm)] border border-[var(--inner-line)] p-2">
+                  <input
+                    className={`${input} mb-1`}
+                    placeholder="Question"
+                    value={item.question}
+                    onChange={(e) => {
+                      const next = [...landingContent.extraFaqItems];
+                      next[i] = { ...next[i], question: e.target.value };
+                      setLandingContent((prev) => ({ ...prev, extraFaqItems: next }));
+                    }}
+                  />
+                  <textarea
+                    className={input}
+                    rows={2}
+                    placeholder="Answer"
+                    value={item.answer}
+                    onChange={(e) => {
+                      const next = [...landingContent.extraFaqItems];
+                      next[i] = { ...next[i], answer: e.target.value };
+                      setLandingContent((prev) => ({ ...prev, extraFaqItems: next }));
+                    }}
+                  />
+                  <button
+                    onClick={() =>
+                      setLandingContent((prev) => ({ ...prev, extraFaqItems: prev.extraFaqItems.filter((_, idx) => idx !== i) }))
+                    }
+                    className={`${removeBtn} mt-1`}
+                  >
+                    Remove
+                  </button>
+                </div>
+              ))}
+              <button
+                onClick={() =>
+                  setLandingContent((prev) => ({ ...prev, extraFaqItems: [...prev.extraFaqItems, { question: "", answer: "" } as FaqItem] }))
+                }
+                className={smallBtn}
+              >
+                + Add FAQ item
+              </button>
+            </div>
+          </div>
+
+          <button onClick={handleSaveLanding} disabled={savingLanding} className={smallBtn}>
+            {savingLanding ? "Saving..." : "Save landing content"}
+          </button>
+          {landingSavedMessage && <p className="text-[13px] text-[var(--inner-accent)]">{landingSavedMessage}</p>}
         </div>
       </Section>
 
