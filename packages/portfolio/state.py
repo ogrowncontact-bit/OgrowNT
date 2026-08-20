@@ -22,7 +22,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from packages.shared.market_data import get_latest_close
-from packages.shared.models import PortfolioSnapshot, Position
+from packages.shared.models import PortfolioSnapshot, Position, SystemState
 from packages.shared.settings import get_settings
 
 
@@ -43,41 +43,67 @@ class PortfolioState:
     open_positions: list[Position]
 
 
+def _reset_epoch(db: Session) -> datetime | None:
+    """RESET PAPER ACCOUNT's cutoff (SystemState.last_reset_at): every
+    PortfolioSnapshot before it is still real history (append-only, never
+    deleted — see that column's docstring) but must stop counting toward
+    peak-equity/drawdown/period-P&L math, or a reset would immediately
+    read as a huge fake drawdown against a peak from a life the account no
+    longer has."""
+    state = db.get(SystemState, True)
+    return state.last_reset_at if state is not None else None
+
+
 def get_latest_cash(db: Session) -> float:
-    latest = db.execute(select(PortfolioSnapshot).order_by(PortfolioSnapshot.ts.desc()).limit(1)).scalar_one_or_none()
+    epoch = _reset_epoch(db)
+    query = select(PortfolioSnapshot).order_by(PortfolioSnapshot.ts.desc()).limit(1)
+    if epoch is not None:
+        query = query.where(PortfolioSnapshot.ts >= epoch)
+    latest = db.execute(query).scalar_one_or_none()
     if latest is None:
         return get_settings().initial_paper_capital
     return latest.cash
 
 
-def _peak_equity(db: Session, current_equity: float) -> float:
-    historical_max = db.execute(select(func.max(PortfolioSnapshot.equity))).scalar_one_or_none()
+def _peak_equity(db: Session, current_equity: float, epoch: datetime | None) -> float:
+    query = select(func.max(PortfolioSnapshot.equity))
+    if epoch is not None:
+        query = query.where(PortfolioSnapshot.ts >= epoch)
+    historical_max = db.execute(query).scalar_one_or_none()
     return max(historical_max or 0.0, current_equity)
 
 
-def _equity_at_start_of_day(db: Session, now: datetime) -> float:
+def _equity_at_start_of_day(db: Session, now: datetime, epoch: datetime | None) -> float:
     day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    if epoch is not None and epoch > day_start:
+        day_start = epoch  # the account's day effectively started at reset, not midnight
     first_today = db.execute(
         select(PortfolioSnapshot).where(PortfolioSnapshot.ts >= day_start).order_by(PortfolioSnapshot.ts.asc()).limit(1)
     ).scalar_one_or_none()
     if first_today is not None:
         return first_today.equity
-    last_before_today = db.execute(
-        select(PortfolioSnapshot).where(PortfolioSnapshot.ts < day_start).order_by(PortfolioSnapshot.ts.desc()).limit(1)
-    ).scalar_one_or_none()
+    before_query = select(PortfolioSnapshot).where(PortfolioSnapshot.ts < day_start).order_by(PortfolioSnapshot.ts.desc()).limit(1)
+    if epoch is not None:
+        before_query = before_query.where(PortfolioSnapshot.ts >= epoch)
+    last_before_today = db.execute(before_query).scalar_one_or_none()
     if last_before_today is not None:
         return last_before_today.equity
     return get_settings().initial_paper_capital
 
 
-def _equity_n_days_ago(db: Session, now: datetime, days: int) -> float:
+def _equity_n_days_ago(db: Session, now: datetime, days: int, epoch: datetime | None) -> float:
     cutoff = now - timedelta(days=days)
+    if epoch is not None and epoch > cutoff:
+        cutoff = epoch
     closest_before = db.execute(
         select(PortfolioSnapshot).where(PortfolioSnapshot.ts <= cutoff).order_by(PortfolioSnapshot.ts.desc()).limit(1)
     ).scalar_one_or_none()
     if closest_before is not None:
         return closest_before.equity
-    earliest = db.execute(select(PortfolioSnapshot).order_by(PortfolioSnapshot.ts.asc()).limit(1)).scalar_one_or_none()
+    earliest_query = select(PortfolioSnapshot).order_by(PortfolioSnapshot.ts.asc()).limit(1)
+    if epoch is not None:
+        earliest_query = earliest_query.where(PortfolioSnapshot.ts >= epoch)
+    earliest = db.execute(earliest_query).scalar_one_or_none()
     return earliest.equity if earliest is not None else get_settings().initial_paper_capital
 
 
@@ -87,6 +113,7 @@ def compute_state(db: Session, cash: float | None = None, timeframe: str = "1m")
     mid-fill, before the new snapshot exists yet).
     """
     now = datetime.now(timezone.utc)
+    epoch = _reset_epoch(db)
     cash = get_latest_cash(db) if cash is None else cash
     open_positions = db.query(Position).filter(Position.status == "open").all()
 
@@ -103,14 +130,14 @@ def compute_state(db: Session, cash: float | None = None, timeframe: str = "1m")
     equity = cash + exposure_notional + unrealized_pnl
     exposure_pct = (exposure_notional / equity * 100) if equity > 0 else 0.0
 
-    peak = _peak_equity(db, equity)
+    peak = _peak_equity(db, equity, epoch)
     drawdown_pct = ((peak - equity) / peak * 100) if peak > 0 else 0.0
 
-    equity_day_start = _equity_at_start_of_day(db, now)
+    equity_day_start = _equity_at_start_of_day(db, now, epoch)
     daily_pnl = equity - equity_day_start
     daily_loss_pct = max(0.0, -daily_pnl) / equity_day_start * 100 if equity_day_start > 0 else 0.0
 
-    equity_week_start = _equity_n_days_ago(db, now, 7)
+    equity_week_start = _equity_n_days_ago(db, now, 7, epoch)
     weekly_pnl = equity - equity_week_start
     weekly_loss_pct = max(0.0, -weekly_pnl) / equity_week_start * 100 if equity_week_start > 0 else 0.0
 
@@ -118,7 +145,7 @@ def compute_state(db: Session, cash: float | None = None, timeframe: str = "1m")
     # fixed 7-day lookback), not calendar-month-to-date — simpler and
     # avoids a discontinuity on the 1st where "monthly" loss would
     # otherwise reset to near-zero mid-drawdown.
-    equity_month_start = _equity_n_days_ago(db, now, 30)
+    equity_month_start = _equity_n_days_ago(db, now, 30, epoch)
     monthly_pnl = equity - equity_month_start
     monthly_loss_pct = max(0.0, -monthly_pnl) / equity_month_start * 100 if equity_month_start > 0 else 0.0
 

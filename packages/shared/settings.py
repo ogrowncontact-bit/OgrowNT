@@ -113,6 +113,24 @@ class Settings(BaseSettings):
     # Strategy Lab UI without hammering Postgres between jobs.
     backtest_job_poll_interval_seconds: int = 5
 
+    # "PROMPT 8" §69-71: how often packages/portfolio/reconciliation.py
+    # re-derives cash from first principles. Frequent — an accounting
+    # mismatch pauses trading, so catching one quickly matters more than the
+    # (cheap, SQL-aggregate-only) cost of running it often.
+    reconciliation_interval_seconds: int = 300
+
+    # "PROMPT 8" §62-66: how often a SystemHealth snapshot row is written —
+    # the historical record GET /api/system/health's on-demand view doesn't
+    # keep.
+    health_snapshot_interval_seconds: int = 300
+
+    # "PROMPT 8" §66 crash-loop protection (SystemState.worker_restart_count):
+    # more worker-process restarts than this within restart_window_seconds
+    # auto-pauses trading rather than letting a silently crash-looping
+    # process keep trading "on" underneath the flapping.
+    max_worker_restarts_per_window: int = 5
+    restart_window_seconds: int = 3600
+
 
 @lru_cache
 def get_settings() -> Settings:

@@ -290,7 +290,7 @@ def run_strategy_cycle(
             )
             if outcome == "executed":
                 executed += 1
-            elif outcome == "risk_rejected":
+            elif outcome in ("risk_rejected", "portfolio_rejected"):
                 risk_rejected += 1
 
     db.commit()

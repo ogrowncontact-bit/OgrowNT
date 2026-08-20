@@ -12,6 +12,12 @@ that uses them:
   Post-Phase-7 ("Prompt 2" market data engine): market_events
   Post-Phase-7 ("Prompt 6" news intelligence): macro_events, event_reactions,
     plus the News Intelligence columns added to news_events/news_impact
+  Post-Phase-7 ("Prompt 7" backtest lab): backtest_jobs, monte_carlo_runs,
+    stress_test_runs
+  Post-Phase-7 ("Prompt 8" autonomous paper trading): trading_events,
+    system_health, manual_actions, plus TradingMode/pause/idempotency/
+    trailing-stop/role columns added to system_state/positions/orders/
+    admin_users
 """
 from datetime import datetime, timezone
 
@@ -36,13 +42,21 @@ def _utcnow() -> datetime:
 
 
 class AdminUser(Base):
-    """Single-tenant admin account. See docs/blueprint/03-api-spec.md#auth."""
+    """Account table — despite the name (kept for migration continuity),
+    holds both roles. "PROMPT 8" §84 RBAC: ADMIN can mutate (manual
+    controls, kill switch, risk limits, strategy lifecycle); VIEWER can only
+    read. Single-tenant in practice (one operator), but the role column
+    lets that operator hand out a read-only link without sharing the admin
+    password. See docs/blueprint/03-api-spec.md#auth.
+    """
 
     __tablename__ = "admin_users"
+    __table_args__ = (CheckConstraint("role IN ('admin','viewer')", name="ck_admin_users_role"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     email: Mapped[str] = mapped_column(String, unique=True, nullable=False)
     hashed_password: Mapped[str] = mapped_column(String, nullable=False)
+    role: Mapped[str] = mapped_column(String, default="admin", nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
 
@@ -151,6 +165,7 @@ class SystemState(Base):
     """Singleton row — see docs/blueprint/02-database-schema.md#system_state."""
 
     __tablename__ = "system_state"
+    __table_args__ = (CheckConstraint("trading_mode IN ('paper','live_disabled')", name="ck_system_state_trading_mode"),)
 
     id: Mapped[bool] = mapped_column(Boolean, primary_key=True, default=True)
     safety_belt_level: Mapped[str] = mapped_column(String, default="normal", nullable=False)
@@ -170,6 +185,39 @@ class SystemState(Base):
     # liveness into one timestamp would make either one's outage invisible
     # whenever the other happened to still be healthy.
     backtest_worker_last_heartbeat: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # -- "PROMPT 8" Autonomous Paper Trading -------------------------------
+    # Explicit TradingMode (§2-4): LIVE is never a reachable value in this
+    # phase — there is no code path that writes anything but 'paper' or
+    # 'live_disabled', and packages/risk/engine.py's first gate re-checks
+    # this on every signal, same as trading_enabled above. See
+    # docs/live-trading-non-goal.md.
+    trading_mode: Mapped[str] = mapped_column(String, default="paper", nullable=False)
+    # PAUSE/RESUME (§60): a voluntary, reversible operator action — distinct
+    # from trading_enabled (the Kill Switch, an emergency/automatic stop).
+    # Both are checked in packages/risk/engine.py; either one alone blocks
+    # new trades, so a paused system reads as NO_TRADE, not EMERGENCY.
+    trading_paused: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    paused_reason: Mapped[str | None] = mapped_column(Text)
+    paused_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Crash-loop protection for the worker process (§66's "recuperação
+    # automática... max_restart_attempts"): apps/worker/main.py increments
+    # this on every process start and auto-pauses trading (never touches the
+    # Kill Switch — this is an operational safeguard, not a market-risk one)
+    # once too many restarts land inside restart_window_started_at's rolling
+    # window. Docker's own `restart: unless-stopped` still does the actual
+    # OS-level process restart; this only stops a silently crash-looping
+    # worker from quietly keeping trading "on" underneath the flapping.
+    worker_restart_count: Mapped[int] = mapped_column(default=0, nullable=False)
+    restart_window_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # RESET PAPER ACCOUNT (§72's manual-control list): when set,
+    # packages/portfolio/state.py and packages/portfolio/reconciliation.py
+    # both treat this as the start of the account's current life — every
+    # PortfolioSnapshot/Order/Trade before it stays in the DB (append-only,
+    # never deleted, still fully auditable) but stops counting toward
+    # peak-equity/drawdown/cash-reconciliation math, so a reset genuinely
+    # starts clean instead of carrying a stale drawdown from a peak that no
+    # longer means anything.
+    last_reset_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class Alert(Base):
@@ -372,6 +420,12 @@ class Position(Base):
     __table_args__ = (
         CheckConstraint("direction IN ('long','short')", name="ck_positions_direction"),
         CheckConstraint("status IN ('open','closed')", name="ck_positions_status"),
+        CheckConstraint(
+            "exit_reason IS NULL OR exit_reason IN ('stop_hit','target_hit','trailing_stop_hit',"
+            "'thesis_invalidated','manual_close','kill_switch_close','portfolio_emergency_close',"
+            "'reconciliation_pause','regime_change_exit')",
+            name="ck_positions_exit_reason",
+        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -390,6 +444,18 @@ class Position(Base):
     unrealized_pnl: Mapped[float | None] = mapped_column(Float)
     exit_price: Mapped[float | None] = mapped_column(Float)
     exit_reason: Mapped[str | None] = mapped_column(String)
+    # -- "PROMPT 8" trailing stops (§27-29) --------------------------------
+    # None => no trailing stop for this position (current_stop is static,
+    # the Phase 3 behavior). {"type": "fixed_distance"|"percentage"|
+    # "atr_based", "value": float} otherwise — packages/quant/risk/
+    # trailing_stop.py reads this each Trade Monitor cycle.
+    trailing_stop_config: Mapped[dict | None] = mapped_column(JSON)
+    # Best price seen since entry (highest close for a long, lowest for a
+    # short) — the anchor a trailing stop measures back from. Distinct from
+    # current_stop itself so a trailing stop can only ever ratchet in the
+    # trader's favor: current_stop is recomputed from this each cycle, never
+    # the other way around.
+    favorable_extreme_price: Mapped[float | None] = mapped_column(Float)
 
     asset: Mapped["Asset"] = relationship()
     strategy: Mapped["StrategyRow"] = relationship()
@@ -422,6 +488,20 @@ class Order(Base):
     fees: Mapped[float | None] = mapped_column(Float)
     slippage_bps: Mapped[float | None] = mapped_column(Float)
     is_paper: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    # -- "PROMPT 8" duplicate-order protection + execution quality ---------
+    # Deterministic per attempt (packages/execution/order_manager.py derives
+    # it from signal_id/position_id + a purpose tag, e.g. "open"/"close") —
+    # a retried call with the same key hits the unique constraint instead of
+    # submitting a second real order (§67-68).
+    idempotency_key: Mapped[str | None] = mapped_column(String, unique=True)
+    # What the strategy/exit logic expected to pay/receive (signal.entry_price
+    # or the position's current_stop/target at exit time) — filled_price
+    # above is what actually happened. The gap between the two, not
+    # filled_price alone, is what §54's "execution quality" measures.
+    expected_price: Mapped[float | None] = mapped_column(Float)
+    # Milliseconds between this order being decided (risk-approved / exit
+    # condition detected) and submit_order() returning — §54's "latency".
+    latency_ms: Mapped[float | None] = mapped_column(Float)
 
 
 class Trade(Base):
@@ -931,3 +1011,101 @@ class StressTestRun(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
     reference_backtest_run: Mapped["BacktestRun"] = relationship()
+
+
+# --- "PROMPT 8" (Autonomous Paper Trading) -------------------------------
+
+
+class TradingEvent(Base):
+    """Event-sourced log of every state-changing moment in the autonomous
+    trading loop (§57-59) — the backing store for the "WHY did/didn't the
+    system trade?" decision trace and the dashboard's Live Activity Feed.
+
+    Deliberately additive to, not a replacement for, the existing audit
+    trail: RiskCheck/RiskDecision already cover *why a signal was
+    approved/blocked* in full per-check detail (docs/blueprint/08-risk-engine.md),
+    and AuditLog covers admin/system actions (kill switch, quarantine).
+    TradingEvent is the one place that stitches moments from *all* of those
+    plus order/position lifecycle into a single chronological stream keyed
+    by ts, which none of the others are optimized to answer on their own.
+    """
+
+    __tablename__ = "trading_events"
+    __table_args__ = (
+        CheckConstraint(
+            "event_type IN ('order_submitted','order_filled','order_rejected',"
+            "'position_opened','position_closed','risk_blocked','no_trade',"
+            "'trading_paused','trading_resumed','kill_switch_triggered',"
+            "'kill_switch_released','reconciliation_mismatch',"
+            "'portfolio_emergency_action','loss_streak_detected',"
+            "'worker_restarted','crash_loop_protection_triggered')",
+            name="ck_trading_events_event_type",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    event_type: Mapped[str] = mapped_column(String, nullable=False)
+    entity_type: Mapped[str | None] = mapped_column(String)
+    entity_id: Mapped[int | None] = mapped_column()
+    payload: Mapped[dict] = mapped_column(JSON, default=dict)
+
+
+class SystemHealth(Base):
+    """Periodic health snapshot (§62-66's SystemHealthMonitor) — distinct
+    from `GET /api/system/health`'s on-demand computed view: that endpoint
+    answers "is the system healthy right now?"; this table answers "was it
+    healthy an hour ago?", which nothing else in this schema records over
+    time (PortfolioSnapshot tracks money, not health)."""
+
+    __tablename__ = "system_health"
+    __table_args__ = (
+        CheckConstraint(
+            "autonomous_status IN ('starting','running','paused','no_trade',"
+            "'caution','defensive','emergency','kill_switch','error')",
+            name="ck_system_health_autonomous_status",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    autonomous_status: Mapped[str] = mapped_column(String, nullable=False)
+    trading_mode: Mapped[str] = mapped_column(String, nullable=False)
+    trading_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    trading_paused: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    safety_belt_level: Mapped[str] = mapped_column(String, nullable=False)
+    worker_alive: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    open_positions_count: Mapped[int] = mapped_column(nullable=False)
+    cadence_failures: Mapped[dict] = mapped_column(JSON, default=dict)
+    notes: Mapped[dict] = mapped_column(JSON, default=dict)
+
+
+class ManualAction(Base):
+    """One row per operator-initiated control action (§68-72's PAUSE/RESUME/
+    CLOSE PAPER POSITION/CANCEL PAPER ORDER/ACTIVATE KILL SWITCH/RESET PAPER
+    ACCOUNT) with a full before/after snapshot — kept as its own typed table
+    rather than folded into AuditLog.detail (used elsewhere in this schema
+    for less safety-critical actions) because §72 requires every one of
+    these six specifically to carry a structured before/after, not just a
+    free-form detail blob, and a dedicated CHECK constraint on `action`
+    keeps that list closed and queryable.
+    """
+
+    __tablename__ = "manual_actions"
+    __table_args__ = (
+        CheckConstraint(
+            "action IN ('pause','resume','close_position','cancel_order',"
+            "'kill_switch','kill_switch_release','reset_paper_account')",
+            name="ck_manual_actions_action",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    actor: Mapped[str] = mapped_column(String, nullable=False)
+    action: Mapped[str] = mapped_column(String, nullable=False)
+    entity_type: Mapped[str | None] = mapped_column(String)
+    entity_id: Mapped[int | None] = mapped_column()
+    reason: Mapped[str | None] = mapped_column(Text)
+    before: Mapped[dict] = mapped_column(JSON, default=dict)
+    after: Mapped[dict] = mapped_column(JSON, default=dict)

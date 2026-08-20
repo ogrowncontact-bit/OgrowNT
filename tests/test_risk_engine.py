@@ -34,7 +34,7 @@ def _signal_for_risk(db_session, asset, **overrides) -> SignalForRisk:
     base = dict(
         signal_id=signal_row.id, asset_id=asset.id, strategy_id=strategy.id, direction="long", entry_price=100.0,
         stop_price=95.0, target_price=115.0, risk_reward=3.0, confidence=0.9, volatility_factor=1.0,
-        data_quality="high", data_ts=NOW, tier="high_quality",
+        data_quality="high", data_ts=NOW, tier="high_quality", asset_class=asset.asset_class,
     )
     base.update(overrides)
     return SignalForRisk(**base)
@@ -196,6 +196,82 @@ def test_quarantine_level_health_score_blocks_as_defense_in_depth(db_session):
     verdict = evaluate_signal(db_session, sfr, _portfolio_state(), SystemState(id=True, trading_enabled=True))
     assert not verdict.approved
     assert verdict.reason == "strategy_degraded"
+
+
+def test_paused_blocks_new_trades_distinctly_from_kill_switch(db_session):
+    """"PROMPT 8" §60: PAUSE is a distinct, voluntary stop from the Kill
+    Switch — trading_enabled stays True, only trading_paused blocks."""
+    asset = _asset(db_session, "RISKPAUSED")
+    sfr = _signal_for_risk(db_session, asset)
+    state = SystemState(id=True, trading_enabled=True, trading_paused=True, paused_reason="operator break")
+    verdict = evaluate_signal(db_session, sfr, _portfolio_state(), state)
+    assert not verdict.approved
+    assert verdict.reason == "trading_paused"
+
+
+def test_non_paper_trading_mode_blocks_everything(db_session):
+    """No code path in this codebase ever sets trading_mode to anything but
+    'paper' — this proves the gate itself works if it ever did."""
+    asset = _asset(db_session, "RISKLIVEMODE")
+    sfr = _signal_for_risk(db_session, asset)
+    state = SystemState(id=True, trading_enabled=True, trading_mode="live_disabled")
+    verdict = evaluate_signal(db_session, sfr, _portfolio_state(), state)
+    assert not verdict.approved
+    assert verdict.reason == "live_trading_disabled"
+
+
+def test_short_on_equity_asset_class_is_honestly_disabled(db_session):
+    """"PROMPT 8" §7-11: real equity short-selling needs borrowed-share/
+    margin mechanics this paper system doesn't model — blocked rather than
+    silently simulated as if it were a crypto/forex short."""
+    asset = Asset(symbol="RISKSHORTEQUITY", asset_class="equity", is_active=True)
+    db_session.add(asset)
+    db_session.commit()
+    sfr = _signal_for_risk(db_session, asset, direction="short")
+    verdict = evaluate_signal(db_session, sfr, _portfolio_state(), SystemState(id=True, trading_enabled=True))
+    assert not verdict.approved
+    assert verdict.reason == "short_disabled_insufficient_data"
+
+
+def test_short_on_crypto_asset_class_is_allowed(db_session):
+    asset = _asset(db_session, "RISKSHORTCRYPTO")  # crypto, per _asset()'s default
+    sfr = _signal_for_risk(db_session, asset, direction="short", entry_price=100.0, stop_price=105.0, target_price=85.0)
+    verdict = evaluate_signal(db_session, sfr, _portfolio_state(), SystemState(id=True, trading_enabled=True))
+    assert verdict.approved
+
+
+def test_long_on_equity_asset_class_is_unaffected_by_the_short_fallback(db_session):
+    asset = Asset(symbol="RISKLONGEQUITY", asset_class="equity", is_active=True)
+    db_session.add(asset)
+    db_session.commit()
+    sfr = _signal_for_risk(db_session, asset)  # direction="long" by default
+    verdict = evaluate_signal(db_session, sfr, _portfolio_state(), SystemState(id=True, trading_enabled=True))
+    assert verdict.approved
+
+
+def test_loss_streak_reduces_size_without_blocking(db_session):
+    from packages.shared.models import Trade
+
+    asset = _asset(db_session, "RISKLOSSSTREAKBASE")
+    baseline_sfr = _signal_for_risk(db_session, asset)
+    baseline = evaluate_signal(db_session, baseline_sfr, _portfolio_state(), SystemState(id=True, trading_enabled=True))
+    assert baseline.approved and baseline.approved_quantity is not None
+
+    now = NOW
+    for i in range(5):
+        position = Position(
+            asset_id=asset.id, strategy_id=baseline_sfr.strategy_id, direction="long", entry_price=100.0,
+            current_stop=95.0, size=1.0, status="closed", closed_at=now - timedelta(minutes=5 - i),
+        )
+        db_session.add(position)
+        db_session.commit()
+        db_session.add(Trade(position_id=position.id, pnl=-10.0, outcome="loss", closed_at=now - timedelta(minutes=5 - i)))
+        db_session.commit()
+
+    streaked_sfr = _signal_for_risk(db_session, _asset(db_session, "RISKLOSSSTREAKAFTER"), strategy_id=baseline_sfr.strategy_id)
+    verdict = evaluate_signal(db_session, streaked_sfr, _portfolio_state(), SystemState(id=True, trading_enabled=True))
+    assert verdict.approved
+    assert verdict.approved_quantity == baseline.approved_quantity * 0.5
 
 
 def test_every_check_is_persisted_for_audit(db_session):

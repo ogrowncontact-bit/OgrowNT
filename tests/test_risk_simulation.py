@@ -47,7 +47,7 @@ def _signal(db_session, asset) -> SignalForRisk:
     return SignalForRisk(
         signal_id=signal_row.id, asset_id=asset.id, strategy_id=strategy.id, direction="long",
         entry_price=100.0, stop_price=95.0, target_price=115.0, risk_reward=3.0, confidence=1.0,
-        volatility_factor=1.0, data_quality="high", data_ts=NOW, tier="high_quality",
+        volatility_factor=1.0, data_quality="high", data_ts=NOW, tier="high_quality", asset_class=asset.asset_class,
     )
 
 

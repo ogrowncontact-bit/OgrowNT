@@ -357,6 +357,104 @@ export const getPromotionCheck = (token: string, strategyId: number) =>
 export const getAlerts = (token: string, limit = 10) => apiFetch<SystemAlert[]>(`/api/alerts?limit=${limit}`, token);
 export const getAnalyticsOverview = (token: string) => apiFetch<AnalyticsOverview>("/api/analytics/overview", token);
 
+// --- "PROMPT 8" Autonomous Trading Center --------------------------------
+
+export type AutonomousStatus = {
+  status: string;
+  trading_mode: string;
+  trading_enabled: boolean;
+  trading_paused: boolean;
+  paused_reason: string | null;
+  safety_belt_level: string;
+  worker_alive: boolean;
+  worker_last_heartbeat: string | null;
+  open_positions_count: number;
+  worker_restart_count: number;
+};
+export type TradingEvent = {
+  id: number;
+  ts: string;
+  event_type: string;
+  entity_type: string | null;
+  entity_id: number | null;
+  payload: Record<string, unknown>;
+};
+export type ManualActionEntry = {
+  id: number;
+  ts: string;
+  actor: string;
+  action: string;
+  entity_type: string | null;
+  entity_id: number | null;
+  reason: string | null;
+  before: Record<string, unknown>;
+  after: Record<string, unknown>;
+};
+export type TradingPerformance = {
+  trades_today: number;
+  wins_today: number;
+  losses_today: number;
+  win_rate_today: number | null;
+  daily_pnl: number;
+  open_positions_count: number;
+  exposure_pct: number;
+  drawdown_pct: number;
+  safety_belt_level: string;
+  autonomous_status: string;
+};
+
+export const getAutonomousStatus = (token: string) => apiFetch<AutonomousStatus>("/api/trading/status", token);
+export const getActivityFeed = (token: string, limit = 30) => apiFetch<TradingEvent[]>(`/api/trading/activity?limit=${limit}`, token);
+export const getManualActions = (token: string, limit = 20) => apiFetch<ManualActionEntry[]>(`/api/trading/manual-actions?limit=${limit}`, token);
+export const getTradingPerformance = (token: string) => apiFetch<TradingPerformance>("/api/trading/performance", token);
+
+export async function pauseTrading(token: string, reason: string) {
+  const res = await fetch(`${API_URL}/api/trading/pause`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ reason }),
+    cache: "no-store",
+  });
+  const body = await res.json().catch(() => null);
+  if (!res.ok) return { ok: false as const, detail: body?.detail ?? `Pause failed (${res.status})` };
+  return { ok: true as const, result: body as SystemStatus };
+}
+
+export async function resumeTrading(token: string) {
+  const res = await fetch(`${API_URL}/api/trading/resume`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  const body = await res.json().catch(() => null);
+  if (!res.ok) return { ok: false as const, detail: body?.detail ?? `Resume failed (${res.status})` };
+  return { ok: true as const, result: body as SystemStatus };
+}
+
+export async function closePaperPosition(token: string, positionId: number, reason: string | null) {
+  const res = await fetch(`${API_URL}/api/trading/positions/${positionId}/close`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ reason }),
+    cache: "no-store",
+  });
+  const body = await res.json().catch(() => null);
+  if (!res.ok) return { ok: false as const, detail: body?.detail ?? `Close failed (${res.status})` };
+  return { ok: true as const, result: body as Position };
+}
+
+export async function resetPaperAccount(token: string, confirm: boolean) {
+  const res = await fetch(`${API_URL}/api/trading/reset-paper`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ confirm }),
+    cache: "no-store",
+  });
+  const body = await res.json().catch(() => null);
+  if (!res.ok) return { ok: false as const, detail: body?.detail ?? `Reset failed (${res.status})` };
+  return { ok: true as const, result: body as SystemStatus };
+}
+
 export async function setKillSwitch(token: string, action: "trigger" | "release") {
   const path = action === "trigger" ? "/api/system/kill-switch" : "/api/system/kill-switch/release";
   const res = await fetch(`${API_URL}${path}`, {

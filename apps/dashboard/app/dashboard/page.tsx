@@ -1,8 +1,10 @@
 import { cookies } from "next/headers";
 import {
+  getActivityFeed,
   getAlerts,
   getAnalyticsOverview,
   getAssets,
+  getAutonomousStatus,
   getBacktests,
   getHealth,
   getLearnedRules,
@@ -23,6 +25,7 @@ import {
   getSystemStatus,
   getTradeJournal,
   getTrades,
+  getTradingPerformance,
 } from "@/lib/api";
 import { StatCard } from "@/components/StatCard";
 import { RiskBadge } from "@/components/RiskBadge";
@@ -38,6 +41,11 @@ import { OpportunityRow } from "@/components/OpportunityRow";
 import { EquitySparkline } from "@/components/EquitySparkline";
 import { NewsIntelligenceCenter } from "@/components/NewsIntelligenceCenter";
 import { StrategyLab } from "@/components/StrategyLab";
+import { AutonomousStatusBadge } from "@/components/AutonomousStatusBadge";
+import { PauseResumeButton } from "@/components/PauseResumeButton";
+import { ClosePositionButton } from "@/components/ClosePositionButton";
+import { ResetAccountButton } from "@/components/ResetAccountButton";
+import { LiveActivityFeed } from "@/components/LiveActivityFeed";
 
 export const dynamic = "force-dynamic";
 
@@ -69,7 +77,7 @@ export default async function DashboardPage() {
   const cookieStore = await cookies();
   const token = cookieStore.get("ogrownt_token")?.value ?? "";
 
-  const [health, status, portfolio, assets, positions, opportunities, regimes, trades, news, strategyLearning, tradeJournal, learnedRules, alerts, strategies, marketOverview, marketEvents, portfolioExposure, riskState, macroEvents, newsRisk] =
+  const [health, status, portfolio, assets, positions, opportunities, regimes, trades, news, strategyLearning, tradeJournal, learnedRules, alerts, strategies, marketOverview, marketEvents, portfolioExposure, riskState, macroEvents, newsRisk, autonomousStatus, activityFeed, tradingPerformance] =
     await Promise.all([
       getHealth(),
       getSystemStatus(token),
@@ -91,6 +99,9 @@ export default async function DashboardPage() {
       getRiskState(token, 10),
       getMacroEvents(token),
       getNewsRisk(token),
+      getAutonomousStatus(token),
+      getActivityFeed(token, 30),
+      getTradingPerformance(token),
     ]);
 
   const [backtests, promotionChecks, analytics] = await Promise.all([
@@ -126,6 +137,8 @@ export default async function DashboardPage() {
             />
             SYSTEM: {systemOnline ? "ONLINE" : "DEGRADED"}
           </span>
+          {autonomousStatus && <AutonomousStatusBadge status={autonomousStatus.status} />}
+          {autonomousStatus && <PauseResumeButton paused={autonomousStatus.trading_paused} />}
           <LogoutButton />
         </div>
       </header>
@@ -139,7 +152,16 @@ export default async function DashboardPage() {
           tone={dailyPnl > 0 ? "positive" : dailyPnl < 0 ? "negative" : "default"}
         />
         <StatCard label="Max Drawdown" value={portfolio ? `${portfolio.drawdown_pct.toFixed(2)}%` : "—"} />
+        <StatCard label="Trades Today" value={tradingPerformance ? String(tradingPerformance.trades_today) : "—"} />
+        <StatCard
+          label="Win Rate Today"
+          value={tradingPerformance?.win_rate_today != null ? `${Math.round(tradingPerformance.win_rate_today)}%` : "—"}
+        />
+        <StatCard label="Open Positions" value={tradingPerformance ? String(tradingPerformance.open_positions_count) : "—"} />
+        <StatCard label="Trading Mode" value={autonomousStatus?.trading_mode.toUpperCase() ?? "—"} />
       </section>
+
+      <LiveActivityFeed events={activityFeed ?? []} />
 
       <section className="mb-6 rounded-lg border border-base-700 bg-base-900 p-4">
         <div className="mb-3 flex items-center justify-between">
@@ -150,7 +172,10 @@ export default async function DashboardPage() {
           <p className="text-xs text-ink-500">
             Trading enabled: {status?.trading_enabled === false ? "no (kill switch)" : "yes"}
           </p>
-          <KillSwitchButton tradingEnabled={status?.trading_enabled !== false} />
+          <div className="flex items-center gap-2">
+            <ResetAccountButton openPositionsCount={positions?.length ?? 0} />
+            <KillSwitchButton tradingEnabled={status?.trading_enabled !== false} />
+          </div>
         </div>
         <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-4">
           <StatCard
@@ -385,9 +410,12 @@ export default async function DashboardPage() {
                         {p.direction.toUpperCase()}
                       </span>
                     </span>
-                    <span className={(p.unrealized_pnl ?? 0) >= 0 ? "text-signal-green" : "text-signal-red"}>
-                      {p.unrealized_pnl !== null ? eur(p.unrealized_pnl) : "—"}
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <span className={(p.unrealized_pnl ?? 0) >= 0 ? "text-signal-green" : "text-signal-red"}>
+                        {p.unrealized_pnl !== null ? eur(p.unrealized_pnl) : "—"}
+                      </span>
+                      <ClosePositionButton positionId={p.id} assetSymbol={p.asset_symbol} />
+                    </div>
                   </div>
                   <div className="mt-1 flex justify-between text-ink-500">
                     <span>{p.strategy_code}</span>

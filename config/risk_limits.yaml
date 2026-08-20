@@ -12,6 +12,12 @@ portfolio:
   max_single_asset_pct: 15
   max_correlated_cluster_pct: 25
   correlation_threshold: 0.7
+  # "PROMPT 8" §14: cap on how much of equity one strategy may have open
+  # across ALL its positions/assets at once — enforced by the Portfolio
+  # Manager (packages/portfolio/manager.py), a step after Risk Engine
+  # approval, not by the Risk Engine itself (see that module's docstring
+  # for why this is a genuinely separate check from max_single_asset_pct).
+  max_strategy_allocation_pct: 30
 loss_limits:
   max_daily_loss_pct: 3
   max_weekly_loss_pct: 6
@@ -38,3 +44,28 @@ news_risk_multipliers:
   elevated: 0.75
   high: 0.5
   critical: 0.0
+# "PROMPT 8" §41: no leverage this phase — every position is sized out of
+# real (paper) equity, never borrowed capital. Kept as an explicit,
+# operator-visible number (not just an implicit consequence of the sizing
+# caps above) so a future LIVE phase has one obvious place to raise it,
+# and packages/risk/engine.py can assert it's exactly 1.0 while paper-only.
+leverage:
+  max_leverage: 1.0
+# "PROMPT 8" §37-39: consecutive-loss count (across the whole portfolio,
+# not one strategy) at which packages/risk/loss_streak.py halves new
+# position size — capital preservation without a full trading halt, which
+# the safety belts already own at a worse drawdown level.
+loss_streak:
+  threshold: 5
+  size_multiplier_when_triggered: 0.5
+# "PROMPT 8" §28-30: what an OPEN position does when a regime shift, a
+# critical news event, or a portfolio emergency (Kill Switch / max
+# drawdown) hits while it's still open. Each is hold|reduce|close — an
+# explicit operator choice (packages/risk/position_policy.py), never
+# implicit behavior decided ad hoc by whichever module noticed the trigger
+# (§30: "Não implementar comportamento implícito").
+position_risk_policy:
+  regime_change: close
+  news_risk: reduce
+  portfolio_emergency: close
+  reduce_fraction: 0.5

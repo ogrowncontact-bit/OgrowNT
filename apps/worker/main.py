@@ -37,6 +37,13 @@ Runs three independent cadences (docs/blueprint/05-event-flow.md §Cadência):
   not-yet-delivered Alert row to whatever notification channels are
   configured (apps/worker/alerts.py) — short by default since alerts
   (kill switch, safety belt changes) are time-sensitive.
+- Every RECONCILIATION_INTERVAL_SECONDS: PaperReconciliationEngine
+  (packages/portfolio/reconciliation.py, "PROMPT 8" §69-71) re-derives cash
+  from first principles and pauses trading on any mismatch.
+- Every HEALTH_SNAPSHOT_INTERVAL_SECONDS: writes a SystemHealth row
+  (packages/shared/worker_health.py's record_system_health_snapshot,
+  "PROMPT 8" §62-66) — a persisted history GET /api/system/health's
+  on-demand view doesn't keep.
 
 Prompt 6 §37 asks for NewsIngestionWorker / NewsAnalysisWorker /
 EventDetectionWorker / SentimentWorker / MacroCalendarWorker /
@@ -88,6 +95,7 @@ from packages.data.connectors.news.factory import get_news_provider
 from packages.execution.adapters.paper import PaperExecutionProvider
 from packages.llm.client import LLMClient
 from packages.notifications.dispatcher import NotificationDispatcher
+from packages.portfolio.reconciliation import reconcile_and_enforce
 from packages.portfolio.state import refresh_snapshot
 from packages.quant.learning.research import run_research_cycle
 from packages.quant.news.event_reaction import compute_event_reactions
@@ -96,7 +104,7 @@ from packages.risk.monitor import update_safety_belt
 from packages.shared.db import SessionLocal
 from packages.shared.logging import configure_logging
 from packages.shared.settings import get_settings
-from packages.shared.worker_health import record_heartbeat
+from packages.shared.worker_health import record_heartbeat, record_system_health_snapshot, record_worker_restart
 
 logger = configure_logging("worker")
 
@@ -138,6 +146,17 @@ def main() -> None:
     db = SessionLocal()
     try:
         backfill_active_assets(db, provider)
+        # "PROMPT 8" §66 crash-loop protection: every process start (a fresh
+        # boot AND every Docker `restart: unless-stopped` after a crash)
+        # counts here. A silently crash-looping process would otherwise
+        # keep trading "on" between each near-instant restart.
+        if record_worker_restart(
+            db, max_restarts=settings.max_worker_restarts_per_window, window_seconds=settings.restart_window_seconds
+        ):
+            logger.critical(
+                "Crash-loop protection triggered — trading paused after repeated worker restarts within %ss",
+                settings.restart_window_seconds,
+            )
     except Exception:  # noqa: BLE001
         logger.exception("Initial history backfill failed")
     finally:
@@ -149,6 +168,8 @@ def main() -> None:
     last_macro_run = 0.0
     last_sentiment_shift_run = 0.0
     last_alert_delivery_run = 0.0
+    last_reconciliation_run = 0.0
+    last_health_snapshot_run = 0.0
     tracker = CadenceFailureTracker()
     market_alert_tracker = MarketAlertTracker()
 
@@ -237,6 +258,26 @@ def main() -> None:
                     logger.exception("alert_delivery cadence failed")
                     tracker.record_failure(db, "alert_delivery", str(exc))
                 last_alert_delivery_run = cycle_start
+
+            if cycle_start - last_reconciliation_run >= settings.reconciliation_interval_seconds:
+                try:
+                    result = reconcile_and_enforce(db)
+                    if not result.ok:
+                        logger.critical("Reconciliation mismatch — trading paused: %s", result.violations)
+                    tracker.record_success("reconciliation")
+                except Exception as exc:  # noqa: BLE001
+                    logger.exception("reconciliation cadence failed")
+                    tracker.record_failure(db, "reconciliation", str(exc))
+                last_reconciliation_run = cycle_start
+
+            if cycle_start - last_health_snapshot_run >= settings.health_snapshot_interval_seconds:
+                try:
+                    record_system_health_snapshot(db, cadence_failures=tracker.snapshot())
+                    tracker.record_success("health_snapshot")
+                except Exception as exc:  # noqa: BLE001
+                    logger.exception("health_snapshot cadence failed")
+                    tracker.record_failure(db, "health_snapshot", str(exc))
+                last_health_snapshot_run = cycle_start
 
             # Written regardless of any cadence's outcome above — this proves
             # the loop itself is alive, not that everything succeeded.

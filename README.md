@@ -4,7 +4,7 @@
 **paper trading only** — no real orders are ever sent. See the full engineering
 specification in [`docs/blueprint/`](docs/blueprint/00-overview.md).
 
-## Status: Phase 7 (Advanced Analytics, Alerts, Optimization) + post-Phase-7 security hardening + Supervisor 24/7 + Market Data Engine + Scanner + Pattern/Strategy/Opportunity confidence & evidence + Risk Engine/Portfolio Intelligence hardening (Risk Center, Risk Heatmap, Strategy Health, configurable Safety Belts) + News Intelligence Center (sentiment, macro calendar, event risk, source consensus) + Strategy Lab (walk-forward optimization, Monte Carlo, stress testing, robustness/quality scoring, async backtest job system)
+## Status: Phase 7 (Advanced Analytics, Alerts, Optimization) + post-Phase-7 security hardening + Supervisor 24/7 + Market Data Engine + Scanner + Pattern/Strategy/Opportunity confidence & evidence + Risk Engine/Portfolio Intelligence hardening (Risk Center, Risk Heatmap, Strategy Health, configurable Safety Belts) + News Intelligence Center (sentiment, macro calendar, event risk, source consensus) + Strategy Lab (walk-forward optimization, Monte Carlo, stress testing, robustness/quality scoring, async backtest job system) + Autonomous Paper Trading (TradingMode gate, Portfolio Manager allocation cap, trailing stops, HOLD/REDUCE/CLOSE position risk policy, anti-martingale loss-streak protection, idempotency keys, event sourcing, reconciliation engine, RBAC, manual trading controls, Autonomous Trading Center dashboard)
 
 Per [`docs/blueprint/12-roadmap.md`](docs/blueprint/12-roadmap.md):
 
@@ -273,14 +273,57 @@ the full list, including the four new as-built docs
 (`docs/backtest-lab.md`, `docs/monte-carlo-stress-testing.md`,
 `docs/strategy-quality-score.md`, `docs/backtest-jobs.md`).
 
+**Autonomous Paper Trading.** Most of the safety infrastructure a 24/7
+autonomous agent needs already existed from Phases 3-6 (Kill Switch,
+Safety Belts, Correlation Guard, Trade Monitor, the `/api/trades/{id}/why`
+decision trace) — this pass closed the genuine remaining gaps. An explicit
+`TradingMode` (`SystemState.trading_mode`, checked first in the Risk
+Engine) keeps `LIVE` functionally unreachable this phase. A new Portfolio
+Manager (`packages/portfolio/manager.py`) runs as a second gate after Risk
+Engine approval, capping how much capital one strategy has open across all
+its positions at once — the one concentration axis the existing per-asset/
+correlation checks don't cover. Trailing stops
+(`packages/quant/exits/trailing_stop.py`: fixed-distance, percentage,
+ATR-based) never widen. A configurable HOLD/REDUCE/CLOSE policy
+(`packages/risk/position_policy.py`) now governs what happens to an *open*
+position on a regime shift, critical news, or a portfolio emergency — none
+of those close a position unilaterally anymore, all three route through
+the Risk Engine's own policy, with `reduce_position` doing genuine partial
+closes. A portfolio-wide `LossStreakDetector` halves size after 5
+consecutive losses and — provably, by absence — never increases it on a
+win streak. Every order carries an `idempotency_key` (duplicate-submission
+protection) and `expected_price`/`latency_ms` (execution quality). A new
+`TradingEvent` table gives the dashboard a real Live Activity Feed. A
+`PaperReconciliationEngine` reconstructs cash from first principles every
+cycle and pauses trading (not the Kill Switch — an accounting-integrity
+stop) on any mismatch. `SystemHealth` snapshots and a
+`record_worker_restart` crash-loop guard round out the health picture.
+RBAC (`AdminUser.role`: admin/viewer) gates every mutation. Six manual
+controls (pause/resume/close position/cancel order/kill switch/reset
+account) are exposed under `/api/trading/*`, each with a full before/after
+`ManualAction` audit row — `RESET PAPER ACCOUNT` requires explicit
+confirmation and a "reset epoch" (`SystemState.last_reset_at`) so a reset
+doesn't read as a fake drawdown against a peak from the account's previous
+life. Live-verified against real Postgres (including reconciliation run
+against this session's real accumulated trading history), a real worker
+process across several cycles, and a real browser click-through of the new
+Autonomous Trading Center panel (status badge, pause/resume, activity
+feed, close-position buttons). See `docs/blueprint/12-roadmap.md`'s
+"PROMPT 8" section for the full list and
+[`docs/autonomous-trading.md`](docs/autonomous-trading.md) for the as-built
+reference.
+
 ## Architecture at a glance
 
 ```text
 apps/
-  api/         FastAPI backend (auth, system health, assets, market data, portfolio,
-               strategies, opportunities/signals, regime, risk, positions/orders/trades,
-               news, macro, patterns, learning, research, backtests (incl. jobs,
-               data-integrity, reality-gap, failure-check, compare), alerts, analytics)
+  api/         FastAPI backend (auth incl. RBAC user management, system health,
+               assets, market data, portfolio, strategies, opportunities/signals,
+               regime, risk, positions/orders/trades, news, macro, patterns,
+               learning, research, backtests (incl. jobs, data-integrity,
+               reality-gap, failure-check, compare), alerts, analytics, trading
+               control — autonomous status/activity/performance, pause/resume/
+               close-position/cancel-order/reset-account manual controls)
   worker/      24/7 loop: Market Data Agent (scan), Trade Monitor + safety-belt
                refresh + Learning Agent (per trade close, every scan), News
                Intelligence Agent (ingestion + DET analysis, own cadence),
@@ -301,10 +344,16 @@ packages/
                strategies (constructor-parameterized), scoring engine, learning
                (strategy stats/health score, quarantine, research/rule validation,
                market memory, degradation analysis, promotion pipeline)
-  portfolio/   equity/cash/exposure/drawdown computation, append-only snapshot ledger
-  risk/        position sizing, correlation guard, safety belts, the veto-power decision pipeline
-  execution/   ExecutionProvider interface, PaperExecutionProvider, order manager,
-               shared fill-simulation math (packages/execution/fills.py)
+  portfolio/   equity/cash/exposure/drawdown computation, append-only snapshot ledger,
+               per-strategy allocation cap (manager.py), cash reconciliation
+               (reconciliation.py), reset-epoch-aware history filtering
+  risk/        position sizing, correlation guard, safety belts, TradingMode +
+               PAUSE + short-selling-honesty + leverage-ceiling gates, loss-streak
+               anti-martingale detector, HOLD/REDUCE/CLOSE position risk policy,
+               the veto-power decision pipeline
+  execution/   ExecutionProvider interface, PaperExecutionProvider, order manager
+               (idempotency keys, expected-price/latency capture, partial-close
+               reduce_position), shared fill-simulation math (packages/execution/fills.py)
   backtest/    event-driven Backtest Engine, isolated simulated portfolio,
                walk-forward validation (fixed-params, true optimization, and
                global grid-search variants), parameter-stability checks, Monte
@@ -416,10 +465,10 @@ cd apps/dashboard && npm install && npm run dev
 unused imports, undefined names, mutable-default footguns — not a style
 rewrite; see `[tool.ruff]` in `pyproject.toml`), `mypy packages apps scripts`
 (type-checked with the `pydantic.mypy` plugin so FastAPI response models
-type-check correctly), then the full pytest suite (585 tests) against a real
+type-check correctly), then the full pytest suite (659 tests) against a real
 `postgres:16-alpine` service container, migrated from scratch via `alembic
 upgrade head`; separately, the dashboard's `eslint` + `next build`; and
-separately again, a plain `docker build` of all three
+separately again, a plain `docker build` of all four
 `infra/docker/Dockerfile.*` images — the only place those get built at all,
 since this repo's own dev sandbox has no Docker daemon. Nothing in CI
 touches a broker, an exchange, or real capital — it only proves the

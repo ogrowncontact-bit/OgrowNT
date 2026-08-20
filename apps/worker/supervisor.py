@@ -37,6 +37,12 @@ class CadenceFailureTracker:
     def record_success(self, cadence: str) -> None:
         self._consecutive_failures[cadence] = 0
 
+    def snapshot(self) -> dict[str, int]:
+        """A copy of the current consecutive-failure counts per cadence —
+        "PROMPT 8" §62-66's SystemHealth snapshot rows read this, never the
+        tracker's private state directly."""
+        return dict(self._consecutive_failures)
+
     def record_failure(self, db: Session, cadence: str, error: str) -> int:
         """Returns the new consecutive-failure count. Raises an Alert
         exactly once per threshold crossing (at CONSECUTIVE_FAILURE_ALERT_THRESHOLD),

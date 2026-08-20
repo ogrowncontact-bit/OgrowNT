@@ -26,6 +26,7 @@ class PortfolioLimitsConfig:
     max_single_asset_pct: float
     max_correlated_cluster_pct: float
     correlation_threshold: float
+    max_strategy_allocation_pct: float
 
 
 @dataclass(frozen=True)
@@ -79,6 +80,34 @@ class NewsRiskMultipliersConfig:
 
 
 @dataclass(frozen=True)
+class LeverageConfig:
+    """"PROMPT 8" §41 — explicit and configurable, but never anything other
+    than 1.0 while packages/shared/models.py's SystemState.trading_mode
+    can't be anything but 'paper'/'live_disabled'; see
+    packages/risk/engine.py's leverage check."""
+
+    max_leverage: float
+
+
+@dataclass(frozen=True)
+class LossStreakConfig:
+    threshold: int
+    size_multiplier_when_triggered: float
+
+
+@dataclass(frozen=True)
+class PositionRiskPolicyConfig:
+    """"PROMPT 8" §28-30 — see packages/risk/position_policy.py. Each field
+    is 'hold'|'reduce'|'close'; reduce_fraction is how much of the position
+    a REDUCE action closes (the rest stays open, unchanged)."""
+
+    regime_change: str
+    news_risk: str
+    portfolio_emergency: str
+    reduce_fraction: float
+
+
+@dataclass(frozen=True)
 class RiskLimits:
     capital: CapitalConfig
     per_trade: PerTradeConfig
@@ -88,6 +117,9 @@ class RiskLimits:
     data_quality: DataQualityConfig
     safety_belt_multipliers: SafetyBeltMultipliersConfig
     news_risk_multipliers: NewsRiskMultipliersConfig
+    leverage: LeverageConfig
+    loss_streak: LossStreakConfig
+    position_risk_policy: PositionRiskPolicyConfig
 
 
 def load_risk_limits(path: Path = CONFIG_PATH) -> RiskLimits:
@@ -101,4 +133,7 @@ def load_risk_limits(path: Path = CONFIG_PATH) -> RiskLimits:
         data_quality=DataQualityConfig(**raw["data_quality"]),
         safety_belt_multipliers=SafetyBeltMultipliersConfig(**raw["safety_belt_multipliers"]),
         news_risk_multipliers=NewsRiskMultipliersConfig(**raw["news_risk_multipliers"]),
+        leverage=LeverageConfig(**raw["leverage"]),
+        loss_streak=LossStreakConfig(**raw["loss_streak"]),
+        position_risk_policy=PositionRiskPolicyConfig(**raw["position_risk_policy"]),
     )

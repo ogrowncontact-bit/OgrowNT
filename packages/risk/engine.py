@@ -18,12 +18,23 @@ from sqlalchemy.orm import Session
 from packages.portfolio.state import PortfolioState
 from packages.risk.config import RiskLimits, load_risk_limits
 from packages.risk.correlation_guard import check_correlation_guard
+from packages.risk.loss_streak import evaluate_loss_streak
 from packages.risk.news_guard import evaluate_news_risk
 from packages.risk.position_sizing import calculate_position_size
 from packages.risk.safety_belt import evaluate_safety_belt, policy_for, tier_meets_floor
 from packages.risk.strategy_health import classify_strategy_health
 from packages.shared.models import RiskCheck, StrategyPerformance, SystemState
 from packages.shared.models import RiskDecision as RiskDecisionRow
+
+# "PROMPT 8" §7-11: asset classes where this system can honestly simulate a
+# short (cash-settled paper accounting, no borrow/margin mechanics needed —
+# packages/execution/order_manager.py's P&L math is already direction-
+# symmetric). Real equity short-selling needs borrowed shares/margin this
+# system doesn't model at all; rather than silently pretend that away, a
+# short signal on an 'equity' asset is honestly blocked (§9: "fallback
+# honesto: SHORT=DISABLED se dados insuficientes") instead of simulated as
+# if it were the same as a crypto/forex/index/commodity short.
+_SHORT_DISABLED_ASSET_CLASSES = {"equity"}
 
 
 @dataclass(frozen=True)
@@ -41,6 +52,7 @@ class SignalForRisk:
     data_quality: str
     data_ts: datetime
     tier: str
+    asset_class: str
 
 
 def _latest_health_score(db: Session, strategy_id: int) -> float | None:
@@ -104,6 +116,37 @@ def evaluate_signal(
     if not system_state.trading_enabled:
         return blocked("trading_enabled", {}, "kill_switch")
     ok("trading_enabled")
+
+    # 1b. PAUSE (§60) — a voluntary, reversible operator stop, distinct from
+    # the Kill Switch above (an emergency/automatic one). Checked separately
+    # so the two read differently downstream: a paused system is NO_TRADE,
+    # not EMERGENCY.
+    if system_state.trading_paused:
+        return blocked("trading_paused", {"reason": system_state.paused_reason}, "trading_paused")
+    ok("trading_paused")
+
+    # 1c. TradingMode (§2-4) — this phase never reaches 'live_disabled' in
+    # practice (nothing in this codebase writes anything else to
+    # trading_mode), but the check is real, not decorative: if it ever did,
+    # this is what stops a live order from being sized at all. `None` is
+    # treated as the column's own DB-level default ('paper') — a
+    # not-yet-flushed SystemState built in-process (tests; the
+    # get-or-create path below always commits before this runs) has no
+    # ORM-applied default yet, and that is not the same thing as an
+    # operator having actually switched modes.
+    if system_state.trading_mode not in (None, "paper"):
+        return blocked("trading_mode", {"trading_mode": system_state.trading_mode}, "live_trading_disabled")
+    ok("trading_mode")
+
+    # 1d. Short-selling honesty fallback (§7-11) — see
+    # _SHORT_DISABLED_ASSET_CLASSES above.
+    if signal.direction == "short" and signal.asset_class in _SHORT_DISABLED_ASSET_CLASSES:
+        return blocked(
+            "short_selling_supported",
+            {"asset_class": signal.asset_class},
+            "short_disabled_insufficient_data",
+        )
+    ok("short_selling_supported", {"asset_class": signal.asset_class})
 
     # Safety belt policy: does the current belt allow new trades at all, and
     # does this signal's tier clear the belt's floor (docs/blueprint/08-risk-engine.md
@@ -228,9 +271,22 @@ def evaluate_signal(
         )
     ok("news_risk", {"level": news_verdict.level, "reasons": news_verdict.reasons})
 
+    # 12. Loss Streak Detector (§37-39) — a run of losses across the WHOLE
+    # portfolio (not just this strategy) only ever reduces size, exactly
+    # like every other multiplier here; it never blocks outright (the
+    # safety belts already own a full halt at a worse drawdown) and it
+    # never increases size on a win streak (§40 anti-martingale —
+    # size_multiplier is 1.0 whenever not triggered, full stop).
+    loss_streak = evaluate_loss_streak(db, limits.loss_streak)
+    ok(
+        "loss_streak",
+        {"consecutive_losses": loss_streak.consecutive_losses, "triggered": loss_streak.triggered},
+    )
+
     # Position sizing — always the smallest of every applicable cap, then
     # scaled down further by the current safety belt's multiplier, the
-    # strategy health multiplier, and the news risk multiplier.
+    # strategy health multiplier, the news risk multiplier, and the loss
+    # streak multiplier.
     sizing = calculate_position_size(
         capital=equity,
         entry_price=signal.entry_price,
@@ -242,8 +298,29 @@ def evaluate_signal(
         limits=limits,
     )
     approved_quantity = (
-        sizing.quantity * policy.size_multiplier * health_verdict.size_multiplier * news_verdict.size_multiplier
+        sizing.quantity
+        * policy.size_multiplier
+        * health_verdict.size_multiplier
+        * news_verdict.size_multiplier
+        * loss_streak.size_multiplier
     )
+
+    # 13. Leverage ceiling (§41) — a hard assertion, not just a consequence
+    # of the caps above: every cap in calculate_position_size() is already
+    # expressed as a fraction of `equity` (never of a borrowed/larger
+    # number), so notional should structurally never exceed
+    # equity * max_leverage. Checked explicitly anyway, the same "prove it,
+    # don't just assume it" discipline as every other invariant in this
+    # codebase (see e.g. packages/portfolio/reconciliation.py).
+    notional = approved_quantity * signal.entry_price
+    max_notional = equity * limits.leverage.max_leverage
+    if equity > 0 and notional > max_notional * 1.0001:  # tiny float-rounding tolerance, not a policy gap
+        return blocked(
+            "leverage_ceiling",
+            {"notional": notional, "max_notional": max_notional, "max_leverage": limits.leverage.max_leverage},
+            "leverage_exceeded",
+        )
+    ok("leverage_ceiling", {"notional": notional, "max_notional": max_notional})
 
     if approved_quantity <= 0:
         return blocked("position_sizing", {"sizing": sizing.detail}, "zero_size")

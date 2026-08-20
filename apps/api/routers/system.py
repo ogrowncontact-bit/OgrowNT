@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from apps.api.deps import get_current_admin, get_session
+from apps.api.deps import get_current_admin, get_session, require_admin_role
 from apps.api.schemas import ComponentHealth, HealthResponse, RiskLimitsUpdate, SystemStatusResponse
 from packages.data.connectors.market.factory import get_market_data_provider
 from packages.data.connectors.news.factory import get_news_provider
@@ -104,7 +104,7 @@ def status_(db: Session = Depends(get_session), _: AdminUser = Depends(get_curre
 
 @router.post("/kill-switch", response_model=SystemStatusResponse)
 def trigger_kill_switch(
-    db: Session = Depends(get_session), admin: AdminUser = Depends(get_current_admin)
+    db: Session = Depends(get_session), admin: AdminUser = Depends(require_admin_role)
 ) -> SystemState:
     state = db.get(SystemState, True) or SystemState(id=True)
     state.safety_belt_level = "kill_switch"
@@ -145,7 +145,7 @@ def _deep_merge(base: dict, updates: dict) -> dict:
 @router.patch("/risk-limits")
 def update_risk_limits(
     payload: RiskLimitsUpdate,
-    admin: AdminUser = Depends(get_current_admin),
+    admin: AdminUser = Depends(require_admin_role),
     db: Session = Depends(get_session),
 ) -> dict:
     """Partial update of config/risk_limits.yaml — docs/blueprint/08-risk-engine.md
@@ -169,7 +169,7 @@ def update_risk_limits(
 
 @router.post("/kill-switch/release", response_model=SystemStatusResponse)
 def release_kill_switch(
-    db: Session = Depends(get_session), admin: AdminUser = Depends(get_current_admin)
+    db: Session = Depends(get_session), admin: AdminUser = Depends(require_admin_role)
 ) -> SystemState:
     state = db.get(SystemState, True) or SystemState(id=True)
     state.safety_belt_level = "normal"

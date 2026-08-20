@@ -89,7 +89,11 @@ def test_position_stays_open_when_price_between_stop_and_target(db_session):
     assert position.status == "open"
 
 
-def test_thesis_invalidated_closes_position_when_regime_flips_to_worst(db_session):
+def test_regime_shift_to_worst_routes_through_position_policy_and_closes(db_session):
+    """"PROMPT 8" §28: a regime shift never closes a position directly —
+    it's routed through packages/risk/position_policy.py, whose default
+    config/risk_limits.yaml policy for regime_change is 'close'. See
+    tests/test_position_policy_trade_monitor.py for the hold/reduce cases."""
     asset = _asset_with_price(db_session, "MONTHESIS", 102.0)  # inside stop/target, would otherwise hold
     strategy = _strategy(db_session, "mean_reversion_v1")  # worst_regimes includes trending_bull
     position = Position(asset_id=asset.id, strategy_id=strategy.id, direction="long", entry_price=100.0, current_stop=95.0, target_price=115.0, size=1.0, status="open")
@@ -105,7 +109,7 @@ def test_thesis_invalidated_closes_position_when_regime_flips_to_worst(db_sessio
 
     db_session.refresh(position)
     assert position.status == "closed"
-    assert position.exit_reason == "thesis_invalidated"
+    assert position.exit_reason == "regime_change_exit"
 
 
 def test_unavailable_price_does_not_close_position(db_session):

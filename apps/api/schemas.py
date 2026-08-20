@@ -18,6 +18,13 @@ class AdminOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
     email: str
+    role: str
+
+
+class CreateUserRequest(BaseModel):
+    email: str
+    password: str
+    role: str = "viewer"
 
 
 class AssetOut(BaseModel):
@@ -918,3 +925,67 @@ class StrategyLabComparisonRow(BaseModel):
 
 class StrategyLabCompareRequest(BaseModel):
     backtest_run_ids: list[int]
+
+
+# --- "PROMPT 8" Autonomous Paper Trading ---------------------------------
+
+
+class AutonomousStatusOut(BaseModel):
+    status: str  # AutonomousSystemStatus — see packages/shared/worker_health.py
+    trading_mode: str
+    trading_enabled: bool
+    trading_paused: bool
+    paused_reason: str | None
+    safety_belt_level: str
+    worker_alive: bool
+    worker_last_heartbeat: datetime | None
+    open_positions_count: int
+    worker_restart_count: int
+
+
+class TradingEventOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    ts: datetime
+    event_type: str
+    entity_type: str | None
+    entity_id: int | None
+    payload: dict
+
+
+class ManualActionOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    ts: datetime
+    actor: str
+    action: str
+    entity_type: str | None
+    entity_id: int | None
+    reason: str | None
+    before: dict
+    after: dict
+
+
+class TradingPerformanceOut(BaseModel):
+    trades_today: int
+    wins_today: int
+    losses_today: int
+    win_rate_today: float | None
+    daily_pnl: float
+    open_positions_count: int
+    exposure_pct: float
+    drawdown_pct: float
+    safety_belt_level: str
+    autonomous_status: str
+
+
+class PauseRequest(BaseModel):
+    reason: str
+
+
+class CloseOrCancelReasonRequest(BaseModel):
+    reason: str | None = None
+
+
+class ResetAccountRequest(BaseModel):
+    confirm: bool = False

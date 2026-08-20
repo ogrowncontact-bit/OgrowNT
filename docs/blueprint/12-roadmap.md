@@ -1249,6 +1249,216 @@ Divergências deliberadas, documentadas (não silenciosas):
    `docs/backtest-jobs.md`) na raiz de `docs/`, mesma convenção
    estabelecida no "PROMPT 6".
 
+## "PROMPT 8" — Autonomous Paper Trading + Portfolio Manager + Execution Simulator (pós-Fase 7) — **status: implementada e validada nesta sessão**
+
+O "PROMPT 8" pede um agente de paper trading 24/7 (93 secções): separação
+TradingMode PAPER/LIVE_DISABLED, um gate de aprovação Opportunity→Risk→
+Portfolio→Execution, Portfolio Manager com alocação por estratégia,
+trailing stops, uma política HOLD/REDUCE/CLOSE explícita para posições
+abertas durante regime change/news risk/emergência de portfolio, proteção
+anti-martingale, `LossStreakDetector`, idempotency keys, event sourcing,
+`PaperReconciliationEngine`, RBAC, controlos manuais (pause/resume/close
+position/cancel order/kill switch/reset account) com audit trail
+before/after, um "Autonomous Trading Center" no dashboard, e uma bateria
+de testes de segurança/crash-recovery/simulação contínua. A maior parte da
+infraestrutura de segurança **já existia** desde as Fases 3-6 (Kill Switch,
+Safety Belts, Correlation Guard, Position Sizing, Trade Monitor, o
+endpoint `/api/trades/{id}/why` já era essencialmente o "decision trace"
+do §56) — este prompt não a reconstrói, fecha exactamente os genuínos
+buracos que restavam:
+
+- [x] **Schema** (migrações `0013`/`0014`) — `system_state` ganhou
+      `trading_mode`, `trading_paused/paused_reason/paused_at`,
+      `worker_restart_count/restart_window_started_at` (crash-loop
+      protection), `last_reset_at` (reset epoch); `positions` ganhou
+      `trailing_stop_config`/`favorable_extreme_price` e um `exit_reason`
+      agora fechado por CHECK constraint (9 valores); `orders` ganhou
+      `idempotency_key` (UNIQUE), `expected_price`, `latency_ms`;
+      `admin_users` ganhou `role` (admin/viewer); três tabelas novas —
+      `trading_events` (event sourcing, §54), `system_health` (snapshot
+      periódico, distinto do `GET /api/system/health` on-demand),
+      `manual_actions` (audit trail before/after das 6 acções manuais)
+- [x] **TradingMode + gate LIVE_DISABLED** (§2-4, §8) — `system_state.trading_mode`,
+      verificado como o **primeiro** passo do Risk Engine
+      (`packages/risk/engine.py`), lado a lado com `trading_enabled` (kill
+      switch) e o novo `trading_paused` (PAUSE, §64 — voluntário e
+      reversível, deliberadamente distinto do kill switch automático).
+      Nenhum caminho de código escreve `live_disabled`/qualquer coisa que
+      não seja `paper` — o gate é real, testado, mas nunca alcançado nesta
+      fase (honesto: `# ZERO live trading`)
+- [x] **Portfolio Manager** (§9, §12-17) — `packages/portfolio/manager.py`
+      novo: `evaluate_allocation()` + `AllocationDecision`, um segundo gate
+      **depois** da aprovação do Risk Engine, verificando algo que os
+      checks existentes (exposição por activo, cluster de correlação) não
+      cobrem — quanto capital uma **estratégia** já tem exposto em todos
+      os seus activos ao mesmo tempo (`max_strategy_allocation_pct`, novo
+      em `config/risk_limits.yaml`). Nunca duplica a matemática de
+      exposição/correlação já feita em `packages/risk/`
+- [x] **Short-selling honesty fallback** (§34) — `asset_class == 'equity'`
+      bloqueia `direction == 'short'` com `short_disabled_insufficient_data`
+      (este sistema não modela mecânica de empréstimo de acções/margem);
+      crypto/forex/index/commodity continuam a suportar short (contabilidade
+      cash-settled, já simétrica por direcção em
+      `packages/execution/order_manager.py`)
+- [x] **Leverage ceiling** (§35) — `max_leverage=1.0` explícito em
+      `config/risk_limits.yaml`, verificado como uma asserção real no Risk
+      Engine (nunca apenas assumido como consequência implícita dos outros
+      caps)
+- [x] **Trailing stops** (§26-27) — `packages/quant/exits/trailing_stop.py`
+      novo: `fixed_distance`/`percentage`/`atr_based`, nunca alarga um
+      stop (só ratchets a favor do trade); `apps/worker/trade_monitor.py`
+      chama-o antes de qualquer verificação de saída, ATR calculado só
+      para posições configuradas com esse tipo
+- [x] **Position Risk Policy — HOLD/REDUCE/CLOSE** (§28-30) — `packages/risk/position_policy.py`
+      novo: regime change, critical news, e emergência de portfolio (Kill
+      Switch **ou** belt EMERGENCY) já não fecham uma posição
+      unilateralmente — passam por uma política configurável
+      (`config/risk_limits.yaml`'s `position_risk_policy`, "Não
+      implementar comportamento implícito" §30). REDUCE usa a nova
+      `packages/execution/order_manager.py::reduce_position()` (fecha uma
+      fracção, a posição continua aberta com o mesmo stop/target — nunca
+      alimenta as estatísticas de aprendizagem por estratégia, que
+      continuam exclusivas de um close completo). Ordem de severidade:
+      Kill Switch/EMERGENCY > critical news > regime shift
+- [x] **Anti-martingale + Loss Streak Detector** (§36-39) — `packages/risk/loss_streak.py`
+      novo: streak de perdas **do portfolio inteiro** (não por estratégia
+      — isso já existe via `packages/quant/learning/quarantine.py`'s
+      health score), reduz size a 0.5x a partir de 5 perdas seguidas,
+      nunca bloqueia (as safety belts já cobrem um halt completo a um
+      drawdown pior). Anti-martingale provado por ausência: nenhum código
+      em `packages/risk/position_sizing.py` lê P&L passado para aumentar
+      size, testado explicitamente
+      (`test_win_streak_never_increases_size`)
+- [x] **Idempotency + qualidade de execução** (§18-19, §44, §51) —
+      `Order.idempotency_key` (UNIQUE, chave = propósito + entidade +
+      nº de tentativas já existentes — retries legítimos entre ciclos
+      avançam a chave, duplicados genuínos colidem na constraint da BD);
+      `Order.expected_price`/`latency_ms` capturados em cada submissão
+      (`open_position`/`close_position`/`reduce_position`)
+- [x] **Event sourcing** (§54, "WHY did/didn't the system trade?") —
+      `TradingEvent` novo: `order_submitted/filled/rejected`,
+      `position_opened/closed`, `risk_blocked`, `no_trade`,
+      `trading_paused/resumed`, `kill_switch_triggered/released`,
+      `reconciliation_mismatch`, `portfolio_emergency_action` (também
+      cobre as acções de regime/news do position_policy, distinguidas por
+      `payload.trigger`), `loss_streak_detected`, `worker_restarted`,
+      `crash_loop_protection_triggered`. Complementa, não substitui,
+      `RiskCheck`/`RiskDecision` (já cobriam o "porquê" por sinal em
+      detalhe) e `AuditLog` (acções admin/sistema já existentes)
+- [x] **PaperReconciliationEngine** (§52, §83-84) — `packages/portfolio/reconciliation.py`
+      novo: reconstrói cash do zero (capital inicial − fees de entrada −
+      capital em posições abertas + P&L realizado, agregado em SQL) e
+      compara contra o ledger incremental de
+      `packages/portfolio/state.py`; qualquer divergência ou invariante
+      violado (cash negativo, size≤0, fees negativas) pausa trading
+      (`trading_paused`, não o kill switch — é um stop de integridade
+      contabilística, não de risco de mercado) e escreve um Alert crítico.
+      Corre a cada `reconciliation_interval_seconds` (300s) no worker
+- [x] **SystemHealth + crash-loop protection** (§46-50) —
+      `AutonomousSystemStatus` (starting/running/paused/caution/
+      defensive/emergency/kill_switch/error — `NO_TRADE` é um facto por
+      decisão, não por estado persistido, ver
+      `packages/shared/worker_health.py`'s docstring) computado uma vez e
+      partilhado entre o snapshot periódico e `GET /api/trading/status`;
+      `record_worker_restart()` conta reinícios do processo por janela
+      (`max_worker_restarts_per_window`) e auto-pausa trading se um
+      crash-loop silencioso continuasse a "confirmar" o sistema como
+      saudável entre reinícios quase instantâneos
+- [x] **RESET PAPER ACCOUNT + reset epoch** (§64, §66) — `SystemState.last_reset_at`:
+      `packages/portfolio/state.py` e `packages/portfolio/reconciliation.py`
+      ignoram tudo antes desse instante nos cálculos de pico/drawdown/P&L
+      periódico e na reconciliação — sem isto, um reset pareceria um
+      drawdown gigante contra um pico de uma vida anterior da conta.
+      Histórico completo (`portfolio_snapshots`/`orders`/`trades`) nunca é
+      apagado — append-only, sempre auditável. Exige `confirm=true` e zero
+      posições abertas
+- [x] **RBAC** (§77) — `AdminUser.role` (admin/viewer),
+      `require_admin_role` novo em `apps/api/deps.py`, aplicado a todos os
+      controlos manuais + kill switch + risk-limits PATCH.
+      `POST /api/auth/users` (admin-only) cria contas viewer sem partilhar
+      a password do admin
+- [x] **API `/api/trading/*`** (§78) — `apps/api/routers/trading_control.py`
+      novo: `GET /status` (`AutonomousStatusOut`), `GET /activity` (feed
+      de `TradingEvent`), `GET /performance` (trades hoje, win rate,
+      P&L, exposição, drawdown), `GET /manual-actions`,
+      `POST /pause`, `/resume`, `/positions/{id}/close`,
+      `/orders/{id}/cancel`, `/reset-paper`. Deliberadamente **não**
+      duplica `GET /api/positions`/`/orders`/`/trades`/`/portfolio` nem
+      `POST /api/system/kill-switch`, que já existem e já são testados —
+      ver o docstring do módulo
+- [x] **Dashboard: Autonomous Trading Center + Live Activity Feed** (§58-59, §64) —
+      `AutonomousStatusBadge`, `PauseResumeButton`, `ClosePositionButton`,
+      `ResetAccountButton`, `LiveActivityFeed` novos; a maior parte dos
+      painéis do §58 (portfolio, posições, trades, oportunidades, risk
+      state, news risk, strategy health) já existiam desde fases
+      anteriores — consolidados com o novo cabeçalho de estado +
+      controlos manuais em vez de reconstruídos
+- [x] 74 novos testes automatizados (659/659 no total da suite):
+      PortfolioManager (6), LossStreakDetector (7), gates novos do Risk
+      Engine — TradingMode/pause/short-disabled/leverage/loss-streak (6),
+      trailing stop puro + integração no trade monitor (9), idempotency +
+      qualidade de execução + `reduce_position` (7), reconciliação (6),
+      position policy hold/reduce/close nos três triggers (6), worker
+      health/crash-loop/autonomous status (12), RBAC + auth (6), API de
+      trading control (13), bateria de segurança crítica — Risk Engine
+      offline, bypass estrutural do Portfolio Manager, prova estrutural de
+      que `open_position()` só é chamado a partir do caminho com gate (3),
+      crash recovery + simulação contínua de 15 ciclos sem drift de
+      reconciliação nem colisão de idempotency key (3)
+- [x] **verificado ao vivo** contra Postgres real: API + worker de trading
+      real a correr durante vários ciclos (scan/trade-monitor/strategy);
+      `POST /api/trading/pause`/`/resume` reais com `ManualAction`
+      before/after confirmado na BD; `reconcile_and_enforce()` corrido
+      directamente contra o histórico real acumulado desta sessão (OK,
+      diferença de €0.0024 dentro da tolerância); dashboard real
+      (Playwright/Chromium) — badge de estado RUNNING→PAUSED→RUNNING via
+      os botões reais, Live Activity Feed a mostrar eventos reais
+      (`trading_paused`, `no_trade`, `worker_restarted`), 4 botões de
+      Close renderizados para as 4 posições abertas reais. `ruff`/`mypy`/
+      `npm run lint`/`tsc --noEmit`/`next build` limpos
+
+Divergências deliberadas, documentadas (não silenciosas):
+
+1. Vocabulário de `exit_reason`/nomes de eventos/status usa snake_case
+   minúsculo consistente com o resto do schema (`stop_hit`,
+   `trailing_stop_hit`, `regime_change_exit`, `manual_close`,
+   `kill_switch_close`, `portfolio_emergency_close`,
+   `reconciliation_pause`, `thesis_invalidated`), não os nomes UPPER_CASE
+   literais do prompt (`STOP_LOSS`, `REGIME_CHANGE`, ...) — o mesmo
+   conjunto de 9 razões fechado, sem os renomear a meio de uma sessão já
+   testada só por paridade cosmética.
+2. Sem fila de ordens pendentes/limit orders reais — `PaperExecutionProvider`
+   continua a preencher ordens de mercado sincronamente (decisão da Fase
+   3, intocada). `POST /api/trading/orders/{id}/cancel` está completo e
+   testado, mas nunca encontra uma ordem `new`/`submitted` para cancelar
+   nesta arquitectura — documentado no próprio docstring do endpoint, não
+   escondido.
+3. Sem tabelas `PaperAccount`/`Execution` separadas — as suas
+   responsabilidades já existem: `PaperAccount` é
+   `PortfolioSnapshot`+`SystemState` (cash/equity/reset epoch);
+   `Execution` é o próprio `Order` (já tem `fees`/`slippage_bps`, agora
+   também `expected_price`/`latency_ms`). Duplicar tabelas para paridade
+   de nomes com o prompt teria criado uma segunda fonte de verdade.
+4. Sem arquitectura de filas de eventos/workers assíncronos por agente
+   (§6-7, §80) — mantido o padrão "N workers nomeados → cadências dentro
+   de um processo" já estabelecido em todas as fases anteriores
+   (`apps/worker/main.py`), com duas cadências novas (reconciliação,
+   health snapshot). A mesma razão de sempre: um sistema single-user sem
+   profundidade de fila não ganha isolamento real de uma fila de eventos
+   separada, só complexidade operacional.
+5. 24h/72h/7-day soak tests (§67) simulados como muitos ciclos
+   comprimidos num único processo de teste, não como execuções reais de
+   dias — um teste de longa duração real pertence a um script manual
+   separado (ver `docs/autonomous-trading.md`), não à suite `pytest` que
+   corre a cada alteração.
+6. `NO_TRADE` não é um valor persistido de `AutonomousSystemStatus` — é um
+   facto por decisão (o `TradingEvent(event_type="no_trade")` já emitido
+   por sinal), nunca inferido do `SystemState` sozinho sem evidência do
+   ciclo actual (documentado no docstring de
+   `packages/shared/worker_health.py`).
+7. `docs/autonomous-trading.md` na raiz de `docs/`, mesma convenção
+   estabelecida desde o "PROMPT 6".
+
 ## Evolução futura (fora de âmbito até validação completa)
 
 Live brokers, exchanges reais (crypto/forex/ações), ML avançado, deep learning,

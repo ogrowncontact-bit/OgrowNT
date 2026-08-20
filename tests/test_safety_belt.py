@@ -5,11 +5,14 @@ from packages.portfolio.state import PortfolioState
 from packages.risk.config import (
     CapitalConfig,
     DataQualityConfig,
+    LeverageConfig,
     LiquidityConfig,
     LossLimitsConfig,
+    LossStreakConfig,
     NewsRiskMultipliersConfig,
     PerTradeConfig,
     PortfolioLimitsConfig,
+    PositionRiskPolicyConfig,
     RiskLimits,
     SafetyBeltMultipliersConfig,
 )
@@ -28,7 +31,8 @@ LIMITS = RiskLimits(
     capital=CapitalConfig(initial_paper_capital=10000),
     per_trade=PerTradeConfig(max_risk_pct=1.0, min_risk_reward=1.5),
     portfolio=PortfolioLimitsConfig(
-        max_exposure_pct=60, max_single_asset_pct=15, max_correlated_cluster_pct=25, correlation_threshold=0.7
+        max_exposure_pct=60, max_single_asset_pct=15, max_correlated_cluster_pct=25, correlation_threshold=0.7,
+        max_strategy_allocation_pct=30,
     ),
     loss_limits=LossLimitsConfig(
         max_daily_loss_pct=3, max_weekly_loss_pct=6, max_monthly_loss_pct=10,
@@ -40,6 +44,11 @@ LIMITS = RiskLimits(
         normal=1.0, caution=0.75, defensive=0.5, emergency=0.0, kill_switch=0.0
     ),
     news_risk_multipliers=NewsRiskMultipliersConfig(normal=1.0, elevated=0.75, high=0.5, critical=0.0),
+    leverage=LeverageConfig(max_leverage=1.0),
+    loss_streak=LossStreakConfig(threshold=5, size_multiplier_when_triggered=0.5),
+    position_risk_policy=PositionRiskPolicyConfig(
+        regime_change="close", news_risk="reduce", portfolio_emergency="close", reduce_fraction=0.5
+    ),
 )
 
 

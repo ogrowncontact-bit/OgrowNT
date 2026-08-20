@@ -30,3 +30,15 @@ def get_current_admin(
     if admin is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Admin not found")
     return admin
+
+
+def require_admin_role(admin: AdminUser = Depends(get_current_admin)) -> AdminUser:
+    """"PROMPT 8" §84 RBAC: any authenticated account (admin or viewer) can
+    read via get_current_admin above; only role='admin' may reach a
+    mutating endpoint — manual trading controls, the Kill Switch, risk
+    limits, strategy lifecycle changes. A VIEWER account exists so an
+    operator can hand out a read-only link without sharing the admin
+    password (POST /api/auth/users, itself admin-only)."""
+    if admin.role != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="admin role required")
+    return admin

@@ -21,6 +21,7 @@ from apps.api.routers import (
     strategies,
     system,
     trading,
+    trading_control,
 )
 from packages.shared.logging import configure_logging
 from packages.shared.settings import get_settings
@@ -71,6 +72,7 @@ app.include_router(research.router)
 app.include_router(backtests.router)
 app.include_router(alerts.router)
 app.include_router(analytics.router)
+app.include_router(trading_control.router)
 
 
 @app.get("/")
