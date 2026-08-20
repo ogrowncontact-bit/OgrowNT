@@ -144,6 +144,7 @@ model AssessmentVersion {
   freeResultTemplate Json?   // { headline, insightIntro, lockedInsightsLabel }
   shareTemplate   Json?      // { shareTitleTemplate, shareTextTemplate }
   tensionPairs    Json?      // TensionPairDefinition[]
+  contradictionFollowups Json? // ContradictionFollowupRule[]
   publishedAt     DateTime?
   createdBy       String?
   createdAt       DateTime   @default(now())

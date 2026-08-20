@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { Screen, ProgressBar, OptionCard, Button, ScaleInput, OpenTextArea } from "@inner/ui";
@@ -39,6 +39,17 @@ export function AssessmentFlow({ slug, assessmentSessionId, initialQuestion, ini
     }
   }
 
+  useEffect(() => {
+    fetch(`/api/sessions/${assessmentSessionId}/view`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ questionKey: question.key }),
+      keepalive: true,
+    }).catch(() => {});
+    // Only re-fire when the question actually changes, not on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [question.key]);
+
   const canContinue =
     question.type === "open_text"
       ? openText.trim().length > 0
@@ -46,15 +57,10 @@ export function AssessmentFlow({ slug, assessmentSessionId, initialQuestion, ini
         ? scaleValue !== undefined
         : selected.length > 0;
 
-  async function handleContinue() {
-    if (!canContinue || submitting) return;
+  async function submitAnswer(payload: Record<string, unknown>) {
+    if (submitting) return;
     setSubmitting(true);
     setError(null);
-
-    const payload: Record<string, unknown> = { questionKey: question.key };
-    if (question.type === "open_text") payload.openText = openText.trim();
-    else if (question.type === "scale") payload.scaleValue = scaleValue;
-    else payload.selectedOptionKeys = selected;
 
     try {
       const res = await fetch(`/api/sessions/${assessmentSessionId}/answer`, {
@@ -84,6 +90,19 @@ export function AssessmentFlow({ slug, assessmentSessionId, initialQuestion, ini
     }
   }
 
+  function handleContinue() {
+    if (!canContinue) return;
+    const payload: Record<string, unknown> = { questionKey: question.key };
+    if (question.type === "open_text") payload.openText = openText.trim();
+    else if (question.type === "scale") payload.scaleValue = scaleValue;
+    else payload.selectedOptionKeys = selected;
+    submitAnswer(payload);
+  }
+
+  function handleSkip() {
+    submitAnswer({ questionKey: question.key, skipped: true });
+  }
+
   return (
     <Screen
       align="top"
@@ -99,6 +118,16 @@ export function AssessmentFlow({ slug, assessmentSessionId, initialQuestion, ini
           <Button onClick={handleContinue} disabled={!canContinue || submitting}>
             {submitting ? "..." : "Continue"}
           </Button>
+          {question.sensitive && (
+            <button
+              type="button"
+              onClick={handleSkip}
+              disabled={submitting}
+              className="mt-3 w-full text-center text-[13px] text-[var(--inner-muted)] underline underline-offset-2 disabled:opacity-40"
+            >
+              Prefer not to answer
+            </button>
+          )}
           {error && (
             <p role="alert" className="mt-3 text-sm text-[var(--inner-accent)]">
               {error}

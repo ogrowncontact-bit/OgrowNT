@@ -213,6 +213,8 @@ export const jealousyAssessment: AssessmentConfig = {
         isCore: true,
         prompt: "Describe a moment jealousy showed up for you — what triggered it, and what did you do?",
         dynamicFollowupCandidates: ["jealousy_regret", "jealousy_pattern_recognition"],
+        sensitive: true,
+        difficulty: "deep",
       },
       {
         key: "uncertainty_open",

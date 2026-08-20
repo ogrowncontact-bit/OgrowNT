@@ -77,6 +77,16 @@ describe("confidence: volume + consistency", () => {
   });
 });
 
+describe("skipped answers", () => {
+  it("contributes nothing to scoring — a skipped sensitive question never pulls a dimension in either direction", () => {
+    const config = baseConfig();
+    const withoutSkip = recomputeDimensionScores(config, [q], [answer("pos")]);
+    const withSkip = recomputeDimensionScores(config, [q], [answer("pos"), { questionKey: "q1", skipped: true, answeredAt: "" }]);
+    expect(withSkip.connection.raw).toBe(withoutSkip.connection.raw);
+    expect(withSkip.connection.confidence).toBe(withoutSkip.connection.confidence);
+  });
+});
+
 describe("explainDimension", () => {
   it("traces a score back to the exact contributing answers", () => {
     const config = baseConfig();

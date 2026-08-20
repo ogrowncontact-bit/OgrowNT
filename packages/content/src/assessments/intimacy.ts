@@ -207,6 +207,8 @@ export const intimacyAssessment: AssessmentConfig = {
         isCore: true,
         prompt: "Describe a time you wanted to be closer to someone but held part of yourself back.",
         dynamicFollowupCandidates: ["holding_back_reason", "holding_back_pattern"],
+        sensitive: true,
+        difficulty: "deep",
       },
     ],
     adaptivePool: [

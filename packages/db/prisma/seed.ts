@@ -54,6 +54,7 @@ async function seedAssessment(assessment: AssessmentConfig) {
       freeResultTemplate: assessment.freeResultTemplate as any,
       shareTemplate: (assessment.shareTemplate as any) ?? undefined,
       tensionPairs: (assessment.tensionPairs as any) ?? undefined,
+      contradictionFollowups: (assessment.contradictionFollowups as any) ?? undefined,
       publishedAt: new Date(),
       dimensions: {
         create: await Promise.all(
@@ -71,7 +72,13 @@ async function seedAssessment(assessment: AssessmentConfig) {
             isCore: true,
             prompt: q.prompt,
             orderHint: i,
-            metadata: { scaleMax: q.scaleMax, scaleDimension: q.scaleDimension, dynamicFollowupCandidates: q.dynamicFollowupCandidates },
+            metadata: {
+              scaleMax: q.scaleMax,
+              scaleDimension: q.scaleDimension,
+              dynamicFollowupCandidates: q.dynamicFollowupCandidates,
+              sensitive: q.sensitive,
+              difficulty: q.difficulty,
+            },
             options: {
               create: (q.options ?? []).map((o, j) => ({
                 key: o.key,
@@ -87,7 +94,13 @@ async function seedAssessment(assessment: AssessmentConfig) {
             isCore: false,
             prompt: q.prompt,
             orderHint: 1000 + i,
-            metadata: { scaleMax: q.scaleMax, scaleDimension: q.scaleDimension, dynamicFollowupCandidates: q.dynamicFollowupCandidates },
+            metadata: {
+              scaleMax: q.scaleMax,
+              scaleDimension: q.scaleDimension,
+              dynamicFollowupCandidates: q.dynamicFollowupCandidates,
+              sensitive: q.sensitive,
+              difficulty: q.difficulty,
+            },
             options: {
               create: (q.options ?? []).map((o, j) => ({
                 key: o.key,

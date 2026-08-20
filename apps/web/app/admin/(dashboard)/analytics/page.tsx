@@ -12,6 +12,7 @@ import {
 import { getGlobalSegments, getPerAssessmentSegments } from "@/lib/admin/segmentsReader";
 import { getExperimentResults } from "@/lib/admin/experimentsReader";
 import { ReengagementRunner } from "@/components/admin/ReengagementRunner";
+import { AbandonmentRunner } from "@/components/admin/AbandonmentRunner";
 import { formatPrice as formatMoney } from "@/lib/money";
 
 function formatDate(d: Date) {
@@ -94,6 +95,7 @@ export default async function AdminAnalyticsPage({
       </div>
 
       <ReengagementRunner />
+      <AbandonmentRunner />
 
       <div className="mb-6 flex items-center justify-between">
         <h2 className="font-display text-[18px] text-[var(--inner-ink)]">Funnel by experience</h2>

@@ -106,6 +106,9 @@ export function AssessmentEditor({ assessmentId, initialConfig, hasDraft, status
           <h1 className="font-display text-[24px] text-[var(--inner-ink)]">{config.name || "Untitled experience"}</h1>
         </div>
         <div className="flex shrink-0 gap-2">
+          <a href={`/admin/assessments/${assessmentId}/simulate`} className={smallBtn}>
+            Simulate
+          </a>
           <button onClick={handleSave} disabled={saving || publishing} className={smallBtn}>
             {saving ? "Saving..." : "Save draft"}
           </button>
@@ -467,7 +470,14 @@ function QuestionListEditor({
   function changeType(i: number, type: QuestionType) {
     // Clear fields specific to the previous type so stale data (e.g. leftover
     // options on a scale question) never gets silently persisted.
-    const base: Question = { key: questions[i].key, type, prompt: questions[i].prompt, isCore };
+    const base: Question = {
+      key: questions[i].key,
+      type,
+      prompt: questions[i].prompt,
+      isCore,
+      sensitive: questions[i].sensitive,
+      difficulty: questions[i].difficulty,
+    };
     if (type === "single_select" || type === "multi_select") {
       base.options = questions[i].options?.length ? questions[i].options : [{ key: "a", label: "Option A", dimensionContributions: {} }];
     } else if (type === "scale") {
@@ -503,6 +513,26 @@ function QuestionListEditor({
             value={q.prompt}
             onChange={(e) => update(i, { prompt: e.target.value })}
           />
+
+          <div className="mb-2 flex items-center gap-4">
+            <label className="flex items-center gap-1 text-[12px] text-[var(--inner-ink-soft)]">
+              <input type="checkbox" checked={q.sensitive ?? false} onChange={(e) => update(i, { sensitive: e.target.checked })} />
+              Sensitive (offers "Prefer not to answer")
+            </label>
+            <div className="flex items-center gap-1">
+              <label className={label}>Difficulty</label>
+              <select
+                className={input}
+                value={q.difficulty ?? ""}
+                onChange={(e) => update(i, { difficulty: (e.target.value || undefined) as Question["difficulty"] })}
+              >
+                <option value="">—</option>
+                <option value="easy">Easy</option>
+                <option value="moderate">Moderate</option>
+                <option value="deep">Deep</option>
+              </select>
+            </div>
+          </div>
 
           {(q.type === "single_select" || q.type === "multi_select") && (
             <OptionsEditor

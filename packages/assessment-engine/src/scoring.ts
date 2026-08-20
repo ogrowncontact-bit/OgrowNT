@@ -41,6 +41,7 @@ function collectContributions(
   const questionByKey = new Map(allQuestions.map((q) => [q.key, q]));
 
   for (const answer of answers) {
+    if (answer.skipped) continue;
     const question = questionByKey.get(answer.questionKey);
     if (!question) continue;
 

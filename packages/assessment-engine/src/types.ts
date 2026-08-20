@@ -19,6 +19,8 @@ export interface QuestionOption {
   dimensionContributions: Partial<Record<DimensionKey, number>>;
 }
 
+export type QuestionDifficulty = "easy" | "moderate" | "deep";
+
 export interface Question {
   key: string;
   type: QuestionType;
@@ -35,6 +37,15 @@ export interface Question {
    * these — it can never invent a question outside this list.
    */
   dynamicFollowupCandidates?: string[];
+  /**
+   * Marks a question as emotionally loaded enough that the UI offers
+   * "Prefer not to answer" instead of forcing a response. A skipped
+   * question still consumes its askedQuestionKeys slot (never re-asked)
+   * but contributes nothing to scoring.
+   */
+  sensitive?: boolean;
+  /** Authoring-time signal only — not read by the selection algorithm itself. */
+  difficulty?: QuestionDifficulty;
 }
 
 export type AdaptiveConditionOp = "gte" | "lte" | "between" | "answered_option" | "has_ai_choice";
@@ -64,6 +75,21 @@ export interface AdaptiveRule {
   trigger: AdaptiveTrigger;
   action: AdaptiveAction;
   priority: number;
+}
+
+/**
+ * Authored pairing between a dimension and a CONTEXTUAL clarifying question
+ * to ask when that dimension's answers stop agreeing with each other
+ * (detectContradictions in scoring.ts). This is deliberately distinct from
+ * `AdaptiveRule` — it never accuses ("you said X but also Y"), it just asks
+ * a neutral follow-up ("Which situation feels more like you?") whose
+ * *phrasing* is entirely the content author's responsibility. Fires at most
+ * once per dimension per session.
+ */
+export interface ContradictionFollowupRule {
+  dimensionKey: DimensionKey;
+  /** Must be a key in questionBank.adaptivePool. */
+  questionKey: string;
 }
 
 export interface ProfileMatchingRule {
@@ -182,6 +208,8 @@ export interface AssessmentConfig {
   shareTemplate?: ShareTemplate;
   /** Configurable pairs the tension engine checks after every answer — optional so existing assessments without an authored set simply detect none. */
   tensionPairs?: TensionPairDefinition[];
+  /** Optional contextual follow-up questions for contradiction-prone dimensions — see ContradictionFollowupRule. */
+  contradictionFollowups?: ContradictionFollowupRule[];
   premiumReportStructure: ReportSection[];
   recommendedNext: RecommendationCandidate[];
   pricing: Record<string, PriceRef>;
@@ -207,6 +235,8 @@ export interface RecordedAnswer {
    */
   aiDimensionNudges?: Partial<Record<DimensionKey, number>>; // each -1..1
   aiChosenFollowupKey?: string;
+  /** True when the respondent chose "Prefer not to answer" on a sensitive question — recorded so it's never re-asked, but contributes nothing to scoring. */
+  skipped?: boolean;
 }
 
 export interface DimensionState {

@@ -129,6 +129,7 @@ export async function saveAssessmentDraft(assessmentId: string, config: Assessme
       freeResultTemplate: config.freeResultTemplate as any,
       shareTemplate: (config.shareTemplate as any) ?? undefined,
       tensionPairs: (config.tensionPairs as any) ?? undefined,
+      contradictionFollowups: (config.contradictionFollowups as any) ?? undefined,
       publishedAt: null,
       dimensions: { create: dimensionRows },
       questions: {
@@ -139,7 +140,13 @@ export async function saveAssessmentDraft(assessmentId: string, config: Assessme
             isCore: true,
             prompt: q.prompt,
             orderHint: i,
-            metadata: { scaleMax: q.scaleMax, scaleDimension: q.scaleDimension, dynamicFollowupCandidates: q.dynamicFollowupCandidates },
+            metadata: {
+              scaleMax: q.scaleMax,
+              scaleDimension: q.scaleDimension,
+              dynamicFollowupCandidates: q.dynamicFollowupCandidates,
+              sensitive: q.sensitive,
+              difficulty: q.difficulty,
+            },
             options: {
               create: (q.options ?? []).map((o, j) => ({
                 key: o.key,
@@ -155,7 +162,13 @@ export async function saveAssessmentDraft(assessmentId: string, config: Assessme
             isCore: false,
             prompt: q.prompt,
             orderHint: 1000 + i,
-            metadata: { scaleMax: q.scaleMax, scaleDimension: q.scaleDimension, dynamicFollowupCandidates: q.dynamicFollowupCandidates },
+            metadata: {
+              scaleMax: q.scaleMax,
+              scaleDimension: q.scaleDimension,
+              dynamicFollowupCandidates: q.dynamicFollowupCandidates,
+              sensitive: q.sensitive,
+              difficulty: q.difficulty,
+            },
             options: {
               create: (q.options ?? []).map((o, j) => ({
                 key: o.key,

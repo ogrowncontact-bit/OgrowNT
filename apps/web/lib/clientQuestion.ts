@@ -7,6 +7,7 @@ export interface ClientQuestion {
   prompt: string;
   options?: { key: string; label: string }[];
   scaleMax?: number;
+  sensitive?: boolean;
 }
 
 export function toClientQuestion(q: Question): ClientQuestion {
@@ -16,5 +17,6 @@ export function toClientQuestion(q: Question): ClientQuestion {
     prompt: q.prompt,
     options: q.options?.map((o) => ({ key: o.key, label: o.label })),
     scaleMax: q.scaleMax,
+    sensitive: q.sensitive,
   };
 }

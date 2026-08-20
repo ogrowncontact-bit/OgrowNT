@@ -1,5 +1,5 @@
 import { rankProfiles } from "./profileMatcher";
-import { detectTensions } from "./scoring";
+import { detectContradictions, detectTensions } from "./scoring";
 import type { AdaptiveRule, AssessmentConfig, DimensionKey, DimensionState, Question, RecordedAnswer } from "./types";
 
 function ruleMatches(
@@ -158,6 +158,27 @@ export function decideNextStep(
       }
       // 'increase_confidence' and 'skip' actions affect scoring/flow bookkeeping
       // upstream (engine.ts) rather than producing a question here.
+    }
+  }
+
+  // Layer 1.5: the answer just recorded may have made a dimension's answers
+  // stop agreeing with each other (detectContradictions). Rather than
+  // silently assume which one was "true," ask ONE neutral, contextual
+  // clarifying question per dimension — never framed as catching the person
+  // out. Only reacts to a dimension the *last* answer actually touched, so
+  // this never re-triggers on old, already-settled contradictions.
+  if (lastAnswer && config.contradictionFollowups?.length) {
+    const lastQuestion = [...config.questionBank.core, ...config.questionBank.adaptivePool].find((q) => q.key === lastAnswer.questionKey);
+    const touchedDimensions = new Set(lastQuestion ? questionDimensions(lastQuestion) : []);
+    if (touchedDimensions.size > 0) {
+      const contradictions = detectContradictions(config, [...config.questionBank.core, ...config.questionBank.adaptivePool], answers);
+      const contradictedDimensions = new Set(contradictions.map((c) => c.dimensionKey));
+      for (const rule of config.contradictionFollowups) {
+        if (!touchedDimensions.has(rule.dimensionKey)) continue;
+        if (!contradictedDimensions.has(rule.dimensionKey)) continue;
+        if (askedSet.has(rule.questionKey)) continue;
+        return { type: "ask_followup", questionKey: rule.questionKey };
+      }
     }
   }
 

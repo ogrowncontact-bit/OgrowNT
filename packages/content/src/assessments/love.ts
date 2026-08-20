@@ -80,6 +80,8 @@ export const loveAssessment: AssessmentConfig = {
     },
   ],
 
+  contradictionFollowups: [{ dimensionKey: "connection", questionKey: "connection_contradiction_check" }],
+
   questionBank: {
     core: [
       {
@@ -223,6 +225,21 @@ export const loveAssessment: AssessmentConfig = {
       },
     ],
     adaptivePool: [
+      // Contradiction follow-up (see contradictionFollowups below) — fires
+      // only when earlier answers on "connection" stop agreeing with each
+      // other. Deliberately neutral: it asks which situation feels truer,
+      // it never tells the person their answers contradicted each other.
+      {
+        key: "connection_contradiction_check",
+        type: "single_select",
+        isCore: false,
+        prompt: "Which situation feels more like you? Sometimes people lean different ways depending on the relationship.",
+        options: [
+          { key: "lean_closeness", label: "Most of the time, I lean toward wanting closeness", dimensionContributions: { connection: 1 } },
+          { key: "lean_space", label: "Most of the time, I lean toward needing space", dimensionContributions: { connection: -1 } },
+          { key: "depends_on_person", label: "It genuinely depends on the person and moment", dimensionContributions: {} },
+        ],
+      },
       // --- retained from the original branching set ---
       {
         key: "protect_what",

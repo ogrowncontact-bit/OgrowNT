@@ -136,6 +136,71 @@ describe("information-value selection — distinguish similar profiles", () => {
   });
 });
 
+describe("decideNextStep — contradiction follow-up", () => {
+  const connectionPro: Question = {
+    key: "connection_pro",
+    type: "single_select",
+    isCore: true,
+    prompt: "?",
+    options: [{ key: "a", label: "a", dimensionContributions: { connection: 2 } }],
+  };
+  const connectionCon: Question = {
+    key: "connection_con",
+    type: "single_select",
+    isCore: true,
+    prompt: "?",
+    options: [{ key: "a", label: "a", dimensionContributions: { connection: -2 } }],
+  };
+  const connectionFollowup: Question = {
+    key: "connection_clarify_followup",
+    type: "single_select",
+    isCore: false,
+    prompt: "Which situation feels more like you?",
+    options: [{ key: "a", label: "a", dimensionContributions: { connection: 1 } }],
+  };
+
+  function contradictionConfig(overrides: Partial<AssessmentConfig> = {}): AssessmentConfig {
+    return config({
+      questionBank: {
+        core: [connectionPro, connectionCon],
+        adaptivePool: [connectionFollowup, clarifiesIndependence, touchesValidation, touchesSecurity],
+      },
+      contradictionFollowups: [{ dimensionKey: "connection", questionKey: "connection_clarify_followup" }],
+      ...overrides,
+    });
+  }
+
+  it("asks the configured contextual follow-up once the last answer introduces a contradiction on its dimension", () => {
+    const c = contradictionConfig();
+    const answers: RecordedAnswer[] = [
+      { questionKey: "connection_pro", selectedOptionKeys: ["a"], answeredAt: "" },
+      { questionKey: "connection_con", selectedOptionKeys: ["a"], answeredAt: "" },
+    ];
+    const scores = state({ connection: { confidence: 0.5, consistency: 0.5 } });
+    const step = decideNextStep(c, ["connection_pro", "connection_con"], answers, scores);
+    expect(step).toEqual({ type: "ask_followup", questionKey: "connection_clarify_followup" });
+  });
+
+  it("does not fire when the last answer's dimension has no contradiction", () => {
+    const c = contradictionConfig();
+    const answers: RecordedAnswer[] = [{ questionKey: "connection_pro", selectedOptionKeys: ["a"], answeredAt: "" }];
+    const scores = state({});
+    const step = decideNextStep(c, ["connection_pro"], answers, scores);
+    expect(step.questionKey).not.toBe("connection_clarify_followup");
+  });
+
+  it("never asks the same contradiction follow-up twice", () => {
+    const c = contradictionConfig();
+    const answers: RecordedAnswer[] = [
+      { questionKey: "connection_pro", selectedOptionKeys: ["a"], answeredAt: "" },
+      { questionKey: "connection_con", selectedOptionKeys: ["a"], answeredAt: "" },
+    ];
+    const scores = state({ connection: { confidence: 0.5, consistency: 0.5 } });
+    const step = decideNextStep(c, ["connection_pro", "connection_con", "connection_clarify_followup"], answers, scores);
+    expect(step.questionKey).not.toBe("connection_clarify_followup");
+  });
+});
+
 describe("decideNextStep — completion bounds with the information-value layer", () => {
   it("never completes before minQuestions while any adaptive-pool candidate remains", () => {
     const c = config();

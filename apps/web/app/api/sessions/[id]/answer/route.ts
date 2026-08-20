@@ -51,12 +51,21 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const selectedOptionKeys = body?.selectedOptionKeys as string[] | undefined;
   const scaleValue = body?.scaleValue as number | undefined;
   const openText = body?.openText as string | undefined;
+  const skipped = body?.skipped === true;
+  if (skipped && !expected.sensitive) {
+    return NextResponse.json({ error: "This question cannot be skipped" }, { status: 400 });
+  }
 
   let aiDimensionNudges: Record<string, number> | undefined;
   let aiChosenFollowupKey: string | undefined;
   let supportResources: string | undefined;
 
-  if (expected.type === "open_text") {
+  if (skipped) {
+    // "Prefer not to answer" — only offered on questions marked `sensitive`.
+    // No AI interpretation call, no stored answer content, just a Response
+    // row with nothing selected so the question is never re-asked.
+    await prisma.response.create({ data: { assessmentSessionId: id, questionId: questionKey } });
+  } else if (expected.type === "open_text") {
     const trimmed = openText?.trim();
     if (!trimmed) return NextResponse.json({ error: "openText is required" }, { status: 400 });
 
@@ -121,16 +130,17 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
   const result = submitAnswer(config, state, {
     questionKey,
-    selectedOptionKeys,
-    scaleValue,
-    openText,
+    selectedOptionKeys: skipped ? undefined : selectedOptionKeys,
+    scaleValue: skipped ? undefined : scaleValue,
+    openText: skipped ? undefined : openText,
     aiDimensionNudges,
     aiChosenFollowupKey,
+    skipped,
   });
 
   await track({
     anonymousSessionId,
-    eventName: expected.type === "open_text" ? "open_answer_submitted" : "question_answered",
+    eventName: skipped ? "question_skipped" : expected.type === "open_text" ? "open_answer_submitted" : "question_answered",
     assessmentId: session.assessmentId,
     properties: { questionKey },
   });

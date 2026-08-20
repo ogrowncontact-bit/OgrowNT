@@ -12,6 +12,8 @@ interface QuestionMetadata {
   scaleMax?: number;
   scaleDimension?: string;
   dynamicFollowupCandidates?: string[];
+  sensitive?: boolean;
+  difficulty?: Question["difficulty"];
 }
 
 interface QuestionRow {
@@ -44,6 +46,8 @@ function toQuestion(row: QuestionRow): Question {
     scaleMax: meta.scaleMax,
     scaleDimension: meta.scaleDimension,
     dynamicFollowupCandidates: meta.dynamicFollowupCandidates,
+    sensitive: meta.sensitive,
+    difficulty: meta.difficulty,
   };
 }
 
@@ -66,6 +70,7 @@ export interface VersionRow {
   freeResultTemplate: unknown;
   shareTemplate: unknown;
   tensionPairs: unknown;
+  contradictionFollowups: unknown;
   dimensions: { weight: number; dimension: { key: string } }[];
   questions: QuestionRow[];
   adaptiveRules: { key: string; trigger: unknown; action: unknown; priority: number }[];
@@ -132,6 +137,7 @@ export function mapVersionToConfig(
     freeResultTemplate,
     shareTemplate: (version.shareTemplate as AssessmentConfig["shareTemplate"] | null) ?? undefined,
     tensionPairs: (version.tensionPairs as AssessmentConfig["tensionPairs"] | null) ?? undefined,
+    contradictionFollowups: (version.contradictionFollowups as AssessmentConfig["contradictionFollowups"] | null) ?? undefined,
     premiumReportStructure: (version.reportTemplate?.sections as unknown as AssessmentConfig["premiumReportStructure"]) ?? [],
     recommendedNext: recommendations.map((r) => ({
       assessmentSlug: r.toAssessment.slug,
