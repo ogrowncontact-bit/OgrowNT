@@ -638,6 +638,92 @@ export async function strategyAction(token: string, strategyId: number, action: 
   return { ok: true as const, result: body as Strategy };
 }
 
+// --- "PROMPT 10" Autonomous Research Lab ----------------------------------
+
+export type ResearchReportHypothesis = {
+  id: number;
+  title: string;
+  status: string;
+  priority_score: number | null;
+  source: string;
+  risk: string;
+};
+export type ResearchReportExperiment = {
+  id: number;
+  type: string;
+  status: string;
+  strategy_code: string | null;
+  changed_params: string[] | null;
+  created_at: string | null;
+};
+export type ResearchReportDrift = { drift_type: string; entity: string; severity: string; ts: string | null };
+export type ResearchReportFeatureSignal = {
+  pattern_type: string;
+  regime: string;
+  expectancy: number | null;
+  sample_size: number;
+};
+export type ResearchReportStrategyVersion = {
+  id: number;
+  strategy_code: string | null;
+  version: string;
+  lifecycle_status: string;
+  validation_status: string;
+};
+export type ResearchReportKnowledgeEdge = {
+  subject: string;
+  relation: string;
+  object: string;
+  confidence: number;
+  sample_size: number;
+};
+export type ResearchReportBudgetEntry = { used: number; limit: number; exhausted: boolean };
+export type ResearchReportApproval = {
+  id: number;
+  entity_type: string;
+  entity_id: number;
+  action: string;
+  created_at: string | null;
+};
+export type ResearchReport = {
+  generated_at: string;
+  executive_summary: {
+    total_hypotheses: number;
+    open_hypotheses: number;
+    total_experiments_recent_window: number;
+    completed_experiments_recent_window: number;
+    promising_or_better_recent_window: number;
+  };
+  active_hypotheses: ResearchReportHypothesis[];
+  recent_experiments: ResearchReportExperiment[];
+  degradation_and_drift_alerts: ResearchReportDrift[];
+  feature_research_findings: {
+    pattern_signals_with_evidence: number;
+    regime_dependent_signals: number;
+    top_signals: ResearchReportFeatureSignal[];
+  };
+  strategy_versions: ResearchReportStrategyVersion[];
+  knowledge_graph_highlights: ResearchReportKnowledgeEdge[];
+  research_budget_usage: Record<string, ResearchReportBudgetEntry>;
+  pending_approvals: ResearchReportApproval[];
+  security_and_sandbox_posture: Record<string, string>;
+  recommendations: string[];
+};
+
+export const getResearchReport = (token: string) => apiFetch<ResearchReport>("/api/research-lab/report", token);
+
+export async function decideResearchApproval(token: string, approvalId: number, decision: string, detail?: string) {
+  const res = await fetch(`${API_URL}/api/research-lab/approvals/${approvalId}/decide`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ decision, detail: detail ?? null }),
+    cache: "no-store",
+  });
+  const body = await res.json().catch(() => null);
+  if (!res.ok) return { ok: false as const, detail: body?.detail ?? `Decision failed (${res.status})` };
+  return { ok: true as const, result: body as ResearchReportApproval };
+}
+
 export async function login(email: string, password: string) {
   const res = await fetch(`${API_URL}/api/auth/login`, {
     method: "POST",

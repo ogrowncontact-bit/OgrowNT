@@ -71,12 +71,20 @@ def check_parameter_stability(
     db: Session, *, strategy_code: str, asset_id: int, symbol: str, timeframe: str,
     start_ts: datetime, end_ts: datetime, initial_capital: float,
     perturbation_pct: float = DEFAULT_PERTURBATION_PCT, risk_limits: RiskLimits | None = None,
+    base_params: dict | None = None,
 ) -> StabilityResult:
+    """`base_params` (new, "PROMPT 10" §16-21): perturb around a specific
+    candidate parameter set instead of the strategy class's own defaults —
+    used by `packages/research/experiment.py`'s ExperimentEngine to check
+    whether a proposed candidate's chosen parameters are a stable choice,
+    not a knife-edge fit. Every existing caller leaves this None and gets
+    the original, unchanged default-centered behavior.
+    """
     strategy_class = STRATEGY_CLASSES.get(strategy_code)
     if strategy_class is None:
         raise ValueError(f"unknown strategy code: {strategy_code!r}")
 
-    base_strategy = strategy_class()
+    base_strategy = strategy_class(**base_params) if base_params else strategy_class()
     base_params = _numeric_params(base_strategy)
     base_result = run_backtest(
         db, strategy=base_strategy, asset_id=asset_id, symbol=symbol, timeframe=timeframe,

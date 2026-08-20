@@ -68,6 +68,20 @@ def record_backtest_worker_heartbeat(db: Session) -> None:
     db.commit()
 
 
+def record_research_worker_heartbeat(db: Session) -> None:
+    """Same idea as record_backtest_worker_heartbeat, for the separate
+    apps/research_worker process ("PROMPT 10" §59) — its own SystemState
+    column so a slow/paused research process is never confused with the
+    live trading worker or the Strategy Lab's own backtest_worker being
+    unhealthy."""
+    state = db.get(SystemState, True)
+    if state is None:
+        state = SystemState(id=True)
+    state.research_worker_last_heartbeat = datetime.now(timezone.utc)
+    db.add(state)
+    db.commit()
+
+
 def record_worker_restart(db: Session, *, max_restarts: int, window_seconds: int) -> bool:
     """Called once at apps/worker/main.py process startup — "PROMPT 8"
     §66's crash-loop protection. Docker's `restart: unless-stopped` already

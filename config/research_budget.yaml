@@ -1,0 +1,10 @@
+# Research Budget configuration — packages/research/budget.py.
+# Rolling-window (period_hours, default 24h) spending caps per resource_type,
+# so the Autonomous Research Agent can never silently consume unbounded
+# compute. Editable here directly; a caller may also override a limit
+# per-call via check_budget/spend's `limit` kwarg for a one-off exception.
+limits:
+  experiment: 20
+  backtest: 100
+  llm_call: 50
+  api_call: 500

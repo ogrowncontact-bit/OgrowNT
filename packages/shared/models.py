@@ -22,6 +22,9 @@ that uses them:
     agent_messages, agent_predictions, agent_reliability, agent_health,
     decisions, contradictions, plus proposed_by_agent added to
     learned_rules
+  Post-Phase-7 ("Prompt 10" autonomous research & evolution): research_hypotheses,
+    experiments, strategy_versions, research_approvals, drift_detections,
+    research_queue, research_budget_usage, research_knowledge_edges
 """
 from datetime import datetime, timezone
 
@@ -222,6 +225,12 @@ class SystemState(Base):
     # starts clean instead of carrying a stale drawdown from a peak that no
     # longer means anything.
     last_reset_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Same idea as backtest_worker_last_heartbeat, for the separate
+    # apps/research_worker process ("PROMPT 10" §59's compute isolation —
+    # autonomous research never competes with a live scan/strategy/risk
+    # cadence OR an operator's own ad-hoc Strategy Lab job for the same
+    # reason those two already have independent processes/columns).
+    research_worker_last_heartbeat: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class Alert(Base):
@@ -1291,3 +1300,258 @@ class Contradiction(Base):
     signal_b: Mapped[str] = mapped_column(String, nullable=False)
     severity: Mapped[float] = mapped_column(Float, nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+# -- "PROMPT 10" Autonomous Research & Evolution Engine --------------------
+
+
+class ResearchHypothesis(Base):
+    """A testable research question — "PROMPT 10" §11-14. Distinct from
+    `LearnedRule` (Phase 5): a `LearnedRule` is a narrow rule-condition
+    artifact from `packages/quant/learning/research.py`'s existing DET+LLM
+    pipeline; a `ResearchHypothesis` is the broader "why is this strategy
+    struggling and what might fix it" research question this phase's
+    `AutonomousResearchAgent` reasons over, with its own approval workflow
+    (`ResearchApproval`) and full experiment lifecycle. The two are not
+    merged — different granularity, different consumers.
+    """
+
+    __tablename__ = "research_hypotheses"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('proposed','approved','rejected','request_more_tests','experimenting','completed')",
+            name="ck_research_hypotheses_status",
+        ),
+        CheckConstraint("risk IN ('low','medium','high')", name="ck_research_hypotheses_risk"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    title: Mapped[str] = mapped_column(String, nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    problem: Mapped[str] = mapped_column(Text, nullable=False)
+    observation: Mapped[str] = mapped_column(Text, nullable=False)
+    hypothesis: Mapped[str] = mapped_column(Text, nullable=False)
+    expected_effect: Mapped[str] = mapped_column(Text, nullable=False)
+    risk: Mapped[str] = mapped_column(String, default="medium", nullable=False)
+    assets: Mapped[list] = mapped_column(JSON, default=list)
+    timeframes: Mapped[list] = mapped_column(JSON, default=list)
+    regimes: Mapped[list] = mapped_column(JSON, default=list)
+    # "PROMPT 10" §4: which research trigger produced this (strategy_
+    # degradation/regime_change/agent_disagreement/anomaly/manual/...).
+    source: Mapped[str] = mapped_column(String, nullable=False)
+    # §14/§15's quality/priority dimensions, kept as one JSON blob rather
+    # than six columns -- they're always read/written together and never
+    # individually queried/filtered on.
+    quality: Mapped[dict] = mapped_column(JSON, default=dict)
+    priority_score: Mapped[float | None] = mapped_column(Float)
+    status: Mapped[str] = mapped_column(String, default="proposed", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
+class Experiment(Base):
+    """Control vs candidate comparison — "PROMPT 10" §16-21. The engine
+    behind this is `packages/backtest/report.py::run_full_lab`, called once
+    for `control` and once for `candidate` — this table never re-implements
+    backtesting, it records what was compared and the result of comparing
+    it. `status` is the exact closed vocabulary from §20.
+    """
+
+    __tablename__ = "experiments"
+    __table_args__ = (
+        CheckConstraint(
+            "type IN ('backtest','walk_forward','optimization','feature_test','strategy_test',"
+            "'regime_test','event_test','genetic_search','ablation')",
+            name="ck_experiments_type",
+        ),
+        CheckConstraint(
+            "status IN ('queued','running','completed','failed','rejected','promising',"
+            "'validating','approved','quarantined')",
+            name="ck_experiments_status",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    hypothesis_id: Mapped[int | None] = mapped_column(ForeignKey("research_hypotheses.id"))
+    type: Mapped[str] = mapped_column(String, nullable=False)
+    control: Mapped[dict] = mapped_column(JSON, nullable=False)
+    candidate: Mapped[dict] = mapped_column(JSON, nullable=False)
+    dataset: Mapped[dict] = mapped_column(JSON, nullable=False)
+    parameters: Mapped[dict] = mapped_column(JSON, default=dict)
+    status: Mapped[str] = mapped_column(String, default="queued", nullable=False)
+    result: Mapped[dict] = mapped_column(JSON, default=dict)
+    # §89 reproducibility: code_version/random_seed/environment/timestamp —
+    # one JSON blob, same reasoning as ResearchHypothesis.quality above.
+    reproducibility: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class StrategyVersion(Base):
+    """One parameterized/DSL variant of a strategy — "PROMPT 10" §26-29,
+    §65-70. `StrategyRow` (Phase 2) stays the one row per named strategy
+    *code*; this is the new, orthogonal axis: many versions can exist per
+    `strategy_id`, each independently validated and independently a
+    CHAMPION/CHALLENGER/EXPERIMENTAL/etc. Never touches
+    `StrategyRow.lifecycle_stage` (idea/.../production — the capital-tier
+    promotion axis, "PROMPT 6"/Phase 6, untouched by this phase).
+    """
+
+    __tablename__ = "strategy_versions"
+    __table_args__ = (
+        CheckConstraint(
+            "lifecycle_status IN ('experimental','challenger','champion','production_candidate','rolled_back','retired')",
+            name="ck_strategy_versions_lifecycle_status",
+        ),
+        CheckConstraint(
+            "validation_status IN ('EXPERIMENTAL','PROMISING','VALIDATING','ROBUST','DEGRADED','REJECTED','QUARANTINED')",
+            name="ck_strategy_versions_validation_status",
+        ),
+        UniqueConstraint("strategy_id", "version", name="uq_strategy_versions_strategy_id_version"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    strategy_id: Mapped[int] = mapped_column(ForeignKey("strategies.id"), nullable=False)
+    version: Mapped[str] = mapped_column(String, nullable=False)
+    parent_version_id: Mapped[int | None] = mapped_column(ForeignKey("strategy_versions.id"))
+    changes: Mapped[list] = mapped_column(JSON, default=list)
+    dsl_definition: Mapped[dict | None] = mapped_column(JSON)
+    params: Mapped[dict] = mapped_column(JSON, default=dict)
+    performance: Mapped[dict] = mapped_column(JSON, default=dict)
+    # Reuses packages/backtest/quality_score.py's exact closed STATUS_LABELS
+    # set — one source of truth for what these labels mean, not a second
+    # vocabulary that could silently drift from the one the Strategy Lab
+    # dashboard already displays.
+    validation_status: Mapped[str] = mapped_column(String, default="EXPERIMENTAL", nullable=False)
+    lifecycle_status: Mapped[str] = mapped_column(String, default="experimental", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    created_by: Mapped[str] = mapped_column(String, nullable=False)
+
+
+class ResearchApproval(Base):
+    """Human-in-the-loop review — "PROMPT 10" §82-85. One row per review
+    action (approve/reject/request_more_tests/promote/rollback/quarantine)
+    against a hypothesis/strategy_version/experiment, mirroring
+    `ManualAction`'s before/after audit-trail precedent ("PROMPT 8").
+    `entity_type`/`entity_id` is a loose reference (no FK — spans several
+    tables) exactly like `AuditLog`'s existing pattern.
+    """
+
+    __tablename__ = "research_approvals"
+    __table_args__ = (
+        CheckConstraint(
+            "entity_type IN ('hypothesis','strategy_version','experiment')", name="ck_research_approvals_entity_type"
+        ),
+        CheckConstraint(
+            "action IN ('approve','reject','request_more_tests','promote','rollback','quarantine')",
+            name="ck_research_approvals_action",
+        ),
+        CheckConstraint(
+            "status IN ('pending_review','approved','rejected','request_more_tests')",
+            name="ck_research_approvals_status",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    entity_type: Mapped[str] = mapped_column(String, nullable=False)
+    entity_id: Mapped[int] = mapped_column(nullable=False)
+    action: Mapped[str] = mapped_column(String, nullable=False)
+    status: Mapped[str] = mapped_column(String, default="pending_review", nullable=False)
+    reviewer: Mapped[str | None] = mapped_column(String)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    evidence: Mapped[dict] = mapped_column(JSON, default=dict)
+    detail: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
+class DriftDetection(Base):
+    """One row per detected distribution shift — "PROMPT 10" §71-74.
+    Detecting drift never modifies production by itself (§73-74): the only
+    consequence is a row here plus, at the caller's discretion, a new
+    `ResearchHypothesis` proposing an adaptation to investigate.
+    """
+
+    __tablename__ = "drift_detections"
+    __table_args__ = (
+        CheckConstraint("drift_type IN ('feature','market','strategy','agent','data')", name="ck_drift_detections_drift_type"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    drift_type: Mapped[str] = mapped_column(String, nullable=False)
+    entity: Mapped[str] = mapped_column(String, nullable=False)
+    detail: Mapped[dict] = mapped_column(JSON, default=dict)
+    severity: Mapped[str] = mapped_column(String, nullable=False)
+
+
+class ResearchQueueItem(Base):
+    """Async job envelope for autonomous research workloads — "PROMPT 10"
+    §58-61. Same pattern as `BacktestJob` ("PROMPT 7"), deliberately a
+    separate table/queue/worker process (`apps/research_worker/`) rather
+    than added `kind`s on `BacktestJob`: research jobs carry a different
+    payload shape (hypothesis linkage, budget tracking) and must never
+    compete with a human-triggered ad-hoc Strategy Lab job for the same
+    queue (§59 compute isolation — research must never degrade market/risk
+    monitoring OR an operator's own on-demand backtest).
+    """
+
+    __tablename__ = "research_queue"
+    __table_args__ = (
+        CheckConstraint(
+            "queue_type IN ('hypothesis','experiment','feature_test','strategy_test',"
+            "'regime_test','event_test','knowledge_update')",
+            name="ck_research_queue_queue_type",
+        ),
+        CheckConstraint("status IN ('queued','running','completed','failed','cancelled')", name="ck_research_queue_status"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    queue_type: Mapped[str] = mapped_column(String, nullable=False)
+    payload: Mapped[dict] = mapped_column(JSON, default=dict)
+    status: Mapped[str] = mapped_column(String, default="queued", nullable=False)
+    result: Mapped[dict | None] = mapped_column(JSON)
+    error: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class ResearchBudgetUsage(Base):
+    """One row per unit of research compute spent — "PROMPT 10" §56-57.
+    `packages/research/budget.py::check_budget` sums today's rows per
+    `resource_type` against `config/research_budget.yaml`'s limits before
+    letting a new job queue — never after the fact.
+    """
+
+    __tablename__ = "research_budget_usage"
+    __table_args__ = (
+        CheckConstraint(
+            "resource_type IN ('experiment','backtest','llm_call','api_call')", name="ck_research_budget_usage_resource_type"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    resource_type: Mapped[str] = mapped_column(String, nullable=False)
+    amount: Mapped[float] = mapped_column(Float, default=1.0, nullable=False)
+    experiment_id: Mapped[int | None] = mapped_column(ForeignKey("experiments.id"))
+
+
+class ResearchKnowledgeEdge(Base):
+    """One relationship in the research knowledge graph — "PROMPT 10"
+    §42-43 (e.g. "BREAKOUT works_well_in HIGH_VOLUME"). Populated only from
+    statistically-evidenced experiment/regime-breakdown results
+    (`sample_size`/`confidence` always recorded) — never a bare assertion,
+    per §44's "exigir validação estatística".
+    """
+
+    __tablename__ = "research_knowledge_edges"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    subject: Mapped[str] = mapped_column(String, nullable=False)
+    relation: Mapped[str] = mapped_column(String, nullable=False)
+    object: Mapped[str] = mapped_column(String, nullable=False)
+    confidence: Mapped[float] = mapped_column(Float, nullable=False)
+    sample_size: Mapped[int] = mapped_column(nullable=False)
+    evidence: Mapped[dict] = mapped_column(JSON, default=dict)
+    source_experiment_id: Mapped[int | None] = mapped_column(ForeignKey("experiments.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)

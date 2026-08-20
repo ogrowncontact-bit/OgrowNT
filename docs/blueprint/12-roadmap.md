@@ -1613,6 +1613,198 @@ Divergências deliberadas, documentadas (não silenciosas):
    (Quant Research/Strategy Health reportam "no strategy in context" em
    vez de adivinhar qual estratégia a decisão representa).
 
+## "PROMPT 10" — Autonomous Research & Evolution Engine (pós-Fase 9) — **status: implementada e validada nesta sessão**
+
+O "PROMPT 10" pede um `AutonomousResearchAgent` que fecha o ciclo
+"self-improvement" do sistema — mas com uma restrição central citada
+literalmente no prompt: **"SELF-IMPROVEMENT ≠ SELF-EXECUTION — o sistema
+pode pesquisar e propor melhorias. Não pode alterar o sistema de produção
+diretamente."** O loop pedido é explicitamente um "SCIENTIFIC RESEARCH
+LOOP" (diagnose → hypothesis → experiment → validate → paper-challenger →
+human-review → new validated version), não o anti-padrão nomeado no
+próprio prompt ("loss → change strategy → trade → loss → change
+strategy"). §64: "NO AUTOMATIC PRODUCTION PROMOTION... a promoção final
+deve permanecer manual nesta fase." Mapeando os 94 §§ contra o código já
+existente das Fases 6-9: `packages/backtest/*` (17 módulos) já cobre a
+maior parte do que §16-21 pede de um "Experiment Engine" — este prompt não
+reconstrói o motor de backtesting, compõe os mesmos primitivos já provados
+(`run_backtest`/`run_walk_forward`/`run_monte_carlo`/
+`run_cost_sensitivity`/`run_slippage_sensitivity`/`run_stress_scenario`/
+`check_parameter_stability`/`compute_robustness_score`/
+`compute_quality_score`) numa camada fina de orquestração de pesquisa.
+
+- [x] **`packages/research/dsl.py` — Strategy DSL + sandbox estrutural**
+      (§16-21, §27-28, §64) — árvore condição/expressão em dict
+      whitelisted, nunca código Python, nunca `eval`/`exec`/`compile`
+      (provado por AST em `tests/test_research_dsl_sandbox.py`, mesma
+      técnica de `tests/test_agent_sandbox.py`). Um bug real encontrado e
+      corrigido nesta sessão: strings bare eram sempre tratadas como
+      referências de campo, o que quebrava o próprio exemplo canónico do
+      docstring (`{"eq": ["regime", "trending_bull"]}`) — corrigido com um
+      wrapper explícito `{"lit": "trending_bull"}` para literais de string
+      contra campos categóricos, mais verificação de aridade que faltava
+      em `validate()`/`_resolve()`
+- [x] **`packages/research/significance.py`** (§6, §9, §54-55) —
+      `detect_change_point` (z-test de duas amostras, honesto quando a
+      amostra é curta ou a variância pooled é zero) e `benjamini_hochberg`
+      (correção de falsos positivos para lotes de múltiplas hipóteses —
+      §55 "não fazer p-value fishing")
+- [x] **`packages/research/degradation.py`** (§9-10, §38-40) — taxonomia
+      de 6 estados (HEALTHY/WATCH/DEGRADING/DEGRADED/FAILED/QUARANTINED),
+      deliberadamente distinta do gate de 4 estados do Risk Engine ao vivo
+      (`packages/risk/strategy_health.py`) — ambos leem o mesmo
+      `health_score`, servem consumidores diferentes (raciocínio mais
+      lento do Research Agent vs. gate por-sinal do Risk Engine)
+- [x] **`packages/research/hypothesis.py` + `packages/llm/hypothesis.py`**
+      (§3-4, §11-15, §41) — geração DET-first (`_det_narrative`, sempre
+      disponível) com enriquecimento LLM opcional; `find_similar_recent_hypothesis`
+      (cooldown de 14 dias) implementa §41 "não repetir pesquisa já
+      falhada" estruturalmente — `create_hypothesis()` devolve `None`
+      (não escreve nada) quando já existe uma hipótese equivalente recente
+- [x] **`packages/research/experiment.py` — ExperimentEngine** (§16-21,
+      §89) — control vs. candidate, composto pelos mesmos 8 primitivos que
+      `run_full_lab` já usa, mas com `params` passados explicitamente
+      (`run_full_lab` só avalia os defaults da classe). `_classify_experiment`
+      usa o vocabulário fechado exacto do §20 (queued/running/completed/
+      failed/rejected/promising/validating/approved/quarantined).
+      `reproducibility` grava `code_version`/`random_seed`/`timestamp` em
+      cada `Experiment`
+- [x] **`packages/research/features.py`** (§22-25) — correlação
+      pattern×regime lida de `PatternPerformance` (Fase 4, nunca claim
+      causal — §23), `FeatureAblationStrategy` (wrapper `Strategy`-compatible
+      que intercepta `generate_signal()` com um filtro DSL) permite A/B
+      "estratégia com feature vs. sem feature" através do mesmo
+      `run_backtest` inalterado
+- [x] **`packages/research/generator.py` — StrategyGenerator** (§16-21) —
+      mutação + crossover + busca genética limitada
+      (`MAX_SEARCH_EVALUATIONS`, mesmo espírito de
+      `packages/backtest/optimize.py::MAX_COMBINATIONS`), fitness durante
+      a busca é o walk-forward simples (barato), não o pipeline completo
+      de 8 motores (caro demais para `population_size × generations`
+      avaliações); propostas de filtro DSL derivadas de
+      `research_feature_signals()`
+- [x] **`packages/research/versioning.py` — Champion/Challenger + Shadow
+      Mode** (§26-33, §64) — `StrategyVersion` é um eixo ORTOGONAL a
+      `StrategyRow.lifecycle_stage` (Fase 2, eixo de capital, intocado).
+      Toda transição de estado exige `reviewer` não-vazio + escreve
+      `AuditLog` — mesmo padrão de
+      `packages/agents/reliability.py::restore_from_quarantine`. Shadow
+      Mode reescopado honestamente para um sistema só-paper-trading:
+      reavalia o challenger contra o champion via o mesmo ExperimentEngine
+      em vez de construir um segundo pipeline de execução ao vivo
+- [x] **`packages/research/drift.py`** (§34-37) — 5 tipos de drift
+      (feature/market/strategy/agent/data), cada um reutilizando evidência
+      já computada por um pipeline existente em vez de um novo motor de
+      cálculo por sinal
+- [x] **`packages/research/knowledge.py` — Research Memory + Knowledge
+      Graph** (§41-43) — `ResearchKnowledgeEdge` (subject/relation/object)
+      derivado automaticamente de `Experiment`s, `upsert_edge` funde
+      evidência repetida numa única linha (confiança ponderada por
+      amostra) em vez de duplicar factos; False Signal Memory é uma função
+      de consulta sobre o mesmo grafo (`has_known_negative_result`), não
+      uma tabela nova
+- [x] **`packages/research/budget.py`** (§56-60) — cap de gasto por
+      `resource_type` numa janela deslizante, limites em
+      `config/research_budget.yaml` (mesmo padrão editável de
+      `config/risk_limits.yaml`); `spend()` verifica ANTES de gastar,
+      nunca depois
+- [x] **`packages/research/approval.py` — Human Approval Workflow**
+      (§64, §82-85, §90-91) — a única porta entre uma proposta e uma
+      mudança real: `record_decision` só aplica um `promote`/`rollback`/
+      `quarantine` DEPOIS de exigir `reviewer` não-vazio, e a mudança de
+      estado é aplicada ANTES da própria linha `ResearchApproval` ser
+      marcada "approved" — se a aplicação falhar (ex.: `entity_id`
+      inválido), a aprovação fica honestamente `pending_review`, nunca
+      "approved" para uma promoção que na verdade não aconteceu (bug real
+      encontrado e corrigido pela própria bateria red-team desta fase)
+- [x] **DB — migração `0016`** — 8 tabelas novas (`research_hypotheses`,
+      `experiments`, `strategy_versions`, `research_approvals`,
+      `drift_detections`, `research_queue`, `research_budget_usage`,
+      `research_knowledge_edges`) + migração `0017`
+      (`system_state.research_worker_last_heartbeat`); upgrade→downgrade→upgrade
+      verificado em ambas
+- [x] **`apps/research_worker/` — terceiro processo separado** (§58-61,
+      §92) — mesmo padrão de `apps/backtest_worker` (Fase 7), mas uma fila
+      (`research_queue`) e processo distintos: pesquisa autónoma nunca
+      compete com o loop de trading ao vivo NEM com um job ad-hoc do
+      Strategy Lab de um operador. 7 tipos de job
+      (hypothesis/experiment/feature_test/strategy_test/regime_test/
+      event_test/knowledge_update), cada handler um adaptador fino sobre
+      `packages/research/*`; jobs com custo computacional chamam
+      `budget.spend` antes de trabalhar
+- [x] **API** — `GET/POST /api/research-lab/*`
+      (`apps/api/routers/research_lab.py`), prefixo deliberadamente
+      distinto de `/api/research` (Fase 5, `LearnedRule`s, conceito mais
+      antigo e mais estreito). Toda leitura é aberta a qualquer conta
+      autenticada; `POST /approvals`, `/approvals/{id}/decide`, e
+      `/queue` são admin-only (RBAC)
+- [x] **Dashboard "Autonomous Research Lab"** — painel construído a
+      partir de uma única chamada a `GET /api/research-lab/report` (as 11
+      secções), com botões Approve/Reject/More-Tests inline nas
+      aprovações pendentes que passam pelo mesmo workflow humano-obrigatório
+      que a API já impõe
+- [x] **`packages/research/report.py` — relatório de 11 secções** (§90-91)
+      — resumo executivo, hipóteses activas, experiências recentes,
+      alertas de degradação/drift, achados de pesquisa de features,
+      versões de estratégia, destaques do grafo de conhecimento, uso do
+      orçamento de pesquisa, aprovações pendentes, postura de
+      segurança/sandbox, recomendações
+- [x] **Testes** — 173 novos (916/916 no total): DSL + sandbox estrutural
+      (30), significância estatística (8), degradação (7), hipóteses (8),
+      ExperimentEngine incluindo corrida real contra dados sintéticos
+      seeded (10), feature research + ablation (6), StrategyGenerator
+      incluindo determinismo sob a mesma seed (11), versioning +
+      champion/challenger + rollback (13), drift detection para os 5
+      tipos (10), knowledge graph (9), research budget (8), approval
+      workflow (14), research report (6), research_worker job dispatch
+      (9), API (11), bateria red-team de 10 itens específicos desta
+      camada — injecção DSL, bypass de orçamento, promoção sem aprovação,
+      spoofing de reviewer, alcance à camada de execução, injecção SQL no
+      grafo de conhecimento, injecção de vocabulário fechado, lavagem de
+      resultado zero-trade, bypass do limite de busca genética, spoofing
+      de entity_id (12), e a simulação de cenário end-to-end completa do
+      §92 (diagnose → hypothesis → experiment → validate → human-review →
+      promote → rollback, 1)
+- [x] **verificado ao vivo** contra Postgres real: todos os módulos
+      testados directamente contra dados reais seeded antes dos testes
+      automatizados existirem (`run_experiment`, `run_genetic_search`,
+      `run_ablation`, o ciclo completo de versioning, o dispatch dos 7
+      tipos de job do research_worker); API real com token admin real
+      (GET/POST em todos os endpoints, incluindo o fluxo completo
+      request→decide de uma aprovação); dashboard real (login real via
+      browser, screenshot do painel "Autonomous Research Lab" com dados
+      reais das 11 secções, clique real no botão Approve confirmado a
+      persistir no Postgres). `ruff`/`mypy`/suite completa limpos
+      (916/916)
+
+Divergências deliberadas, documentadas (não silenciosas):
+
+1. `ExperimentEngine` não reutiliza `run_full_lab` directamente — esse
+   sempre instancia a estratégia com os defaults da classe, ignorando
+   qualquer override de `params`; um Experiment precisa avaliar DOIS
+   conjuntos de parâmetros específicos (control vs. candidate), não os
+   defaults duas vezes. Compõe os mesmos 8 primitivos directamente em vez
+   disso — zero matemática de backtesting duplicada.
+2. Fitness durante a busca genética é o walk-forward simples e barato
+   (`run_walk_forward`), não o pipeline completo de 8 motores de
+   `evaluate_arm` — rodar o pipeline caro
+   `population_size × generations` vezes não seria proporcional; o
+   vencedor da busca é uma proposta, uma chamada explícita a
+   `run_experiment` (ou uma `ResearchApproval` de promoção) é que decide
+   se vale a pena gastar a avaliação completa.
+3. Shadow Mode não é um segundo pipeline de execução ao vivo dentro de
+   `apps/worker` — este é um sistema só-paper-trading sem capital real em
+   lado nenhum; reavaliar um challenger via o mesmo `ExperimentEngine`
+   já construído produz a mesma evidência sem nova infra-estrutura nem
+   risco de tocar um caminho de sinal ao vivo.
+4. `False Signal Memory` (§41) não é uma tabela nova — é uma função de
+   consulta sobre `ResearchKnowledgeEdge` já existente
+   (`has_known_negative_result`).
+5. Multiple-testing correction (§55) e o cap de orçamento de pesquisa
+   (§56-60) são dois mecanismos deliberadamente distintos — um corrige
+   inferência estatística sobre um lote de hipóteses, o outro limita
+   consumo bruto de compute; nenhum substitui o outro.
+
 ## Evolução futura (fora de âmbito até validação completa)
 
 Live brokers, exchanges reais (crypto/forex/ações), ML avançado, deep learning,

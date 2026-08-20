@@ -22,6 +22,7 @@ import {
   getPositions,
   getPromotionCheck,
   getRegimes,
+  getResearchReport,
   getRiskState,
   getStrategies,
   getStrategyLearning,
@@ -44,6 +45,7 @@ import { OpportunityRow } from "@/components/OpportunityRow";
 import { EquitySparkline } from "@/components/EquitySparkline";
 import { NewsIntelligenceCenter } from "@/components/NewsIntelligenceCenter";
 import { AICommandCenter } from "@/components/AICommandCenter";
+import { AutonomousResearchLab } from "@/components/AutonomousResearchLab";
 import { StrategyLab } from "@/components/StrategyLab";
 import { AutonomousStatusBadge } from "@/components/AutonomousStatusBadge";
 import { PauseResumeButton } from "@/components/PauseResumeButton";
@@ -111,10 +113,11 @@ export default async function DashboardPage() {
       getContradictions(token, 20),
     ]);
 
-  const [backtests, promotionChecks, analytics] = await Promise.all([
+  const [backtests, promotionChecks, analytics, researchReport] = await Promise.all([
     getBacktests(token, 8),
     Promise.all((strategyLearning ?? []).map((s) => getPromotionCheck(token, s.strategy_id))),
     getAnalyticsOverview(token),
+    getResearchReport(token),
   ]);
   const promotionByStrategyId = new Map(
     (strategyLearning ?? []).map((s, i) => [s.strategy_id, promotionChecks[i]])
@@ -443,6 +446,8 @@ export default async function DashboardPage() {
       </section>
 
       <AICommandCenter agents={agents ?? []} decisions={decisions ?? []} contradictions={contradictions ?? []} />
+
+      <AutonomousResearchLab report={researchReport} />
 
       <NewsIntelligenceCenter
         news={news ?? []}

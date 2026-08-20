@@ -1065,3 +1065,135 @@ class DecisionDetailOut(DecisionOut):
 
 class RestoreAgentRequest(BaseModel):
     confirm: bool = True
+
+
+# --- "PROMPT 10" Autonomous Research Lab ---------------------------------
+
+
+class ResearchHypothesisOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    title: str
+    description: str
+    problem: str
+    observation: str
+    hypothesis: str
+    expected_effect: str
+    risk: str
+    assets: list
+    timeframes: list
+    regimes: list
+    source: str
+    quality: dict
+    priority_score: float | None
+    status: str
+    created_at: datetime
+
+
+class ExperimentOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    hypothesis_id: int | None
+    type: str
+    control: dict
+    candidate: dict
+    dataset: dict
+    parameters: dict
+    status: str
+    result: dict | None
+    reproducibility: dict
+    created_at: datetime
+    completed_at: datetime | None
+
+
+class StrategyVersionOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    strategy_id: int
+    version: str
+    parent_version_id: int | None
+    changes: list
+    dsl_definition: dict | None
+    params: dict
+    performance: dict
+    validation_status: str
+    lifecycle_status: str
+    created_at: datetime
+    created_by: str
+
+
+class ResearchKnowledgeEdgeOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    subject: str
+    relation: str
+    object: str
+    confidence: float
+    sample_size: int
+    evidence: dict
+    source_experiment_id: int | None
+    created_at: datetime
+
+
+class DriftDetectionOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    ts: datetime
+    drift_type: str
+    entity: str
+    detail: dict
+    severity: str
+
+
+class ResearchApprovalOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    entity_type: str
+    entity_id: int
+    action: str
+    status: str
+    reviewer: str | None
+    reviewed_at: datetime | None
+    evidence: dict
+    detail: str | None
+    created_at: datetime
+
+
+class RequestApprovalRequest(BaseModel):
+    entity_type: str
+    entity_id: int
+    action: str
+    evidence: dict = {}
+    detail: str | None = None
+
+
+class ApprovalDecisionRequest(BaseModel):
+    decision: str
+    detail: str | None = None
+
+
+class ResearchQueueItemOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    queue_type: str
+    payload: dict
+    status: str
+    result: dict | None
+    error: str | None
+    created_at: datetime
+    started_at: datetime | None
+    completed_at: datetime | None
+
+
+class EnqueueResearchJobRequest(BaseModel):
+    queue_type: str
+    payload: dict = {}
+
+
+class ResearchBudgetStatusOut(BaseModel):
+    resource_type: str
+    period_hours: float
+    used: float
+    limit: float
+    remaining: float
+    exhausted: bool

@@ -18,6 +18,7 @@ from apps.api.routers import (
     patterns,
     portfolio,
     research,
+    research_lab,
     risk,
     strategies,
     system,
@@ -77,6 +78,7 @@ app.include_router(trading_control.router)
 app.include_router(agents.router)
 app.include_router(agents.decisions_router)
 app.include_router(agents.contradictions_router)
+app.include_router(research_lab.router)
 
 
 @app.get("/")

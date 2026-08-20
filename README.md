@@ -4,7 +4,7 @@
 **paper trading only** — no real orders are ever sent. See the full engineering
 specification in [`docs/blueprint/`](docs/blueprint/00-overview.md).
 
-## Status: Phase 7 (Advanced Analytics, Alerts, Optimization) + post-Phase-7 security hardening + Supervisor 24/7 + Market Data Engine + Scanner + Pattern/Strategy/Opportunity confidence & evidence + Risk Engine/Portfolio Intelligence hardening (Risk Center, Risk Heatmap, Strategy Health, configurable Safety Belts) + News Intelligence Center (sentiment, macro calendar, event risk, source consensus) + Strategy Lab (walk-forward optimization, Monte Carlo, stress testing, robustness/quality scoring, async backtest job system) + Autonomous Paper Trading (TradingMode gate, Portfolio Manager allocation cap, trailing stops, HOLD/REDUCE/CLOSE position risk policy, anti-martingale loss-streak protection, idempotency keys, event sourcing, reconciliation engine, RBAC, manual trading controls, Autonomous Trading Center dashboard) + Multi-Agent Quant Intelligence (18 named specialist agents, Consensus/Contradiction/Chief Decision Engine, reliability/calibration/quarantine, AI Command Center dashboard)
+## Status: Phase 7 (Advanced Analytics, Alerts, Optimization) + post-Phase-7 security hardening + Supervisor 24/7 + Market Data Engine + Scanner + Pattern/Strategy/Opportunity confidence & evidence + Risk Engine/Portfolio Intelligence hardening (Risk Center, Risk Heatmap, Strategy Health, configurable Safety Belts) + News Intelligence Center (sentiment, macro calendar, event risk, source consensus) + Strategy Lab (walk-forward optimization, Monte Carlo, stress testing, robustness/quality scoring, async backtest job system) + Autonomous Paper Trading (TradingMode gate, Portfolio Manager allocation cap, trailing stops, HOLD/REDUCE/CLOSE position risk policy, anti-martingale loss-streak protection, idempotency keys, event sourcing, reconciliation engine, RBAC, manual trading controls, Autonomous Trading Center dashboard) + Multi-Agent Quant Intelligence (18 named specialist agents, Consensus/Contradiction/Chief Decision Engine, reliability/calibration/quarantine, AI Command Center dashboard) + Autonomous Research & Evolution Engine (hypothesis generation, ExperimentEngine, bounded genetic search, StrategyVersion Champion/Challenger, drift detection, knowledge graph, human-approval-gated promotion, Autonomous Research Lab dashboard)
 
 Per [`docs/blueprint/12-roadmap.md`](docs/blueprint/12-roadmap.md):
 
@@ -344,6 +344,39 @@ click-through of the new "AI Command Center" panel. See
 [`docs/multi-agent-architecture.md`](docs/multi-agent-architecture.md) for
 the as-built reference.
 
+**Autonomous Research & Evolution Engine.** "SELF-IMPROVEMENT != SELF-EXECUTION" —
+the system can research and propose a better strategy version; it can
+never apply one on its own. A `ResearchHypothesis` (DET narrative + optional
+LLM enrichment, deduped by a 14-day similarity cooldown) feeds an
+`ExperimentEngine` that composes the same 8 backtest-lab primitives
+`run_full_lab` already uses (walk-forward, Monte Carlo, cost/slippage
+sensitivity, parameter stability, robustness/quality scoring) to evaluate
+control vs. candidate parameter sets, classified into the closed §20
+status vocabulary (queued/running/completed/failed/rejected/promising/
+validating/approved/quarantined). A bounded genetic search
+(`packages/research/generator.py`, capped evaluation count) proposes
+parameter mutations; a Degradation Engine (6-state taxonomy, distinct from
+the live Risk Engine's own strategy-health gate) and 5-type Drift Detector
+diagnose when research should trigger at all. Every state change — promote
+a `StrategyVersion` to challenger/champion, roll one back, quarantine one,
+approve a hypothesis — runs through `packages/research/approval.py`, which
+requires a non-empty human reviewer and writes an audit-log row; nothing
+in the research pipeline can reach `packages.execution` or apply a
+promotion on its own (proven structurally, same AST-walk technique as the
+agent sandbox). A third, separate worker process
+(`apps/research_worker/`, its own `research_queue`) runs research jobs
+without ever competing with the live trading loop or an operator's own
+Strategy Lab job. Live-verified against real Postgres (every module run
+directly against real seeded data before its automated tests existed) and
+a real browser click-through of the new "Autonomous Research Lab" panel,
+including a real Approve click persisting a human-reviewed promotion.
+173 new tests (916/916 in the full suite), including a 10-item red-team
+battery targeting the self-improvement/self-execution boundary and a full
+end-to-end scenario simulation of the research loop. See
+`docs/blueprint/12-roadmap.md`'s "PROMPT 10" section for the full list and
+[`docs/autonomous-research-lab.md`](docs/autonomous-research-lab.md) for
+the as-built reference.
+
 ## Architecture at a glance
 
 ```text
@@ -354,7 +387,8 @@ apps/
                learning, research, backtests (incl. jobs, data-integrity,
                reality-gap, failure-check, compare), alerts, analytics, trading
                control — autonomous status/activity/performance, pause/resume/
-               close-position/cancel-order/reset-account manual controls)
+               close-position/cancel-order/reset-account manual controls,
+               agents (AI Command Center), research-lab (Autonomous Research Lab))
   worker/      24/7 loop: Market Data Agent (scan), Trade Monitor + safety-belt
                refresh + Learning Agent (per trade close, every scan), News
                Intelligence Agent (ingestion + DET analysis, own cadence),
@@ -367,6 +401,10 @@ apps/
                above — see packages/backtest below): polls backtest_jobs and
                dispatches by kind (backtest/walk_forward/walk_forward_optimization/
                optimize/monte_carlo/stress_test/sensitivity/full_lab)
+  research_worker/ third separate process: polls research_queue and dispatches
+               by kind (hypothesis/experiment/feature_test/strategy_test/
+               regime_test/event_test/knowledge_update) — never competes with
+               worker/'s live loop or backtest_worker/'s operator-triggered jobs
   dashboard/   Next.js dashboard (single admin user)
 packages/
   shared/      DB models, settings, logging, OHLCV lookup — shared across apps/packages
@@ -405,12 +443,18 @@ packages/
                Consensus/Contradiction/Chief Decision Engine, and a
                reliability/quarantine engine — never imports
                packages/execution, structurally proven (test_agent_sandbox.py)
+  research/    Autonomous Research & Evolution Engine — DSL, ExperimentEngine,
+               bounded genetic search, StrategyVersion Champion/Challenger,
+               drift detection, knowledge graph, budget, human-approval-gated
+               promotion — never imports packages/execution, structurally
+               proven (test_research_dsl_sandbox.py)
 infra/
   docker/      docker-compose + Dockerfiles
   migrations/  Alembic
 scripts/       seed.py — admin user, asset universe, paper portfolio, strategy registry
-config/        risk_limits.yaml, scoring_weights.yaml, promotion_criteria.yaml — all
-               live-editable (risk limits via PATCH /api/system/risk-limits)
+config/        risk_limits.yaml, scoring_weights.yaml, promotion_criteria.yaml,
+               research_budget.yaml — all live-editable (risk limits via
+               PATCH /api/system/risk-limits)
 docs/blueprint/  full technical spec (architecture, DB schema, API, agents,
                  event flow, memory, scoring, risk engine, dashboard spec,
                  backtesting, LLM prompts, roadmap)

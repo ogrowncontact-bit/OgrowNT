@@ -113,6 +113,14 @@ class Settings(BaseSettings):
     # Strategy Lab UI without hammering Postgres between jobs.
     backtest_job_poll_interval_seconds: int = 5
 
+    # apps/research_worker/main.py's poll cadence -- "PROMPT 10" §59's
+    # compute isolation, a THIRD separate process from both apps/worker and
+    # apps/backtest_worker. Slower than the backtest worker's on purpose:
+    # research_queue items (hypothesis generation, experiments, genetic
+    # search) are inherently heavier and less latency-sensitive than a
+    # human waiting on a Strategy Lab job in the dashboard.
+    research_job_poll_interval_seconds: int = 15
+
     # "PROMPT 8" §69-71: how often packages/portfolio/reconciliation.py
     # re-derives cash from first principles. Frequent — an accounting
     # mismatch pauses trading, so catching one quickly matters more than the
