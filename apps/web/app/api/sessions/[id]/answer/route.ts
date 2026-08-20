@@ -11,6 +11,7 @@ import { toClientQuestion } from "@/lib/clientQuestion";
 import { track } from "@/lib/analytics";
 import type { OpenResponseAiMeta } from "@/lib/openResponseAiMeta";
 import { ensureAiTelemetryRegistered } from "@/lib/aiTelemetry";
+import { getAiModelConfig } from "@/lib/aiConfig";
 
 // Registers once per module instance — instrumentation.ts's startup hook runs
 // in a separate module realm from route handlers in Next.js's dev server, so
@@ -34,6 +35,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const config = await getAssessmentConfig(session.sourceSlug);
   if (!config) return NextResponse.json({ error: "Unknown assessment" }, { status: 500 });
 
+  const modelConfig = await getAiModelConfig();
+
   const body = await request.json().catch(() => null);
   const questionKey = body?.questionKey as string | undefined;
   if (!questionKey) return NextResponse.json({ error: "questionKey is required" }, { status: 400 });
@@ -56,11 +59,14 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const trimmed = openText?.trim();
     if (!trimmed) return NextResponse.json({ error: "openText is required" }, { status: 400 });
 
-    const analysis = await interpretOpenAnswer({
-      questionPrompt: expected.prompt,
-      answerText: trimmed,
-      allowedDimensions: config.dimensions.map((d) => d.key),
-    });
+    const analysis = await interpretOpenAnswer(
+      {
+        questionPrompt: expected.prompt,
+        answerText: trimmed,
+        allowedDimensions: config.dimensions.map((d) => d.key),
+      },
+      modelConfig
+    );
 
     // Question AI only gets to choose among candidates this question actually
     // declares, and only ones not already asked in this session (§4/§5).
@@ -73,7 +79,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       .filter((c): c is { key: string; prompt: string } => c !== null);
 
     if (unusedCandidates.length > 0) {
-      const choice = await chooseFollowup({ answerText: trimmed, tags: analysis.tags, candidates: unusedCandidates });
+      const choice = await chooseFollowup({ answerText: trimmed, tags: analysis.tags, candidates: unusedCandidates }, modelConfig);
       aiChosenFollowupKey = choice.chosenKey ?? undefined;
     }
 
@@ -129,36 +135,50 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   });
 
   if (result.isComplete) {
-    const { profileResult, dimensionScores, tensions } = computeResult(config, result.state);
+    const { profileResult, dimensionScores, tensions, contradictions } = computeResult(config, result.state);
 
     // Profile AI only narrates the profile the deterministic matcher already
     // picked (§6) — collected tags come from this session's own open answers.
     const openResponses = await prisma.openResponse.findMany({ where: { assessmentSessionId: id } });
     const openAnswerTags = openResponses.flatMap((r) => (r.aiTags as OpenResponseAiMeta | null)?.tags ?? []);
 
-    const generatedInsight = await generateFreeInsight({
-      primaryProfileName: profileResult.primary.name,
-      primaryProfileDescription: profileResult.primary.descriptionTemplate,
-      dimensionScores: Object.fromEntries(Object.entries(dimensionScores).map(([k, v]) => [k, v.normalized])),
-      openAnswerTags,
-    });
+    const generatedInsight = await generateFreeInsight(
+      {
+        primaryProfileName: profileResult.primary.name,
+        primaryProfileDescription: profileResult.primary.descriptionTemplate,
+        dimensionScores: Object.fromEntries(Object.entries(dimensionScores).map(([k, v]) => [k, v.normalized])),
+        openAnswerTags,
+      },
+      modelConfig
+    );
 
-    // REPORT INPUT stage: enriches the already-decided profile/tensions with
-    // themes and narrative insights for the future premium report. Never the
-    // decision-maker — profileResult/tensions above are already final by the
-    // time this runs. Always resolves to *something* structured, AI or not.
-    const enrichment = await enrichProfileWithAI({
-      primaryProfileName: profileResult.primary.name,
-      secondaryProfileNames: profileResult.secondary.map((p) => p.name),
-      dimensions: Object.entries(dimensionScores).map(([key, score]) => ({
-        key,
-        label: dimensionPool.find((d) => d.key === key)?.label ?? key,
-        normalized: score.normalized,
-        confidence: score.confidence,
-      })),
-      tensions,
-      openAnswerThemes: openAnswerTags,
-    });
+    const contradictionInputs = contradictions.map((c) => ({
+      dimensionKey: c.dimensionKey,
+      label: dimensionPool.find((d) => d.key === c.dimensionKey)?.label ?? c.dimensionKey,
+      strength: 1 - c.consistency,
+    }));
+
+    // REPORT INPUT stage: enriches the already-decided profile/tensions/
+    // contradictions with themes and narrative insights for the future
+    // premium report. Never the decision-maker — profileResult/tensions/
+    // contradictions above are already final by the time this runs. Always
+    // resolves to *something* structured, AI or not.
+    const enrichment = await enrichProfileWithAI(
+      {
+        primaryProfileName: profileResult.primary.name,
+        secondaryProfileNames: profileResult.secondary.map((p) => p.name),
+        dimensions: Object.entries(dimensionScores).map(([key, score]) => ({
+          key,
+          label: dimensionPool.find((d) => d.key === key)?.label ?? key,
+          normalized: score.normalized,
+          confidence: score.confidence,
+        })),
+        tensions,
+        contradictions: contradictionInputs,
+        openAnswerThemes: openAnswerTags,
+      },
+      modelConfig
+    );
 
     const aiSemanticNotes = {
       insight: generatedInsight?.insight,
@@ -172,13 +192,14 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       ...Object.entries(dimensionScores).map(([dimensionKey, score]) =>
         prisma.dimensionScore.upsert({
           where: { assessmentSessionId_dimensionKey: { assessmentSessionId: id, dimensionKey } },
-          update: { rawScore: score.raw, normalizedScore: score.normalized, confidence: score.confidence },
+          update: { rawScore: score.raw, normalizedScore: score.normalized, confidence: score.confidence, consistency: score.consistency },
           create: {
             assessmentSessionId: id,
             dimensionKey,
             rawScore: score.raw,
             normalizedScore: score.normalized,
             confidence: score.confidence,
+            consistency: score.consistency,
           },
         })
       ),
@@ -188,6 +209,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
           primaryProfileKey: profileResult.primary.key,
           secondaryProfileKeys: profileResult.secondary.map((p) => p.key),
           tensions: tensions as any,
+          contradictions: contradictions as any,
           aiSemanticNotes: aiSemanticNotes as any,
         },
         create: {
@@ -195,6 +217,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
           primaryProfileKey: profileResult.primary.key,
           secondaryProfileKeys: profileResult.secondary.map((p) => p.key),
           tensions: tensions as any,
+          contradictions: contradictions as any,
           aiSemanticNotes: aiSemanticNotes as any,
         },
       }),

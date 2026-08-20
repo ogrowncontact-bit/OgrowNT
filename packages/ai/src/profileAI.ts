@@ -1,5 +1,6 @@
-import { callStructured, isAiEnabled, MODELS } from "./client";
+import { callStructured, isAiEnabled } from "./client";
 import { enforceNonDiagnostic } from "./guardrails/nonDiagnosticFilter";
+import { resolveModelConfig, type AIModelConfig } from "./modelConfig";
 
 interface GenerateInsightParams {
   primaryProfileName: string;
@@ -20,8 +21,9 @@ export interface GeneratedInsight {
  * `null` (caller uses the assessment's static template copy) if AI is
  * unavailable or the output can't be made to pass the non-diagnostic filter.
  */
-export async function generateFreeInsight(params: GenerateInsightParams): Promise<GeneratedInsight | null> {
+export async function generateFreeInsight(params: GenerateInsightParams, modelConfig?: Partial<AIModelConfig>): Promise<GeneratedInsight | null> {
   if (!isAiEnabled()) return null;
+  const config = resolveModelConfig(modelConfig);
 
   const scoreLines = Object.entries(params.dimensionScores)
     .map(([dim, score]) => `${dim}: ${Math.round(score)}/100`)
@@ -29,7 +31,7 @@ export async function generateFreeInsight(params: GenerateInsightParams): Promis
 
   const result = await callStructured<{ insight: string }>({
     module: "profileAI",
-    model: MODELS.quality,
+    model: config.qualityModel,
     system:
       "You write one short, warm, specific sentence (max 240 characters) for a self-reflection app's free " +
       "result screen. The person's dominant pattern has ALREADY been determined — you are narrating it, " +
@@ -46,6 +48,9 @@ export async function generateFreeInsight(params: GenerateInsightParams): Promis
       required: ["insight"],
     },
     maxTokens: 200,
+    ceilingTokens: config.maxTokens,
+    temperature: config.temperature,
+    timeoutMs: config.timeoutMs,
   });
 
   if (!result.ok || !result.data.insight) return null;

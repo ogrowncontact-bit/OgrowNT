@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { detectTensions, explainDimension, recomputeDimensionScores } from "./scoring";
+import { detectContradictions, detectTensions, explainDimension, recomputeDimensionScores } from "./scoring";
 import type { AssessmentConfig, Question, RecordedAnswer } from "./types";
 
 const dims: AssessmentConfig["dimensions"] = [
@@ -96,6 +96,94 @@ describe("explainDimension", () => {
   });
 });
 
+const q2: Question = {
+  key: "q2",
+  type: "single_select",
+  isCore: true,
+  prompt: "?",
+  options: [
+    { key: "pos", label: "pos", dimensionContributions: { connection: 3 } },
+    { key: "neg", label: "neg", dimensionContributions: { connection: -3 } },
+  ],
+};
+
+describe("contradiction detection", () => {
+  it("detects a contradiction when answers to different questions pull the same dimension in opposite directions", () => {
+    const config = baseConfig();
+    // "I usually express my feelings openly" (q1: pos) vs. "when conflict begins, I tend to withdraw" (q2: neg)
+    const contradictions = detectContradictions(config, [q, q2], [answer("pos", "q1"), answer("neg", "q2")]);
+    expect(contradictions).toHaveLength(1);
+    expect(contradictions[0].dimensionKey).toBe("connection");
+    expect(contradictions[0].positiveCount).toBe(1);
+    expect(contradictions[0].negativeCount).toBe(1);
+    expect(contradictions[0].consistency).toBeCloseTo(0.5, 5);
+  });
+
+  it("does not flag agreement as a contradiction", () => {
+    const config = baseConfig();
+    const contradictions = detectContradictions(config, [q, q2], [answer("pos", "q1"), answer("pos", "q2")]);
+    expect(contradictions).toEqual([]);
+  });
+
+  it("does not flag a single answer — nothing to contradict yet", () => {
+    const config = baseConfig();
+    const contradictions = detectContradictions(config, [q], [answer("pos")]);
+    expect(contradictions).toEqual([]);
+  });
+
+  it("does not flag a lopsided split as a contradiction (mostly one direction)", () => {
+    const config = baseConfig();
+    const contradictions = detectContradictions(
+      config,
+      [q, q2],
+      [answer("pos", "q1"), answer("pos", "q2"), answer("pos", "q1"), answer("pos", "q2"), answer("neg", "q1")]
+    );
+    // 4 positive, 1 negative -> consistency 0.8 — mostly one direction, not a real split
+    expect(contradictions).toEqual([]);
+  });
+
+  it("open-text nudges alone never create a contradiction (only structured answer contributions count)", () => {
+    const config = baseConfig();
+    const nudged: RecordedAnswer = { questionKey: "open1", openText: "text", aiDimensionNudges: { connection: -1 }, answeredAt: new Date().toISOString() };
+    const contradictions = detectContradictions(config, [q], [answer("pos"), nudged]);
+    expect(contradictions).toEqual([]);
+  });
+
+  it("sorts multiple contradictions by strength (lowest consistency first)", () => {
+    const config = baseConfig({
+      dimensions: [
+        { key: "connection", weight: 1 },
+        { key: "independence", weight: 1 },
+      ],
+    });
+    const indepQ: Question = {
+      key: "iq",
+      type: "single_select",
+      isCore: true,
+      prompt: "?",
+      options: [
+        { key: "pos", label: "pos", dimensionContributions: { independence: 3 } },
+        { key: "neg", label: "neg", dimensionContributions: { independence: -3 } },
+      ],
+    };
+    const indepQ2: Question = { ...indepQ, key: "iq2" };
+    const indepQ3: Question = { ...indepQ, key: "iq3" };
+
+    const answers: RecordedAnswer[] = [
+      answer("pos", "q1"),
+      answer("neg", "q2"), // connection: 1 vs 1 -> consistency 0.5
+      answer("pos", "iq"),
+      answer("pos", "iq2"),
+      answer("neg", "iq3"), // independence: 2 vs 1 -> consistency 0.667
+    ];
+
+    const contradictions = detectContradictions(config, [q, q2, indepQ, indepQ2, indepQ3], answers);
+    expect(contradictions).toHaveLength(2);
+    expect(contradictions[0].dimensionKey).toBe("connection");
+    expect(contradictions[1].dimensionKey).toBe("independence");
+  });
+});
+
 describe("tension detection", () => {
   const withTensionPair = baseConfig({
     tensionPairs: [
@@ -104,12 +192,12 @@ describe("tension detection", () => {
   });
 
   it("does not register a tension when only one side is strong", () => {
-    const scores = { connection: { raw: 0, normalized: 90, confidence: 1 }, independence: { raw: 0, normalized: 40, confidence: 1 } };
+    const scores = { connection: { raw: 0, normalized: 90, confidence: 1, consistency: 1 }, independence: { raw: 0, normalized: 40, confidence: 1, consistency: 1 } };
     expect(detectTensions(withTensionPair, scores)).toEqual([]);
   });
 
   it("registers a tension when both sides clear their threshold — this is a real coexisting pattern, not a contradiction", () => {
-    const scores = { connection: { raw: 0, normalized: 82, confidence: 1 }, independence: { raw: 0, normalized: 79, confidence: 1 } };
+    const scores = { connection: { raw: 0, normalized: 82, confidence: 1, consistency: 1 }, independence: { raw: 0, normalized: 79, confidence: 1, consistency: 1 } };
     const tensions = detectTensions(withTensionPair, scores);
     expect(tensions).toHaveLength(1);
     expect(tensions[0].key).toBe("connection_independence");
@@ -120,19 +208,19 @@ describe("tension detection", () => {
 
   it("strength increases the further both sides clear their thresholds", () => {
     const barely = detectTensions(withTensionPair, {
-      connection: { raw: 0, normalized: 66, confidence: 1 },
-      independence: { raw: 0, normalized: 66, confidence: 1 },
+      connection: { raw: 0, normalized: 66, confidence: 1, consistency: 1 },
+      independence: { raw: 0, normalized: 66, confidence: 1, consistency: 1 },
     })[0];
     const strong = detectTensions(withTensionPair, {
-      connection: { raw: 0, normalized: 99, confidence: 1 },
-      independence: { raw: 0, normalized: 99, confidence: 1 },
+      connection: { raw: 0, normalized: 99, confidence: 1, consistency: 1 },
+      independence: { raw: 0, normalized: 99, confidence: 1, consistency: 1 },
     })[0];
     expect(strong.strength).toBeGreaterThan(barely.strength);
   });
 
   it("detects no tensions for an assessment with no authored tensionPairs", () => {
     const config = baseConfig();
-    const scores = { connection: { raw: 0, normalized: 99, confidence: 1 }, independence: { raw: 0, normalized: 99, confidence: 1 } };
+    const scores = { connection: { raw: 0, normalized: 99, confidence: 1, consistency: 1 }, independence: { raw: 0, normalized: 99, confidence: 1, consistency: 1 } };
     expect(detectTensions(config, scores)).toEqual([]);
   });
 
@@ -155,14 +243,14 @@ describe("tension detection", () => {
       ],
     });
     const noTension = detectTensions(c, {
-      independence: { raw: 0, normalized: 85, confidence: 1 },
-      distance_response: { raw: 0, normalized: 60, confidence: 1 }, // high tolerance — no tension
+      independence: { raw: 0, normalized: 85, confidence: 1, consistency: 1 },
+      distance_response: { raw: 0, normalized: 60, confidence: 1, consistency: 1 }, // high tolerance — no tension
     });
     expect(noTension).toEqual([]);
 
     const tension = detectTensions(c, {
-      independence: { raw: 0, normalized: 85, confidence: 1 },
-      distance_response: { raw: 0, normalized: 15, confidence: 1 }, // low tolerance — tension
+      independence: { raw: 0, normalized: 85, confidence: 1, consistency: 1 },
+      distance_response: { raw: 0, normalized: 15, confidence: 1, consistency: 1 }, // low tolerance — tension
     });
     expect(tension).toHaveLength(1);
     expect(tension[0].strength).toBeGreaterThan(0);

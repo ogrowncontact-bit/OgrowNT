@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { enrichProfileWithAI, type DimensionInput, type TensionInput } from "./profileEnrichmentAI";
+import { enrichProfileWithAI, type ContradictionInput, type DimensionInput, type TensionInput } from "./profileEnrichmentAI";
 
 const dimensions: DimensionInput[] = [
   { key: "connection", label: "Connection", normalized: 82, confidence: 0.9 },
@@ -14,6 +14,7 @@ describe("enrichProfileWithAI fallback (no ANTHROPIC_API_KEY)", () => {
       secondaryProfileNames: ["The Careful Opener"],
       dimensions,
       tensions: [],
+      contradictions: [],
       openAnswerThemes: [],
     });
     expect(result).toBeTruthy();
@@ -28,6 +29,7 @@ describe("enrichProfileWithAI fallback (no ANTHROPIC_API_KEY)", () => {
       secondaryProfileNames: [],
       dimensions,
       tensions: [],
+      contradictions: [],
       openAnswerThemes: [],
     });
     const strength = result.insights.find((i) => i.type === "strength");
@@ -42,6 +44,7 @@ describe("enrichProfileWithAI fallback (no ANTHROPIC_API_KEY)", () => {
       secondaryProfileNames: [],
       dimensions,
       tensions: [],
+      contradictions: [],
       openAnswerThemes: [],
     });
     const friction = result.insights.find((i) => i.type === "friction");
@@ -56,11 +59,32 @@ describe("enrichProfileWithAI fallback (no ANTHROPIC_API_KEY)", () => {
       secondaryProfileNames: [],
       dimensions,
       tensions,
+      contradictions: [],
       openAnswerThemes: [],
     });
     const pattern = result.insights.find((i) => i.type === "pattern");
     expect(pattern).toBeDefined();
     expect(pattern!.confidence).toBe(0.73);
+  });
+
+  it("surfaces a detected contradiction as a contradiction insight, never a strength/friction/pattern, carrying its strength as confidence", async () => {
+    const contradictions: ContradictionInput[] = [{ dimensionKey: "connection", label: "connection", strength: 0.5 }];
+    const result = await enrichProfileWithAI({
+      primaryProfileName: "The Independent Connector",
+      secondaryProfileNames: [],
+      dimensions,
+      tensions: [],
+      contradictions,
+      openAnswerThemes: [],
+    });
+    const contradiction = result.insights.find((i) => i.type === "contradiction");
+    expect(contradiction).toBeDefined();
+    expect(contradiction!.confidence).toBe(0.5);
+    // never described as a flaw, inconsistency, or dishonesty
+    const bannedFramings = ["lying", "dishonest", "inconsistent", "confused", "wrong"];
+    for (const term of bannedFramings) {
+      expect(contradiction!.text.toLowerCase()).not.toContain(term);
+    }
   });
 
   it("uses open-answer themes when present instead of deriving generic ones", async () => {
@@ -69,6 +93,7 @@ describe("enrichProfileWithAI fallback (no ANTHROPIC_API_KEY)", () => {
       secondaryProfileNames: [],
       dimensions,
       tensions: [],
+      contradictions: [],
       openAnswerThemes: ["protects-independence", "fears-rejection"],
     });
     expect(result.themes).toEqual(["protects-independence", "fears-rejection"]);
@@ -80,6 +105,7 @@ describe("enrichProfileWithAI fallback (no ANTHROPIC_API_KEY)", () => {
       secondaryProfileNames: [],
       dimensions,
       tensions: [],
+      contradictions: [],
       openAnswerThemes: [],
     });
     const bannedTerms = ["disorder", "diagnosis", "syndrome", "narcissistic", "codependent", "you are", "you have"];
@@ -97,6 +123,7 @@ describe("enrichProfileWithAI fallback (no ANTHROPIC_API_KEY)", () => {
       secondaryProfileNames: [],
       dimensions: neutralDimensions,
       tensions: [],
+      contradictions: [],
       openAnswerThemes: [],
     });
     expect(result.aiGenerated).toBe(false);

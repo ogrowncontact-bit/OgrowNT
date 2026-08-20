@@ -1,7 +1,9 @@
-import { callStructured, isAiEnabled, MODELS } from "./client";
+import { callStructured, isAiEnabled } from "./client";
 import { enforceNonDiagnostic } from "./guardrails/nonDiagnosticFilter";
+import { resolveModelConfig, type AIModelConfig } from "./modelConfig";
+import { bucketConfidence } from "./confidence";
 
-export type InsightType = "strength" | "friction" | "pattern";
+export type InsightType = "strength" | "friction" | "pattern" | "contradiction";
 
 export interface EnrichedInsight {
   type: InsightType;
@@ -29,11 +31,20 @@ export interface TensionInput {
   strength: number; // 0..1
 }
 
+export interface ContradictionInput {
+  dimensionKey: string;
+  label: string;
+  /** 0..1 — how strongly the contributing answers disagreed in direction (1 - consistency). Deterministic, from assessment-engine's detectContradictions(). */
+  strength: number;
+}
+
 interface EnrichProfileParams {
   primaryProfileName: string;
   secondaryProfileNames: string[];
   dimensions: DimensionInput[];
   tensions: TensionInput[];
+  /** Distinct from tensions: two DIFFERENT questions pulling the same dimension in opposite directions, not two dimensions both being strong. */
+  contradictions: ContradictionInput[];
   /** Tags already extracted from this session's open-text answers (Response AI) — never raw text. */
   openAnswerThemes: string[];
 }
@@ -50,16 +61,20 @@ const MAX_INSIGHTS = 5;
  * structured — including with AI unavailable — since the report pipeline
  * needs a REPORT INPUT either way. See docs/ARCHITECTURE.md §6.
  */
-export async function enrichProfileWithAI(params: EnrichProfileParams): Promise<ProfileEnrichment> {
+export async function enrichProfileWithAI(params: EnrichProfileParams, modelConfig?: Partial<AIModelConfig>): Promise<ProfileEnrichment> {
   if (!isAiEnabled()) {
     return deterministicFallback(params);
   }
+  const config = resolveModelConfig(modelConfig);
 
   const dimensionLines = params.dimensions
-    .map((d) => `${d.label} (${d.key}): ${Math.round(d.normalized)}/100, confidence ${d.confidence.toFixed(2)}`)
+    .map((d) => `${d.label} (${d.key}): ${Math.round(d.normalized)}/100, confidence ${d.confidence.toFixed(2)} (${bucketConfidence(d.confidence)})`)
     .join("\n");
   const tensionLines = params.tensions.length
     ? params.tensions.map((t) => `${t.label}: ${t.dimensions.join(" + ")} (strength ${t.strength.toFixed(2)})`).join("\n")
+    : "(none detected)";
+  const contradictionLines = params.contradictions.length
+    ? params.contradictions.map((c) => `${c.label}: answers disagreed in direction (strength ${c.strength.toFixed(2)})`).join("\n")
     : "(none detected)";
 
   const result = await callStructured<{
@@ -67,23 +82,29 @@ export async function enrichProfileWithAI(params: EnrichProfileParams): Promise<
     insights: { type: string; text: string; confidence: number }[];
   }>({
     module: "profileEnrichmentAI",
-    model: MODELS.quality,
+    model: config.qualityModel,
     system:
       "You enrich an already-decided personality-pattern profile for a self-reflection app. The primary and " +
-      "secondary profiles, dimension scores, and any tensions have ALREADY been determined by deterministic " +
-      "scoring — you are elaborating on them, never re-deciding or overriding them. Write 2-5 short themes " +
-      "(lowercase-hyphenated, e.g. 'protects-independence') and up to 5 short insights (max 200 characters " +
-      "each), each tagged 'strength', 'friction', or 'pattern' (use 'pattern' for tensions — two things being " +
-      "true at once, not a contradiction). Use hedged language throughout: 'your responses suggest...', " +
-      "'you appear to...', 'one pattern worth noticing is...'. Never say 'you are' or 'you have'. Never use " +
-      "clinical or diagnostic terms (disorder, syndrome, diagnosis, trauma, narcissistic, codependent, etc). " +
-      "Give each insight your own confidence (0-1) reflecting how strongly the underlying data supports it — " +
-      "a dimension with low confidence should produce, at most, a low-confidence insight.",
+      "secondary profiles, dimension scores, and any tensions or contradictions have ALREADY been determined " +
+      "by deterministic scoring — you are elaborating on them, never re-deciding or overriding them. Write 2-5 " +
+      "short themes (lowercase-hyphenated, e.g. 'protects-independence') and up to 5 short insights (max 200 " +
+      "characters each), each tagged 'strength', 'friction', 'pattern', or 'contradiction'. Use 'pattern' for " +
+      "tensions (two dimensions both scoring strongly — two things being true at once, not a contradiction). " +
+      "Use 'contradiction' only for listed Contradictions, where answers to different questions pulled in " +
+      "opposite directions — phrase these especially carefully, e.g. 'you may be emotionally open when you " +
+      "feel safe, but become more private under pressure', never as inconsistency, confusion, or dishonesty on " +
+      "their part. Use hedged language throughout: 'your responses suggest...', 'you appear to...', 'one " +
+      "pattern worth noticing is...', 'in some situations... while in others...'. Never say 'you are' or 'you " +
+      "have'. Never use clinical or diagnostic terms (disorder, syndrome, diagnosis, trauma, narcissistic, " +
+      "codependent, etc). Give each insight your own confidence (0-1) reflecting how strongly the underlying " +
+      "data supports it — a dimension marked low or medium confidence should produce, at most, a matching " +
+      "low- or medium-confidence insight, worded more tentatively.",
     userMessage:
       `Primary profile: ${params.primaryProfileName}\n` +
       `Secondary profiles: ${params.secondaryProfileNames.join(", ") || "(none)"}\n\n` +
       `Dimensions:\n${dimensionLines}\n\n` +
       `Tensions:\n${tensionLines}\n\n` +
+      `Contradictions (answers to different questions disagreeing — not the same as a tension):\n${contradictionLines}\n\n` +
       `Themes from their own words: ${params.openAnswerThemes.join(", ") || "(none)"}`,
     toolName: "record_enrichment",
     toolDescription: "Record the enriched themes and insights for this profile.",
@@ -97,7 +118,7 @@ export async function enrichProfileWithAI(params: EnrichProfileParams): Promise<
           items: {
             type: "object",
             properties: {
-              type: { type: "string", enum: ["strength", "friction", "pattern"] },
+              type: { type: "string", enum: ["strength", "friction", "pattern", "contradiction"] },
               text: { type: "string", maxLength: 260 },
               confidence: { type: "number", minimum: 0, maximum: 1 },
             },
@@ -108,11 +129,14 @@ export async function enrichProfileWithAI(params: EnrichProfileParams): Promise<
       required: ["themes", "insights"],
     },
     maxTokens: 700,
+    ceilingTokens: config.maxTokens,
+    temperature: config.temperature,
+    timeoutMs: config.timeoutMs,
   });
 
   if (!result.ok) return deterministicFallback(params);
 
-  const validTypes = new Set<InsightType>(["strength", "friction", "pattern"]);
+  const validTypes = new Set<InsightType>(["strength", "friction", "pattern", "contradiction"]);
   const insights: EnrichedInsight[] = (Array.isArray(result.data.insights) ? result.data.insights : [])
     .filter((i) => validTypes.has(i.type as InsightType))
     .map((i) => {
@@ -179,6 +203,15 @@ function deterministicFallback(params: EnrichProfileParams): ProfileEnrichment {
       type: "pattern",
       text: `Your responses suggest two things are true for you at once: ${strongestTension.label.toLowerCase()}.`,
       confidence: strongestTension.strength,
+    });
+  }
+
+  const strongestContradiction = params.contradictions[0];
+  if (strongestContradiction) {
+    insights.push({
+      type: "contradiction",
+      text: `Your answers didn't point the same way on ${strongestContradiction.label.toLowerCase()} — this can depend a lot on the situation, rather than being one fixed pattern.`,
+      confidence: strongestContradiction.strength,
     });
   }
 

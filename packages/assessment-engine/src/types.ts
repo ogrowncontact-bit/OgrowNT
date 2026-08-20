@@ -133,6 +133,14 @@ export interface TensionResult {
   strength: number;
 }
 
+export interface ContradictionResult {
+  dimensionKey: DimensionKey;
+  /** 0..1 — fraction of this dimension's signed contributions that agreed in direction. Always <1 here, since that's what makes it a contradiction. */
+  consistency: number;
+  positiveCount: number;
+  negativeCount: number;
+}
+
 export interface ReportSection {
   key: string;
   title: string;
@@ -205,6 +213,8 @@ export interface DimensionState {
   raw: number;
   normalized: number;
   confidence: number; // 0..1
+  /** 0..1 — what fraction of this dimension's contributing answers agreed in direction. 1 with no contributions (nothing to disagree). */
+  consistency: number;
 }
 
 export interface SessionState {

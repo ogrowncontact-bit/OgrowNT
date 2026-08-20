@@ -5,6 +5,7 @@ import type { AssessmentConfig } from "@inner/assessment-engine";
 import { getAssessmentConfig, listPublishedSlugs } from "./assessments";
 import { ensureAiTelemetryRegistered } from "./aiTelemetry";
 import { matchesCondition } from "./conditionMatching";
+import { getAiModelConfig } from "./aiConfig";
 
 export { matchesCondition } from "./conditionMatching";
 
@@ -63,13 +64,17 @@ export async function selectRecommendation(params: {
   const topDimension = Object.entries(params.dimensionScores).sort((a, b) => b[1] - a[1])[0];
   const topDimensionLabel = topDimension ? (dimensionLabels[topDimension[0]] ?? topDimension[0]) : "your top pattern";
 
-  const generated = await generateRecommendationCopy({
-    fromAssessmentName: params.fromConfig.name,
-    primaryProfileName: params.primaryProfileName,
-    topDimensionLabel,
-    targetAssessmentName: targetConfig.name,
-    targetAssessmentHook: targetConfig.hook,
-  });
+  const modelConfig = await getAiModelConfig();
+  const generated = await generateRecommendationCopy(
+    {
+      fromAssessmentName: params.fromConfig.name,
+      primaryProfileName: params.primaryProfileName,
+      topDimensionLabel,
+      targetAssessmentName: targetConfig.name,
+      targetAssessmentHook: targetConfig.hook,
+    },
+    modelConfig
+  );
 
   const bridgeCopy = generated?.bridgeCopy ?? staticBridgeCopy ?? `Curious what "${targetConfig.name}" might reveal?`;
 

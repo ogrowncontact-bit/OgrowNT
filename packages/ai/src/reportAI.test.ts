@@ -20,6 +20,7 @@ function baseContext(overrides: Partial<ReportContext> = {}): ReportContext {
     dimensionConfidence: { connection: 1, independence: 0.8, trust: 0.5, vulnerability: 0.3 },
     dimensionLabels: { connection: "Connection", independence: "Independence", trust: "Trust", vulnerability: "Vulnerability" },
     tensions: [],
+    contradictions: [],
     openAnswerThemes: [],
     language: "en",
     reportType: "individual",
@@ -79,6 +80,27 @@ describe("generateReport fallback (no ANTHROPIC_API_KEY)", () => {
     const result = await generateReport(baseContext({ tensions: [] }));
     const tensionSection = result.sections.find((s) => s.key === "inner_tension")!;
     expect(tensionSection.body.toLowerCase()).toContain("didn't reveal");
+  });
+
+  it("surfaces a detected contradiction in the inner_tension section, framed as situational rather than a flaw", async () => {
+    const result = await generateReport(
+      baseContext({ contradictions: [{ label: "openness in conflict", strength: 0.5 }] })
+    );
+    const tensionSection = result.sections.find((s) => s.key === "inner_tension")!;
+    expect(tensionSection.body.toLowerCase()).toContain("openness in conflict");
+    expect(tensionSection.body.toLowerCase()).toContain("depends on the situation");
+  });
+
+  it("mentions both a tension and a contradiction when both are detected, distinctly", async () => {
+    const result = await generateReport(
+      baseContext({
+        tensions: [{ label: "wanting closeness and strongly protecting independence", strength: 0.8 }],
+        contradictions: [{ label: "openness in conflict", strength: 0.5 }],
+      })
+    );
+    const tensionSection = result.sections.find((s) => s.key === "inner_tension")!;
+    expect(tensionSection.body).toContain("wanting closeness and strongly protecting independence");
+    expect(tensionSection.body.toLowerCase()).toContain("openness in conflict");
   });
 });
 

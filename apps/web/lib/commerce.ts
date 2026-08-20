@@ -1,5 +1,5 @@
 import { prisma, Prisma } from "@inner/db";
-import { generateReport, type ReportContext, type ReportTension } from "@inner/ai";
+import { generateReport, type ReportContext, type ReportTension, type ReportContradiction } from "@inner/ai";
 import { renderReportPdf } from "@inner/pdf";
 import { renderReportDeliveryEmail, renderPurchaseConfirmationEmail } from "@inner/email";
 import { dimensionPool } from "@inner/content/dimensions";
@@ -11,6 +11,7 @@ import { recordEmailEvent } from "./emailEvents";
 import { formatPrice } from "./money";
 import type { OpenResponseAiMeta } from "./openResponseAiMeta";
 import { ensureAiTelemetryRegistered } from "./aiTelemetry";
+import { getAiModelConfig } from "./aiConfig";
 
 // See the comment in app/api/sessions/[id]/answer/route.ts — registered per
 // module realm, not just once globally via instrumentation.ts.
@@ -100,6 +101,12 @@ export async function completeOrder(orderId: string): Promise<void> {
     label: t.label,
     strength: t.strength,
   }));
+  const contradictions: ReportContradiction[] = (
+    (profileResultRow.contradictions as { dimensionKey: string; consistency: number }[] | null) ?? []
+  ).map((c) => ({
+    label: dimensionLabels[c.dimensionKey] ?? c.dimensionKey,
+    strength: 1 - c.consistency,
+  }));
 
   await track({ anonymousSessionId: session.anonymousSessionId, eventName: "report_generation_started", assessmentId: session.assessmentId });
 
@@ -114,13 +121,15 @@ export async function completeOrder(orderId: string): Promise<void> {
       dimensionConfidence,
       dimensionLabels,
       tensions,
+      contradictions,
       openAnswerThemes: openAnswerTags,
       language: order.language,
       reportType: "individual",
       sections: config.premiumReportStructure.map((s) => ({ key: s.key, title: s.title })),
     };
 
-    const generated = await generateReport(reportContext);
+    const modelConfig = await getAiModelConfig();
+    const generated = await generateReport(reportContext, modelConfig);
 
     const pdf = await renderReportPdf({
       assessmentName: config.name,

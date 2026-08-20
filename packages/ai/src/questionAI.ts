@@ -1,4 +1,5 @@
-import { callStructured, isAiEnabled, MODELS } from "./client";
+import { callStructured, isAiEnabled } from "./client";
+import { resolveModelConfig, type AIModelConfig } from "./modelConfig";
 
 export interface FollowupCandidate {
   key: string;
@@ -23,16 +24,17 @@ export interface FollowupChoice {
  * docs/ARCHITECTURE.md §4 so it can only select, not author, new
  * psychological territory.
  */
-export async function chooseFollowup(params: ChooseFollowupParams): Promise<FollowupChoice> {
+export async function chooseFollowup(params: ChooseFollowupParams, modelConfig?: Partial<AIModelConfig>): Promise<FollowupChoice> {
   if (params.candidates.length === 0) return { chosenKey: null, aiGenerated: false };
 
   if (!isAiEnabled()) {
     return { chosenKey: fallbackChoice(params), aiGenerated: false };
   }
+  const config = resolveModelConfig(modelConfig);
 
   const result = await callStructured<{ chosen_key: string }>({
     module: "questionAI",
-    model: MODELS.fast,
+    model: config.fastModel,
     system:
       "You decide whether one more follow-up question is worth asking in a short self-reflection " +
       "interview about relationship patterns. You may ONLY pick from the exact candidate keys given, " +
@@ -51,6 +53,9 @@ export async function chooseFollowup(params: ChooseFollowupParams): Promise<Foll
       required: ["chosen_key"],
     },
     maxTokens: 100,
+    ceilingTokens: config.maxTokens,
+    temperature: config.temperature,
+    timeoutMs: config.timeoutMs,
   });
 
   if (!result.ok) return { chosenKey: fallbackChoice(params), aiGenerated: false };

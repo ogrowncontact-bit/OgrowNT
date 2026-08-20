@@ -1,5 +1,6 @@
 import type {
   AssessmentConfig,
+  ContradictionResult,
   DimensionKey,
   DimensionState,
   Question,
@@ -71,7 +72,7 @@ function collectContributions(
 export function emptyDimensionScores(config: AssessmentConfig): Record<DimensionKey, DimensionState> {
   const out: Record<DimensionKey, DimensionState> = {};
   for (const d of config.dimensions) {
-    out[d.key] = { raw: 0, normalized: 50, confidence: 0 };
+    out[d.key] = { raw: 0, normalized: 50, confidence: 0, consistency: 1 };
   }
   return out;
 }
@@ -147,6 +148,7 @@ export function recomputeDimensionScores(
       // reflects structured-answer volume + consistency only, per docs/ARCHITECTURE.md §6.
       normalized: blendedNormalized,
       confidence: confidenceFor(contributions),
+      consistency: confidenceFactors(contributions).consistency,
     };
   }
   return result;
@@ -234,4 +236,44 @@ export function detectTensions(
   }
 
   return results.sort((x, y) => y.strength - x.strength);
+}
+
+// Below this many signed (non-neutral) contributing answers, a split is just
+// one outlier answer, not a real pattern worth narrating.
+const CONTRADICTION_MIN_SIGNED_COUNT = 2;
+// Above this consistency, contributions mostly agree — not a contradiction.
+const CONTRADICTION_MAX_CONSISTENCY = 0.75;
+
+/**
+ * A contradiction is different from a tension: a tension is two *dimensions*
+ * both scoring strongly (docs/ARCHITECTURE.md §6's "high independence AND
+ * high connection"); a contradiction is answers to *different questions*
+ * pulling the SAME dimension in opposite directions (e.g. "I usually express
+ * my feelings openly" vs. "when conflict begins, I tend to withdraw" both
+ * feeding openness). Purely deterministic — reuses the same per-answer
+ * contribution data as scoring and explainDimension, with no separate
+ * cross-question comparison logic to invent. The AI layer only ever narrates
+ * these with hedged language; it never gets to decide whether one exists.
+ */
+export function detectContradictions(
+  config: AssessmentConfig,
+  allQuestions: Question[],
+  answers: RecordedAnswer[]
+): ContradictionResult[] {
+  const contributionsByDimension = collectContributions(config, allQuestions, answers);
+  const results: ContradictionResult[] = [];
+
+  for (const d of config.dimensions) {
+    const contributions = contributionsByDimension[d.key] ?? [];
+    const positiveCount = contributions.filter((c) => c.weight > 0).length;
+    const negativeCount = contributions.filter((c) => c.weight < 0).length;
+    if (positiveCount + negativeCount < CONTRADICTION_MIN_SIGNED_COUNT) continue;
+
+    const { consistency } = confidenceFactors(contributions);
+    if (consistency > CONTRADICTION_MAX_CONSISTENCY) continue;
+
+    results.push({ dimensionKey: d.key, consistency, positiveCount, negativeCount });
+  }
+
+  return results.sort((a, b) => a.consistency - b.consistency);
 }

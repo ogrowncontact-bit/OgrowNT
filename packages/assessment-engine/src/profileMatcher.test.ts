@@ -5,7 +5,7 @@ import type { AssessmentConfig, DimensionState, ProfileDefinition } from "./type
 function scores(overrides: Record<string, number>): Record<string, DimensionState> {
   const out: Record<string, DimensionState> = {};
   for (const [key, normalized] of Object.entries(overrides)) {
-    out[key] = { raw: 0, normalized, confidence: 1 };
+    out[key] = { raw: 0, normalized, confidence: 1, consistency: 1 };
   }
   return out;
 }

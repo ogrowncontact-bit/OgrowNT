@@ -38,7 +38,12 @@ interface CallStructuredParams {
   toolName: string;
   toolDescription: string;
   inputSchema: Record<string, unknown>;
+  /** Requested by the call site; still capped by `ceilingTokens` (the admin's configured maxTokens) below. */
   maxTokens?: number;
+  /** Admin-configured ceiling — the call site's `maxTokens` is clamped to this, never the other way around. */
+  ceilingTokens?: number;
+  temperature?: number;
+  timeoutMs?: number;
 }
 
 /** One Claude call, forced to answer via a single tool call so the output is structured, not free-text we'd have to parse. Every call — including the no-API-key and error paths — is reported via reportAiCall() for cost/latency monitoring. */
@@ -52,20 +57,26 @@ export async function callStructured<T>(params: CallStructuredParams): Promise<S
 
   const start = Date.now();
   try {
-    const response = await anthropic.messages.create({
-      model: params.model,
-      max_tokens: params.maxTokens ?? 512,
-      system: params.system,
-      messages: [{ role: "user", content: params.userMessage }],
-      tools: [
-        {
-          name: params.toolName,
-          description: params.toolDescription,
-          input_schema: params.inputSchema as Anthropic.Tool.InputSchema,
-        },
-      ],
-      tool_choice: { type: "tool", name: params.toolName },
-    });
+    const requestedTokens = params.maxTokens ?? 512;
+    const maxTokens = params.ceilingTokens ? Math.min(requestedTokens, params.ceilingTokens) : requestedTokens;
+    const response = await anthropic.messages.create(
+      {
+        model: params.model,
+        max_tokens: maxTokens,
+        temperature: params.temperature,
+        system: params.system,
+        messages: [{ role: "user", content: params.userMessage }],
+        tools: [
+          {
+            name: params.toolName,
+            description: params.toolDescription,
+            input_schema: params.inputSchema as Anthropic.Tool.InputSchema,
+          },
+        ],
+        tool_choice: { type: "tool", name: params.toolName },
+      },
+      params.timeoutMs ? { timeout: params.timeoutMs } : undefined,
+    );
     const latencyMs = Date.now() - start;
     const inputTokens = response.usage?.input_tokens ?? null;
     const outputTokens = response.usage?.output_tokens ?? null;

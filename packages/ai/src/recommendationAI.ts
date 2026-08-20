@@ -1,5 +1,6 @@
-import { callStructured, isAiEnabled, MODELS } from "./client";
+import { callStructured, isAiEnabled } from "./client";
 import { enforceNonDiagnostic } from "./guardrails/nonDiagnosticFilter";
+import { resolveModelConfig, type AIModelConfig } from "./modelConfig";
 
 interface GenerateRecommendationParams {
   fromAssessmentName: string;
@@ -21,12 +22,13 @@ export interface GeneratedRecommendation {
  * config-declared candidates only, so this can't recommend something
  * irrelevant or unpublished. See docs/ARCHITECTURE.md §8.
  */
-export async function generateRecommendationCopy(params: GenerateRecommendationParams): Promise<GeneratedRecommendation | null> {
+export async function generateRecommendationCopy(params: GenerateRecommendationParams, modelConfig?: Partial<AIModelConfig>): Promise<GeneratedRecommendation | null> {
   if (!isAiEnabled()) return null;
+  const config = resolveModelConfig(modelConfig);
 
   const result = await callStructured<{ bridge_copy: string }>({
     module: "recommendationAI",
-    model: MODELS.fast,
+    model: config.fastModel,
     system:
       "You write one warm, specific sentence bridging a just-completed self-reflection experience to a " +
       "related one, for a premium app. It should feel like a natural next question the person might have " +
@@ -44,6 +46,9 @@ export async function generateRecommendationCopy(params: GenerateRecommendationP
       required: ["bridge_copy"],
     },
     maxTokens: 150,
+    ceilingTokens: config.maxTokens,
+    temperature: config.temperature,
+    timeoutMs: config.timeoutMs,
   });
 
   if (!result.ok || !result.data.bridge_copy) return null;

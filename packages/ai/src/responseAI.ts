@@ -1,5 +1,6 @@
-import { callStructured, isAiEnabled, MODELS } from "./client";
+import { callStructured, isAiEnabled } from "./client";
 import { detectSafetyConcern } from "./guardrails/safetyFlag";
+import { resolveModelConfig, type AIModelConfig } from "./modelConfig";
 
 export interface OpenAnswerAnalysis {
   tags: string[];
@@ -49,8 +50,9 @@ function heuristicConfidence(answerText: string): number {
  * under a hard cap, and `safetyFlag` is OR'd with the deterministic keyword
  * check below, which always wins on its own regardless of what the model says.
  */
-export async function interpretOpenAnswer(params: InterpretParams): Promise<OpenAnswerAnalysis> {
+export async function interpretOpenAnswer(params: InterpretParams, modelConfig?: Partial<AIModelConfig>): Promise<OpenAnswerAnalysis> {
   const deterministicSafetyFlag = detectSafetyConcern(params.answerText);
+  const config = resolveModelConfig(modelConfig);
 
   if (!isAiEnabled()) {
     return {
@@ -71,7 +73,7 @@ export async function interpretOpenAnswer(params: InterpretParams): Promise<Open
     confidence: number;
   }>({
     module: "responseAI",
-    model: MODELS.fast,
+    model: config.fastModel,
     system:
       "You analyze one short, personal answer from a self-reflection app about relationship patterns. " +
       "You are not a therapist and must never diagnose, label a disorder, or make definitive claims about " +
@@ -100,6 +102,9 @@ export async function interpretOpenAnswer(params: InterpretParams): Promise<Open
       required: ["tags", "sentiment", "dimension_nudges", "safety_concern", "confidence"],
     },
     maxTokens: 400,
+    ceilingTokens: config.maxTokens,
+    temperature: config.temperature,
+    timeoutMs: config.timeoutMs,
   });
 
   if (!result.ok) {

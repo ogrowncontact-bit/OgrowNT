@@ -35,6 +35,9 @@ export default async function AdminDashboardLayout({ children }: { children: Rea
               <Link href="/admin/analytics" className="hover:text-[var(--inner-ink)]">
                 Analytics
               </Link>
+              <Link href="/admin/ai-settings" className="hover:text-[var(--inner-ink)]">
+                AI Settings
+              </Link>
             </nav>
           </div>
           <div className="flex items-center gap-4">
@@ -52,6 +55,7 @@ export default async function AdminDashboardLayout({ children }: { children: Rea
           <Link href="/admin/email">Email</Link>
           <Link href="/admin/users">Users</Link>
           <Link href="/admin/analytics">Analytics</Link>
+          <Link href="/admin/ai-settings">AI Settings</Link>
         </nav>
       </header>
       <main className="mx-auto max-w-4xl px-6 py-8">{children}</main>

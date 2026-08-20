@@ -67,10 +67,10 @@ function config(overrides: Partial<AssessmentConfig> = {}): AssessmentConfig {
 
 function state(overrides: Record<string, Partial<DimensionState>>): Record<string, DimensionState> {
   const base: Record<string, DimensionState> = {
-    connection: { raw: 0, normalized: 50, confidence: 0.9 },
-    independence: { raw: 0, normalized: 50, confidence: 0.9 },
-    validation: { raw: 0, normalized: 50, confidence: 0.9 },
-    security: { raw: 0, normalized: 50, confidence: 0.9 },
+    connection: { raw: 0, normalized: 50, confidence: 0.9, consistency: 1 },
+    independence: { raw: 0, normalized: 50, confidence: 0.9, consistency: 1 },
+    validation: { raw: 0, normalized: 50, confidence: 0.9, consistency: 1 },
+    security: { raw: 0, normalized: 50, confidence: 0.9, consistency: 1 },
   };
   for (const [k, v] of Object.entries(overrides)) base[k] = { ...base[k], ...v };
   return base;

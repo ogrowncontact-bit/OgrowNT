@@ -381,6 +381,8 @@ model DimensionScore {
   rawScore            Float
   normalizedScore     Float
   confidence          Float
+  /** What fraction of this dimension's contributing answers agreed in direction (assessment-engine's explainDimension()) — separate from `confidence`, which also factors in answer count. A low value here, with enough answers to mean something, is the deterministic evidence behind a possible contradiction (see packages/ai's detectContradictions()). Null for sessions scored before this column existed. */
+  consistency         Float?
 
   @@unique([assessmentSessionId, dimensionKey])
   @@schema("runtime")
@@ -393,6 +395,7 @@ model ProfileResult {
   primaryProfileKey   String
   secondaryProfileKeys Json             // string[]
   tensions            Json?             // TensionResult[] from the deterministic tension engine
+  contradictions      Json?             // ContradictionResult[] from the deterministic contradiction engine (assessment-engine's detectContradictions())
   aiSemanticNotes     Json?
   computedAt          DateTime          @default(now())
 
@@ -634,5 +637,26 @@ model AiCallLog {
   errorReason  String?
 
   @@index([module, occurredAt])
+  @@schema("admin")
+}
+
+/**
+ * Single-row admin-editable AI generation settings (docs/ARCHITECTURE.md
+ * §7 "AIModelConfig") — the API key stays an env var only, never a column
+ * here or a field the admin form submits, so it can't leak into a DB
+ * dump, an audit-log diff, or the admin frontend. `id` is always the
+ * literal string "singleton"; apps/web upserts against that fixed id
+ * rather than modeling a table that could ever have a second row.
+ */
+model AiSettings {
+  id               String    @id @default("singleton")
+  fastModel        String
+  qualityModel     String
+  temperature      Float
+  maxTokens        Int
+  timeoutMs        Int
+  updatedAt        DateTime  @updatedAt
+  updatedByAdminId String?
+
   @@schema("admin")
 }

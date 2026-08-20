@@ -1,6 +1,8 @@
-import { callStructured, isAiEnabled, MODELS } from "./client";
+import { callStructured, isAiEnabled } from "./client";
 import { enforceNonDiagnostic } from "./guardrails/nonDiagnosticFilter";
 import { validateReportQuality } from "./reportQualityValidator";
+import { resolveModelConfig, type AIModelConfig } from "./modelConfig";
+import { bucketConfidence } from "./confidence";
 
 export interface ReportSectionSpec {
   key: string;
@@ -17,6 +19,12 @@ export interface GeneratedReportSection {
 export interface ReportTension {
   label: string;
   strength: number; // 0..1
+}
+
+export interface ReportContradiction {
+  label: string;
+  /** 0..1 — how strongly the contributing answers disagreed in direction. */
+  strength: number;
 }
 
 export const REPORT_ENGINE_VERSION = 1;
@@ -45,6 +53,8 @@ export interface ReportContext {
   dimensionConfidence: Record<string, number>; // key -> 0..1
   dimensionLabels: Record<string, string>;
   tensions: ReportTension[];
+  /** Distinct from tensions: two DIFFERENT questions pulling the same dimension in opposite directions. */
+  contradictions: ReportContradiction[];
   /** Already-extracted tags from this session's open-text answers (Response AI) — never raw answer text. */
   openAnswerThemes: string[];
   /** ISO 639-1 code. Falls back to "en" generation if unsupported — see generateReport(). */
@@ -91,9 +101,10 @@ export interface GenerateReportResult {
  * open-answer themes are never identical — the prompt is built from those,
  * not from the profile name alone. See docs/ARCHITECTURE.md §7.
  */
-export async function generateReport(context: ReportContext): Promise<GenerateReportResult> {
+export async function generateReport(context: ReportContext, modelConfig?: Partial<AIModelConfig>): Promise<GenerateReportResult> {
+  const config = resolveModelConfig(modelConfig);
   const language = resolvedLanguage(context.language);
-  const modelVersion = MODELS.quality;
+  const modelVersion = config.qualityModel;
 
   if (!isAiEnabled()) {
     return {
@@ -108,12 +119,15 @@ export async function generateReport(context: ReportContext): Promise<GenerateRe
   const scoreLines = Object.entries(context.dimensionScores)
     .map(([dim, score]) => {
       const confidence = context.dimensionConfidence[dim];
-      const confidenceNote = confidence !== undefined ? `, confidence ${confidence.toFixed(2)}` : "";
+      const confidenceNote = confidence !== undefined ? `, confidence ${confidence.toFixed(2)} (${bucketConfidence(confidence)})` : "";
       return `${humanize(dim, context.dimensionLabels)}: ${Math.round(score)}/100${confidenceNote}`;
     })
     .join(", ");
   const tensionLines = context.tensions.length
     ? context.tensions.map((t) => `${t.label} (strength ${t.strength.toFixed(2)})`).join("; ")
+    : "(none detected)";
+  const contradictionLines = context.contradictions.length
+    ? context.contradictions.map((c) => `${c.label} (strength ${c.strength.toFixed(2)})`).join("; ")
     : "(none detected)";
   const { strengths, friction } = deriveStrengthsAndFriction(context.dimensionScores, context.dimensionLabels);
 
@@ -127,17 +141,20 @@ export async function generateReport(context: ReportContext): Promise<GenerateRe
     model: modelVersion,
     system:
       "You write a premium, warm, specific personal-reflection report for a self-reflection app. The " +
-      "person's dominant pattern, secondary patterns, and any tensions have ALREADY been determined by a " +
-      "separate deterministic scoring system — you are narrating and connecting them section by section, " +
-      "never diagnosing anything new, inventing a score, or contradicting the given profile. Each section is " +
-      "2-4 sentences, specific to their actual scores and any detected tension (reference dimensions by name " +
-      "where natural, and connect two dimensions together rather than describing them in isolation — e.g. " +
-      "'your high X paired with your high Y suggests...' is far better than two separate generic sentences). " +
-      "Never write generic filler that would apply to anyone with this profile name. Use hedged language " +
-      "throughout: 'your responses suggest...', 'you appear to...', 'one pattern is...'. Never say 'you are' " +
-      "or 'you have' as a bare claim, never claim certainty, never predict the future, never claim to know " +
-      "unconscious motives, and never use clinical/diagnostic terms (disorder, syndrome, diagnosis, trauma, " +
-      "narcissistic, codependent, pathological, etc)." +
+      "person's dominant pattern, secondary patterns, and any tensions or contradictions have ALREADY been " +
+      "determined by a separate deterministic scoring system — you are narrating and connecting them section " +
+      "by section, never diagnosing anything new, inventing a score, or contradicting the given profile. Each " +
+      "section is 2-4 sentences, specific to their actual scores and any detected tension or contradiction " +
+      "(reference dimensions by name where natural, and connect two dimensions together rather than " +
+      "describing them in isolation — e.g. 'your high X paired with your high Y suggests...' is far better " +
+      "than two separate generic sentences). If a contradiction is given, weave it in with context-aware, " +
+      "situational language — e.g. 'you may be emotionally open when you feel safe, but become more private " +
+      "under pressure' — never as a flaw, inconsistency, or unreliability in what they told you. Never write " +
+      "generic filler that would apply to anyone with this profile name. Use hedged language throughout: " +
+      "'your responses suggest...', 'you appear to...', 'one pattern is...', 'in situations where...'. Never " +
+      "say 'you are' or 'you have' as a bare claim, never claim certainty, never predict the future, never " +
+      "claim to know unconscious motives, and never use clinical/diagnostic terms (disorder, syndrome, " +
+      "diagnosis, trauma, narcissistic, codependent, pathological, etc)." +
       languageInstruction,
     userMessage:
       `Assessment: ${context.assessmentName} (v${context.assessmentVersion})\n` +
@@ -145,6 +162,7 @@ export async function generateReport(context: ReportContext): Promise<GenerateRe
       `Secondary patterns: ${context.secondaryProfileNames.join(", ") || "(none)"}\n` +
       `Dimension scores: ${scoreLines}\n` +
       `Detected tensions (two strong tendencies coexisting, not a contradiction): ${tensionLines}\n` +
+      `Detected contradictions (answers to different questions disagreeing — describe as context-dependent, not as a flaw): ${contradictionLines}\n` +
       `Notable strengths: ${strengths.join(", ") || "(none standout)"}\n` +
       `Notable friction points: ${friction.join(", ") || "(none standout)"}\n` +
       `Themes from their own words: ${context.openAnswerThemes.join(", ") || "(none)"}\n\n` +
@@ -157,6 +175,9 @@ export async function generateReport(context: ReportContext): Promise<GenerateRe
       required: context.sections.map((s) => s.key),
     },
     maxTokens: 3000,
+    ceilingTokens: config.maxTokens,
+    temperature: config.temperature,
+    timeoutMs: config.timeoutMs,
   });
 
   const fallback = buildFallbackSections(context);
@@ -212,6 +233,7 @@ function buildFallbackSections(context: ReportContext): GeneratedReportSection[]
   const { strengths, friction } = deriveStrengthsAndFriction(context.dimensionScores, context.dimensionLabels);
   const topLabel = top ? humanize(top[0], context.dimensionLabels) : "your dominant pattern";
   const topTension = context.tensions[0];
+  const topContradiction = context.contradictions[0];
 
   const byKey: Record<string, string> = {
     signature: `Your INNER Signature: ${context.primaryProfileName}. ${context.primaryProfileDescription}`,
@@ -240,8 +262,10 @@ function buildFallbackSections(context: ReportContext): GeneratedReportSection[]
         ? `One pattern worth noticing: ${friction.map((f) => f.toLowerCase()).join(", ")} scored lower — your responses suggest this could occasionally create friction, though it isn't a fixed trait.`
         : `Nothing in your responses stood out as a significant area of friction relative to your other patterns.`,
     inner_tension: topTension
-      ? `Your responses suggest a real tension worth sitting with: ${topTension.label}. This isn't a contradiction — it's two genuine tendencies that can both be true for you at once.`
-      : `Your responses didn't reveal a strong tension between dimensions — your patterns appear to point in a fairly consistent direction.`,
+      ? `Your responses suggest a real tension worth sitting with: ${topTension.label}. This isn't a contradiction — it's two genuine tendencies that can both be true for you at once.${topContradiction ? ` Your answers also didn't always point the same way on ${topContradiction.label.toLowerCase()} — that's less a fixed trait than a sign of how much it may depend on the situation.` : ""}`
+      : topContradiction
+        ? `Your responses didn't always point the same way on ${topContradiction.label.toLowerCase()} — rather than a fixed trait, this often means it depends on the situation: who you're with, how safe it feels, or what's at stake in the moment.`
+        : `Your responses didn't reveal a strong tension between dimensions — your patterns appear to point in a fairly consistent direction.`,
     misunderstood_aspects: `People close to you may perceive the ${topLabel.toLowerCase()} in how you show up, even in moments when you don't feel it as strongly yourself.`,
     reflection: `A few questions worth sitting with: When did ${topLabel.toLowerCase()} last show up for you? What would it look like to lean on it slightly less, or slightly more, on purpose?`,
     final_note: `Your responses suggest ${context.primaryProfileName.toLowerCase()} is a real, current pattern — not a permanent label. Patterns like this can shift with attention and different circumstances.`,
