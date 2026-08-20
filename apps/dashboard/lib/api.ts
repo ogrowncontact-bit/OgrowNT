@@ -408,6 +408,90 @@ export const getActivityFeed = (token: string, limit = 30) => apiFetch<TradingEv
 export const getManualActions = (token: string, limit = 20) => apiFetch<ManualActionEntry[]>(`/api/trading/manual-actions?limit=${limit}`, token);
 export const getTradingPerformance = (token: string) => apiFetch<TradingPerformance>("/api/trading/performance", token);
 
+// --- "PROMPT 9" AI Command Center -----------------------------------------
+
+export type AgentReliability = {
+  as_of: string;
+  sample_size: number;
+  correct_count: number;
+  accuracy: number | null;
+  avg_confidence_when_correct: number | null;
+  avg_confidence_when_incorrect: number | null;
+  overconfidence_gap: number | null;
+  reliability_score: number | null;
+};
+export type Agent = {
+  code: string;
+  name: string;
+  directional: boolean;
+  version: string;
+  status: string;
+  quarantined_at: string | null;
+  quarantine_reason: string | null;
+  last_health_status: string | null;
+  last_seen_at: string | null;
+  reliability: AgentReliability | null;
+};
+export type AgentMessageEntry = {
+  id: number;
+  agent_code: string;
+  asset_symbol: string | null;
+  status: string;
+  signal: string;
+  confidence: number;
+  evidence: Record<string, unknown>;
+  risk_flags: string[];
+  rationale: string | null;
+  generated_at: string;
+  expires_at: string | null;
+};
+export type Contradiction = {
+  id: number;
+  decision_id: number;
+  agent_code_a: string;
+  agent_code_b: string;
+  signal_a: string;
+  signal_b: string;
+  severity: number;
+  description: string;
+};
+export type Decision = {
+  id: number;
+  asset_symbol: string;
+  ts: string;
+  decision_state: string;
+  consensus_score: number;
+  contradiction_score: number;
+  reasoning_summary: string;
+  blocked_reason: string | null;
+  critical_agent_failure: boolean;
+};
+export type DecisionDetail = Decision & {
+  agent_inputs: Record<string, AgentMessageEntry & { evidence: Record<string, unknown> }>;
+  contradictions: Contradiction[];
+};
+
+export const getAgents = (token: string) => apiFetch<Agent[]>("/api/agents", token);
+export const getAgentMessages = (token: string, code: string, limit = 20) =>
+  apiFetch<AgentMessageEntry[]>(`/api/agents/${code}/messages?limit=${limit}`, token);
+export const getDecisions = (token: string, limit = 20) => apiFetch<Decision[]>(`/api/decisions?limit=${limit}`, token);
+export const getDecisionDetail = (token: string, decisionId: number) =>
+  apiFetch<DecisionDetail>(`/api/decisions/${decisionId}`, token);
+export const getContradictions = (token: string, limit = 20) =>
+  apiFetch<Contradiction[]>(`/api/contradictions?limit=${limit}`, token);
+
+export async function restoreAgent(token: string, code: string) {
+  const res = await fetch(`${API_URL}/api/agents/${code}/restore`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ confirm: true }),
+    cache: "no-store",
+  });
+  const body = await res.json().catch(() => null);
+  if (!res.ok) return { ok: false as const, detail: body?.detail ?? `Restore failed (${res.status})` };
+  return { ok: true as const, result: body as Agent };
+}
+
 export async function pauseTrading(token: string, reason: string) {
   const res = await fetch(`${API_URL}/api/trading/pause`, {
     method: "POST",

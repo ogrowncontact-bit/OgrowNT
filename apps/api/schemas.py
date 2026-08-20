@@ -989,3 +989,79 @@ class CloseOrCancelReasonRequest(BaseModel):
 
 class ResetAccountRequest(BaseModel):
     confirm: bool = False
+
+
+# --- "PROMPT 9" Multi-Agent Quant Intelligence Architecture --------------
+
+
+class AgentReliabilityOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    as_of: datetime
+    sample_size: int
+    correct_count: int
+    accuracy: float | None
+    avg_confidence_when_correct: float | None
+    avg_confidence_when_incorrect: float | None
+    overconfidence_gap: float | None
+    reliability_score: float | None
+
+
+class AgentOut(BaseModel):
+    code: str
+    name: str
+    directional: bool
+    version: str
+    status: str
+    quarantined_at: datetime | None
+    quarantine_reason: str | None
+    last_health_status: str | None
+    last_seen_at: datetime | None
+    reliability: AgentReliabilityOut | None
+
+
+class AgentMessageOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    agent_code: str
+    asset_symbol: str | None
+    status: str
+    signal: str
+    confidence: float
+    evidence: dict
+    risk_flags: list
+    rationale: str | None
+    generated_at: datetime
+    expires_at: datetime | None
+
+
+class ContradictionOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    decision_id: int
+    agent_code_a: str
+    agent_code_b: str
+    signal_a: str
+    signal_b: str
+    severity: float
+    description: str
+
+
+class DecisionOut(BaseModel):
+    id: int
+    asset_symbol: str
+    ts: datetime
+    decision_state: str
+    consensus_score: float
+    contradiction_score: float
+    reasoning_summary: str
+    blocked_reason: str | None
+    critical_agent_failure: bool
+
+
+class DecisionDetailOut(DecisionOut):
+    agent_inputs: dict
+    contradictions: list[ContradictionOut]
+
+
+class RestoreAgentRequest(BaseModel):
+    confirm: bool = True

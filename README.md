@@ -4,7 +4,7 @@
 **paper trading only** — no real orders are ever sent. See the full engineering
 specification in [`docs/blueprint/`](docs/blueprint/00-overview.md).
 
-## Status: Phase 7 (Advanced Analytics, Alerts, Optimization) + post-Phase-7 security hardening + Supervisor 24/7 + Market Data Engine + Scanner + Pattern/Strategy/Opportunity confidence & evidence + Risk Engine/Portfolio Intelligence hardening (Risk Center, Risk Heatmap, Strategy Health, configurable Safety Belts) + News Intelligence Center (sentiment, macro calendar, event risk, source consensus) + Strategy Lab (walk-forward optimization, Monte Carlo, stress testing, robustness/quality scoring, async backtest job system) + Autonomous Paper Trading (TradingMode gate, Portfolio Manager allocation cap, trailing stops, HOLD/REDUCE/CLOSE position risk policy, anti-martingale loss-streak protection, idempotency keys, event sourcing, reconciliation engine, RBAC, manual trading controls, Autonomous Trading Center dashboard)
+## Status: Phase 7 (Advanced Analytics, Alerts, Optimization) + post-Phase-7 security hardening + Supervisor 24/7 + Market Data Engine + Scanner + Pattern/Strategy/Opportunity confidence & evidence + Risk Engine/Portfolio Intelligence hardening (Risk Center, Risk Heatmap, Strategy Health, configurable Safety Belts) + News Intelligence Center (sentiment, macro calendar, event risk, source consensus) + Strategy Lab (walk-forward optimization, Monte Carlo, stress testing, robustness/quality scoring, async backtest job system) + Autonomous Paper Trading (TradingMode gate, Portfolio Manager allocation cap, trailing stops, HOLD/REDUCE/CLOSE position risk policy, anti-martingale loss-streak protection, idempotency keys, event sourcing, reconciliation engine, RBAC, manual trading controls, Autonomous Trading Center dashboard) + Multi-Agent Quant Intelligence (18 named specialist agents, Consensus/Contradiction/Chief Decision Engine, reliability/calibration/quarantine, AI Command Center dashboard)
 
 Per [`docs/blueprint/12-roadmap.md`](docs/blueprint/12-roadmap.md):
 
@@ -313,6 +313,37 @@ feed, close-position buttons). See `docs/blueprint/12-roadmap.md`'s
 [`docs/autonomous-trading.md`](docs/autonomous-trading.md) for the as-built
 reference.
 
+**Multi-Agent Quant Intelligence.** 18 named specialist agents
+(`packages/agents/specialists/`) never execute anything — each produces a
+typed `AgentMessage` (signal/confidence/evidence/risk_flags/expiration),
+aggregated by a Consensus Engine (confidence × reliability × recency
+weighted, never a plain vote — one agent alone can't reach a `*_BIAS`
+state) and a Contradiction Engine into a Chief Decision Engine
+(`DECISION_STATES`: strong_long_bias/long_bias/neutral/short_bias/
+strong_short_bias/no_trade/blocked, with a fully explainable
+`reasoning_summary` + per-agent trace). 10 of the 18 agents wrap
+deterministic modules that already existed from Phases 2-8 (indicators,
+pattern/anomaly detection, regime classification, Momentum/Mean Reversion
+strategies, News Intelligence, data quality, strategy health) rather than
+reimplementing them. Reliability/calibration tracking
+(`packages/agents/reliability.py`) settles each directional call against a
+real forward candle, penalizes overconfidence, and auto-quarantines an
+agent below threshold — restoration is always an explicit admin action,
+never automatic, same precedent as strategy quarantine. The Chief Decision
+Engine is wired into the worker cycle as an **additional** pre-filter,
+never a replacement for the sovereign Risk Engine: a critical agent
+(Data Quality/Risk Guardian/Emergency Guardian) going `UNAVAILABLE`, or an
+active emergency condition, forces `BLOCKED` regardless of how bullish
+every other agent is — and a favorable Decision never bypasses a Risk
+Engine rejection. A structural AST proof (mirroring the existing
+`open_position()` gate proof) confirms no agent module can reach
+`packages/execution` at all. Live-verified against real Postgres (18
+agents/messages/health rows persisted per cycle) and a real browser
+click-through of the new "AI Command Center" panel. See
+`docs/blueprint/12-roadmap.md`'s "PROMPT 9" section for the full list and
+[`docs/multi-agent-architecture.md`](docs/multi-agent-architecture.md) for
+the as-built reference.
+
 ## Architecture at a glance
 
 ```text
@@ -370,6 +401,10 @@ packages/
   llm/         Anthropic API client + News Intelligence/Learning/Research
                interpretation — never imported by packages/execution (structural
                "LLM ≠ Trading Engine")
+  agents/      18 named specialist agents (protocol.py's AgentMessage), a
+               Consensus/Contradiction/Chief Decision Engine, and a
+               reliability/quarantine engine — never imports
+               packages/execution, structurally proven (test_agent_sandbox.py)
 infra/
   docker/      docker-compose + Dockerfiles
   migrations/  Alembic
@@ -465,7 +500,7 @@ cd apps/dashboard && npm install && npm run dev
 unused imports, undefined names, mutable-default footguns — not a style
 rewrite; see `[tool.ruff]` in `pyproject.toml`), `mypy packages apps scripts`
 (type-checked with the `pydantic.mypy` plugin so FastAPI response models
-type-check correctly), then the full pytest suite (659 tests) against a real
+type-check correctly), then the full pytest suite (743 tests) against a real
 `postgres:16-alpine` service container, migrated from scratch via `alembic
 upgrade head`; separately, the dashboard's `eslint` + `next build`; and
 separately again, a plain `docker build` of all four

@@ -26,13 +26,20 @@ from packages.risk.engine import SignalForRisk, evaluate_signal
 from packages.shared.models import Asset, MacroEvent, NewsEvent, NewsImpact, Signal, StrategyRow, SystemState
 
 STARTING_EQUITY = 10_000.0
-NOW = datetime.now(timezone.utc)
 LIMITS = load_risk_limits()
 
 
-def _state(**overrides) -> PortfolioState:
+def _now() -> datetime:
+    # Computed fresh on every call, never once at module import time -- a
+    # module-level constant here would drift stale (relative to
+    # config/risk_limits.yaml's max_staleness_seconds=120) on a slow full-
+    # suite run, since this test isn't necessarily the first to execute.
+    return datetime.now(timezone.utc)
+
+
+def _state(now: datetime, **overrides) -> PortfolioState:
     base = dict(
-        ts=NOW, cash=STARTING_EQUITY, equity=STARTING_EQUITY, exposure_pct=0.0,
+        ts=now, cash=STARTING_EQUITY, equity=STARTING_EQUITY, exposure_pct=0.0,
         daily_pnl=0.0, daily_loss_pct=0.0, weekly_pnl=0.0, weekly_loss_pct=0.0,
         monthly_pnl=0.0, monthly_loss_pct=0.0, drawdown_pct=0.0, unrealized_pnl=0.0, open_positions=[],
     )
@@ -40,14 +47,14 @@ def _state(**overrides) -> PortfolioState:
     return PortfolioState(**base)
 
 
-def _signal(db_session, asset) -> SignalForRisk:
+def _signal(db_session, asset, now: datetime) -> SignalForRisk:
     strategy = db_session.query(StrategyRow).filter(StrategyRow.code == "news_simulation_strategy").first()
     if strategy is None:
         strategy = StrategyRow(code="news_simulation_strategy", name="News Simulation", family="trend", version="1.0")
         db_session.add(strategy)
         db_session.commit()
     signal_row = Signal(
-        strategy_id=strategy.id, asset_id=asset.id, ts=NOW, direction="long",
+        strategy_id=strategy.id, asset_id=asset.id, ts=now, direction="long",
         entry_price=100.0, stop_price=95.0, target_price=115.0, status="scored",
     )
     db_session.add(signal_row)
@@ -55,11 +62,12 @@ def _signal(db_session, asset) -> SignalForRisk:
     return SignalForRisk(
         signal_id=signal_row.id, asset_id=asset.id, strategy_id=strategy.id, direction="long",
         entry_price=100.0, stop_price=95.0, target_price=115.0, risk_reward=3.0, confidence=1.0,
-        volatility_factor=1.0, data_quality="high", data_ts=NOW, tier="high_quality", asset_class=asset.asset_class,
+        volatility_factor=1.0, data_quality="high", data_ts=now, tier="high_quality", asset_class=asset.asset_class,
     )
 
 
 def test_full_news_escalation_simulation(db_session):
+    now = _now()
     trading_on = SystemState(id=True, trading_enabled=True)
     asset = Asset(symbol="NEWSSIMASSET", asset_class="crypto", is_active=True)
     db_session.add(asset)
@@ -67,12 +75,12 @@ def test_full_news_escalation_simulation(db_session):
 
     # --- Step 1: normal news, no macro events -> NORMAL event risk, full size.
     db_session.add(NewsEvent(
-        source="Reuters", published_at=NOW - timedelta(minutes=30), headline="Routine market commentary",
+        source="Reuters", published_at=now - timedelta(minutes=30), headline="Routine market commentary",
         category="other", importance="low", sentiment="neutral",
     ))
     db_session.commit()
 
-    baseline = evaluate_signal(db_session, _signal(db_session, asset), _state(), trading_on, LIMITS)
+    baseline = evaluate_signal(db_session, _signal(db_session, asset, now), _state(now), trading_on, LIMITS)
     assert baseline.approved
     assert baseline.safety_belt_level  # sanity: a real belt was computed
     baseline_quantity = baseline.approved_quantity
@@ -83,12 +91,12 @@ def test_full_news_escalation_simulation(db_session):
     # multiplier, never blocked outright.
     db_session.add(MacroEvent(
         event="Simulated CPI Release", country="US", currency="USD",
-        scheduled_at=NOW + timedelta(minutes=10), importance="high",
+        scheduled_at=now + timedelta(minutes=10), importance="high",
         forecast=3.0, previous=2.9, status="scheduled",
     ))
     db_session.commit()
 
-    reduced = evaluate_signal(db_session, _signal(db_session, asset), _state(), trading_on, LIMITS)
+    reduced = evaluate_signal(db_session, _signal(db_session, asset, now), _state(now), trading_on, LIMITS)
     assert reduced.approved  # HIGH reduces, does not block
     expected_multiplier = LIMITS.news_risk_multipliers.high
     assert reduced.approved_quantity == pytest.approx(baseline_quantity * expected_multiplier)
@@ -100,7 +108,7 @@ def test_full_news_escalation_simulation(db_session):
     # confidence paths may).
     for _ in range(4):
         event = NewsEvent(
-            source="Reuters", published_at=NOW - timedelta(hours=20), headline="Baseline bullish coverage",
+            source="Reuters", published_at=now - timedelta(hours=20), headline="Baseline bullish coverage",
             category="other", sentiment="bullish",
         )
         db_session.add(event)
@@ -108,7 +116,7 @@ def test_full_news_escalation_simulation(db_session):
         db_session.add(NewsImpact(news_event_id=event.id, asset_id=asset.id, impact="medium", direction="bullish", confidence=0.6, horizon_hours=12, rationale="t"))
     for _ in range(3):
         event = NewsEvent(
-            source="Bloomberg", published_at=NOW - timedelta(minutes=30), headline="Recent bearish turn",
+            source="Bloomberg", published_at=now - timedelta(minutes=30), headline="Recent bearish turn",
             category="other", sentiment="bearish",
         )
         db_session.add(event)
@@ -122,7 +130,7 @@ def test_full_news_escalation_simulation(db_session):
     # Sizing is still governed only by the belt/health/news-risk multipliers
     # actually wired into engine.py -- an ordinary sentiment shift, on its
     # own, changes no size (§22: "Não transformar automaticamente em trade").
-    still_reduced_only_by_news_risk = evaluate_signal(db_session, _signal(db_session, asset), _state(), trading_on, LIMITS)
+    still_reduced_only_by_news_risk = evaluate_signal(db_session, _signal(db_session, asset, now), _state(now), trading_on, LIMITS)
     assert still_reduced_only_by_news_risk.approved_quantity == pytest.approx(reduced.approved_quantity)
 
     # --- Step 4: Opportunity confidence reacts to a technical/news conflict
@@ -133,7 +141,7 @@ def test_full_news_escalation_simulation(db_session):
     price = 100.0
     for i in range(40):
         price += 0.5
-        candles.append(Candle(ts=NOW - timedelta(minutes=40 - i), open=price - 0.1, high=price + 0.2, low=price - 0.2, close=price, volume=100, data_quality="high"))
+        candles.append(Candle(ts=now - timedelta(minutes=40 - i), open=price - 0.1, high=price + 0.2, low=price - 0.2, close=price, volume=100, data_quality="high"))
     ctx = MarketContext(asset_id=asset.id, symbol=asset.symbol, timeframe="1m", candles=candles, indicators=compute_indicators(candles), regime=classify_regime(candles))
 
     no_news_confidence, _ = compute_opportunity_confidence(ctx, [], "long", 0.5, 0.5)
@@ -151,7 +159,7 @@ def test_full_news_escalation_simulation(db_session):
     macro_event.importance = "critical"
     db_session.commit()
 
-    blocked = evaluate_signal(db_session, _signal(db_session, asset), _state(), trading_on, LIMITS)
+    blocked = evaluate_signal(db_session, _signal(db_session, asset, now), _state(now), trading_on, LIMITS)
     assert not blocked.approved
     assert blocked.reason == "news_risk_critical"
     assert blocked.approved_quantity is None

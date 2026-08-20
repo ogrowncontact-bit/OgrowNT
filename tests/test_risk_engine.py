@@ -4,12 +4,18 @@ from packages.portfolio.state import PortfolioState
 from packages.risk.engine import SignalForRisk, evaluate_signal
 from packages.shared.models import Asset, Position, Signal, StrategyPerformance, StrategyRow, SystemState
 
-NOW = datetime.now(timezone.utc)
+
+def _now() -> datetime:
+    # Computed fresh on every call, never once at module import time -- a
+    # module-level constant here would drift stale (relative to
+    # config/risk_limits.yaml's max_staleness_seconds=120) on a slow full-
+    # suite run, since these tests aren't necessarily the first to execute.
+    return datetime.now(timezone.utc)
 
 
 def _portfolio_state(**overrides) -> PortfolioState:
     base = dict(
-        ts=NOW, cash=10000, equity=10000, exposure_pct=0.0, daily_pnl=0.0,
+        ts=_now(), cash=10000, equity=10000, exposure_pct=0.0, daily_pnl=0.0,
         daily_loss_pct=0.0, weekly_pnl=0.0, weekly_loss_pct=0.0, monthly_pnl=0.0, monthly_loss_pct=0.0,
         drawdown_pct=0.0, unrealized_pnl=0.0, open_positions=[],
     )
@@ -24,8 +30,9 @@ def _signal_for_risk(db_session, asset, **overrides) -> SignalForRisk:
         db_session.add(strategy)
         db_session.commit()
 
+    now = _now()
     signal_row = Signal(
-        strategy_id=strategy.id, asset_id=asset.id, ts=NOW, direction="long",
+        strategy_id=strategy.id, asset_id=asset.id, ts=now, direction="long",
         entry_price=100.0, stop_price=95.0, target_price=115.0, status="scored",
     )
     db_session.add(signal_row)
@@ -34,7 +41,7 @@ def _signal_for_risk(db_session, asset, **overrides) -> SignalForRisk:
     base = dict(
         signal_id=signal_row.id, asset_id=asset.id, strategy_id=strategy.id, direction="long", entry_price=100.0,
         stop_price=95.0, target_price=115.0, risk_reward=3.0, confidence=0.9, volatility_factor=1.0,
-        data_quality="high", data_ts=NOW, tier="high_quality", asset_class=asset.asset_class,
+        data_quality="high", data_ts=now, tier="high_quality", asset_class=asset.asset_class,
     )
     base.update(overrides)
     return SignalForRisk(**base)
@@ -74,7 +81,7 @@ def test_poor_risk_reward_is_rejected(db_session):
 
 def test_stale_data_is_rejected(db_session):
     asset = _asset(db_session, "RISKSTALE")
-    sfr = _signal_for_risk(db_session, asset, data_ts=NOW - timedelta(seconds=999))
+    sfr = _signal_for_risk(db_session, asset, data_ts=_now() - timedelta(seconds=999))
     verdict = evaluate_signal(db_session, sfr, _portfolio_state(), SystemState(id=True, trading_enabled=True))
     assert not verdict.approved
     assert verdict.reason == "data_unavailable"
@@ -257,7 +264,7 @@ def test_loss_streak_reduces_size_without_blocking(db_session):
     baseline = evaluate_signal(db_session, baseline_sfr, _portfolio_state(), SystemState(id=True, trading_enabled=True))
     assert baseline.approved and baseline.approved_quantity is not None
 
-    now = NOW
+    now = _now()
     for i in range(5):
         position = Position(
             asset_id=asset.id, strategy_id=baseline_sfr.strategy_id, direction="long", entry_price=100.0,

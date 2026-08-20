@@ -1459,11 +1459,165 @@ Divergências deliberadas, documentadas (não silenciosas):
 7. `docs/autonomous-trading.md` na raiz de `docs/`, mesma convenção
    estabelecida desde o "PROMPT 6".
 
+## "PROMPT 9" — Multi-Agent Quant Intelligence Architecture (pós-Fase 7) — **status: implementada e validada nesta sessão**
+
+O "PROMPT 9" pede 18 agentes especializados nomeados (Chief Quant, Technical
+Analysis, Pattern Hunter, Market Regime, Momentum, Mean Reversion, Macro,
+News Intelligence, Sentiment, Quant Research, Portfolio Intelligence, Risk
+Guardian, Execution Intelligence, Learning, Anomaly Detection, Data Quality,
+Strategy Health, Emergency Guardian) que nunca executam nada directamente —
+só produzem `AgentMessage`s tipados (signal/confidence/evidence/risk_flags/
+expiration), agregados por um Consensus Engine + Contradiction Engine num
+Chief Decision Engine (`DECISION_STATES`: STRONG_LONG_BIAS/LONG_BIAS/
+NEUTRAL/SHORT_BIAS/STRONG_SHORT_BIAS/NO_TRADE/BLOCKED, com
+`reasoning_summary`/`agent_inputs` explicáveis), com reliability/calibration
+tracking, quarentena automática, e uma sandbox estrutural. Mapeando os 86
+§§ contra o código já existente das Fases 2-8: **10 dos 18 agentes já
+tinham uma implementação determinística real por baixo** (indicadores,
+`patterns.detect_all`/`detect_anomaly`, `regime.classify_regime_with_news`,
+as estratégias Momentum/Mean Reversion, `packages/quant/news/*`,
+`packages/data/quality.py`, `packages/risk/strategy_health.py`) — este
+prompt não os reconstrói, embrulha-os num protocolo comum e adiciona a
+camada de agregação/decisão/confiabilidade que genuinamente não existia.
+
+- [x] **`packages/agents/` — protocolo + 18 especialistas** (§1-36) —
+      `AgentMessage`/`AgentSignal`/`AgentStatus` (`protocol.py`,
+      `__post_init__` recusa confiança não-zero num status não-OK — "no
+      hallucinated data" estrutural, não por convenção); `AgentContext`
+      partilhado (`context.py`) construído uma vez por (asset, ciclo).
+      18 módulos em `specialists/`, cada um `analyze(ctx) -> AgentMessage`,
+      registados em `SPECIALIST_REGISTRY` (`directional: bool` — 7 votam
+      direcção, 11 são consultivos/guardrail e nunca votam: Sentiment e
+      Quant Research são deliberadamente não-direccionais, mesmo princípio
+      do "PROMPT 6" §11 "SENTIMENT NÃO É DIREÇÃO" — um `LearnedRule`
+      validado não tem uma direcção máquina-legível na sua `condition`
+      livre, adivinhá-la seria alucinar dados)
+- [x] **Sandbox estrutural + tabela de permissões** (§11-14, §60-63) —
+      processo monolítico sem sandbox real ao nível do SO, então "sandbox"
+      aqui é honestamente dois testes AST reais em cada corrida da suite
+      (`tests/test_agent_sandbox.py`, mesma técnica de
+      `tests/test_critical_safety_battery.py`): nenhum módulo em
+      `packages/agents/` importa `packages.execution` nem chama
+      `open_position`/`close_position`/`reduce_position`; cada especialista
+      fica dentro da sua linha declarada em `permissions.py`
+- [x] **Consensus Engine** (§41-42) — "NÃO É VOTO MAJORITÁRIO": cada agente
+      direccional pesado por confiança própria × fiabilidade (0.5 neutro
+      sem histórico) × recência (mensagem expirada pesa menos). Um único
+      agente sozinho nunca alcança um `*_BIAS` — `meaningful_votes` (pesos
+      > 0) tem de ser ≥ 2, distinto de `voting_agents` (qualquer resposta
+      OK, incluindo um NEUTRAL honesto a 0 de confiança) que só serve de
+      transparência no dashboard/reasoning
+- [x] **Contradiction Engine** (§43) — conflito par-a-par entre agentes
+      direccionais em direcções opostas, severidade = média das duas
+      confianças × 100; `contradiction_score` é o pior conflito do ciclo
+      (max, não média — um conflito forte é preocupante mesmo que o resto
+      concorde)
+- [x] **Chief Decision Engine** (§40-46) — função pura
+      `decide(messages, reliability_scores) -> Decision`. BLOCKED reservado
+      para dois motivos estruturais: um `CRITICAL_AGENT_CODES`
+      (`data_quality`/`risk_guardian`/`emergency_guardian`) está
+      UNAVAILABLE este ciclo (§65 "NO NEW TRADES"), ou o Emergency Guardian
+      reporta `risk_flags` com `"emergency"`. Contradição alta é NO_TRADE
+      (incerteza, não falha). Esta engine é um filtro **adicional** antes
+      do Risk Engine soberano (`apps/worker/risk_execution.py`) — nunca o
+      substitui nem o contorna, mesmo princípio de "defense in depth" do
+      "PROMPT 8" §75
+- [x] **Reliability/calibration/quarentena** (§5-6, §55-59) — mesma
+      disciplina DET-only de `packages/quant/learning/strategy_stats.py` +
+      `quarantine.py`: `AgentPrediction` só gravado para uma chamada
+      direccional real; `settle_predictions` só resolve contra um candle
+      real (`get_close_at_or_after`), nunca um preço adivinhado;
+      `reliability_score` penaliza `overconfidence_gap` (confiança média
+      em chamadas erradas acima do que a accuracy justificaria) — nunca
+      recompensa; quarentena automática abaixo de 35.0 com amostra
+      suficiente (mesma magnitude do threshold de estratégias),
+      restauração sempre uma acção admin explícita, nunca automática
+- [x] **DB — migração `0015`** — 7 tabelas novas (`agents`,
+      `agent_messages`, `agent_predictions`, `agent_reliability`,
+      `agent_health`, `decisions`, `contradictions`) + `proposed_by_agent`
+      em `learned_rules`; upgrade→downgrade→upgrade verificado
+- [x] **Wiring no worker** (§14, §37-39, §68) — `apps/worker/strategy_runner.py`
+      constrói um `AgentContext` e chama `run_agent_cycle` **uma vez por
+      (asset, ciclo)**, não por sinal/estratégia (custo controlado);
+      `AgentOrchestrator` (`packages/agents/orchestrator.py`) corre os 11
+      especialistas puros (sem `ctx.db`) em paralelo via
+      `ThreadPoolExecutor` com timeout de 5s por agente, e os 7 que tocam
+      `ctx.db` sequencialmente na mesma sessão/transacção — `Session` do
+      SQLAlchemy não é segura para uso concorrente entre threads, correr
+      esses 7 em paralelo corromperia o estado da ligação partilhada
+      (mesma classe de problema documentada no `db_session` fixture de
+      `tests/conftest.py`). Uma excepção de qualquer especialista nunca
+      derruba o ciclo — marcado UNAVAILABLE, nunca propagado.
+      `apps/worker/risk_execution.py::maybe_execute` consulta o `Decision`
+      como filtro adicional antes do Risk Engine; `decision=None` (ex.:
+      chamadas directas da bateria de segurança) é tratado como "sem
+      opinião", nunca aprovação implícita nem bloqueio implícito
+- [x] **API** — `GET /api/agents` (+ `/{code}`, `/{code}/messages`),
+      `POST /api/agents/{code}/restore` (admin-only, RBAC), `GET /api/decisions`
+      (+ `/{id}` com trace completo), `GET /api/contradictions`
+- [x] **Dashboard "AI Command Center"** — roster de 18 agentes
+      (status/tipo/fiabilidade/última análise + botão Restore quando
+      quarentenado), Market Consensus por activo, tabela de Decisions
+      recentes com linha expansível (`DecisionRow`, mesmo padrão de
+      `OpportunityRow`) mostrando o trace completo dos 18 agentes por
+      decisão, e Detected Conflicts
+- [x] **Testes** — 84 novos (743/743 no total): protocolo + sandbox
+      estrutural (33), comportamento de especialistas (8), Consensus +
+      Contradiction + Chief Decision incluindo bateria red-team de 10 itens
+      específicos desta camada (16), reliability/calibração/quarentena
+      (12), wiring no worker incluindo os dois lados de "defense in depth"
+      — Decision favorável nunca contorna uma rejeição do Risk Engine, e
+      Decision=None nunca é aprovação implícita (7), 8 simulações de
+      cenário A-H (unanimidade bullish/bearish, split neutro, contradição
+      forte, falha de agente crítico, emergência, data quality
+      indisponível, recuperação de quarentena)
+- [x] **verificado ao vivo** contra Postgres real: `run_agent_cycle`
+      corrido directamente contra dados reais (18 `agents`, `agent_messages`,
+      `agent_health` por ciclo persistidos correctamente); API real
+      (`GET /api/agents`, `/api/decisions`, `/api/decisions/{id}`,
+      `/api/contradictions`) testada com token admin real; dashboard real
+      (fetch autenticado via cookie) mostrando "AI Command Center (18
+      agents)", Market Consensus com o `Decision` real mais recente,
+      `reasoning_summary` real ("BLOCKED: critical agent 'data_quality' is
+      unavailable..."), sem regressão nas secções existentes. `ruff`/`mypy`
+      (`packages apps scripts`)/suite completa limpos
+
+Divergências deliberadas, documentadas (não silenciosas):
+
+1. `DecisionTrace`/`AgentVersion` como tabelas separadas (pedidas
+   implicitamente pelo prompt) — dobradas em `Decision.agent_inputs`
+   (snapshot completo de todas as `AgentMessage`s do ciclo) e `Agent.version`
+   respectivamente. Uma tabela `DecisionTrace` paralela a `Decision`
+   duplicaria a mesma informação sem ganhar nada.
+2. `LearningProposal` como tabela nova — não criada; `LearnedRule`
+   (Fase 5) já é exactamente esse conceito, só ganhou
+   `proposed_by_agent` nullable para futuras propostas geradas por um
+   agente com identidade própria.
+3. "Sandbox"/"tool permissions" nunca são um mecanismo de runtime (este
+   processo não tem capacidade de isolamento ao nível do SO) — são dois
+   testes AST estruturais, honestos sobre o que realmente garantem,
+   documentados como tal em `packages/agents/permissions.py`.
+4. Um `ThreadPoolExecutor` literal sobre os 18 agentes (leitura literal do
+   prompt) não é seguro com uma `Session` SQLAlchemy partilhada — paralelo
+   real só para os 11 agentes que nunca tocam `ctx.db`; os 7 restantes
+   correm sequencialmente na mesma transacção, ainda isolados por
+   try/except individual.
+5. Sem modo DEBATE opcional (mencionado no prompt como "opcional") — os 18
+   agentes já produzem evidência suficiente para o `reasoning_summary` e o
+   trace completo por decisão; um segundo round de "debate" entre agentes
+   exigiria uma segunda chamada LLM por ciclo sem um ganho claro sobre o
+   trace determinístico já explicável, e fica fora do âmbito desta fase.
+6. Um `Decision` por (asset, ciclo), não por (asset, estratégia, sinal) —
+   mantém o custo do pass extra de 18 agentes proporcional ao scan, não ao
+   número de sinais gerados; `strategy_row=None` neste ponto é honesto
+   (Quant Research/Strategy Health reportam "no strategy in context" em
+   vez de adivinhar qual estratégia a decisão representa).
+
 ## Evolução futura (fora de âmbito até validação completa)
 
 Live brokers, exchanges reais (crypto/forex/ações), ML avançado, deep learning,
-reinforcement learning, dados alternativos, order book profundo, sentiment,
-opções, arbitragem, multi-agent research — só depois de:
+reinforcement learning, dados alternativos, order book profundo, opções,
+arbitragem — só depois de:
 
 > provar, com dados out-of-sample e paper trading (mínimo 30–90 dias), que existe
 > vantagem estatística depois de custos e slippage. Só então uma pequena quantidade

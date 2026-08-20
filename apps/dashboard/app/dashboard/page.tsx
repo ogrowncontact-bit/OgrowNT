@@ -1,11 +1,14 @@
 import { cookies } from "next/headers";
 import {
   getActivityFeed,
+  getAgents,
   getAlerts,
   getAnalyticsOverview,
   getAssets,
   getAutonomousStatus,
   getBacktests,
+  getContradictions,
+  getDecisions,
   getHealth,
   getLearnedRules,
   getMacroEvents,
@@ -40,6 +43,7 @@ import { RunBacktestForm } from "@/components/RunBacktestForm";
 import { OpportunityRow } from "@/components/OpportunityRow";
 import { EquitySparkline } from "@/components/EquitySparkline";
 import { NewsIntelligenceCenter } from "@/components/NewsIntelligenceCenter";
+import { AICommandCenter } from "@/components/AICommandCenter";
 import { StrategyLab } from "@/components/StrategyLab";
 import { AutonomousStatusBadge } from "@/components/AutonomousStatusBadge";
 import { PauseResumeButton } from "@/components/PauseResumeButton";
@@ -77,7 +81,7 @@ export default async function DashboardPage() {
   const cookieStore = await cookies();
   const token = cookieStore.get("ogrownt_token")?.value ?? "";
 
-  const [health, status, portfolio, assets, positions, opportunities, regimes, trades, news, strategyLearning, tradeJournal, learnedRules, alerts, strategies, marketOverview, marketEvents, portfolioExposure, riskState, macroEvents, newsRisk, autonomousStatus, activityFeed, tradingPerformance] =
+  const [health, status, portfolio, assets, positions, opportunities, regimes, trades, news, strategyLearning, tradeJournal, learnedRules, alerts, strategies, marketOverview, marketEvents, portfolioExposure, riskState, macroEvents, newsRisk, autonomousStatus, activityFeed, tradingPerformance, agents, decisions, contradictions] =
     await Promise.all([
       getHealth(),
       getSystemStatus(token),
@@ -102,6 +106,9 @@ export default async function DashboardPage() {
       getAutonomousStatus(token),
       getActivityFeed(token, 30),
       getTradingPerformance(token),
+      getAgents(token),
+      getDecisions(token, 20),
+      getContradictions(token, 20),
     ]);
 
   const [backtests, promotionChecks, analytics] = await Promise.all([
@@ -434,6 +441,8 @@ export default async function DashboardPage() {
           )}
         </div>
       </section>
+
+      <AICommandCenter agents={agents ?? []} decisions={decisions ?? []} contradictions={contradictions ?? []} />
 
       <NewsIntelligenceCenter
         news={news ?? []}

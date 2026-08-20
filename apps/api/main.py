@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from apps.api.routers import (
+    agents,
     alerts,
     analytics,
     assets,
@@ -73,6 +74,9 @@ app.include_router(backtests.router)
 app.include_router(alerts.router)
 app.include_router(analytics.router)
 app.include_router(trading_control.router)
+app.include_router(agents.router)
+app.include_router(agents.decisions_router)
+app.include_router(agents.contradictions_router)
 
 
 @app.get("/")

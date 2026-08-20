@@ -18,6 +18,10 @@ that uses them:
     system_health, manual_actions, plus TradingMode/pause/idempotency/
     trailing-stop/role columns added to system_state/positions/orders/
     admin_users
+  Post-Phase-7 ("Prompt 9" multi-agent quant intelligence): agents,
+    agent_messages, agent_predictions, agent_reliability, agent_health,
+    decisions, contradictions, plus proposed_by_agent added to
+    learned_rules
 """
 from datetime import datetime, timezone
 
@@ -812,6 +816,13 @@ class LearnedRule(Base):
     status: Mapped[str] = mapped_column(String, default="candidate", nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     validated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # "PROMPT 9" §31 -- NULL for every rule proposed before the Quant
+    # Research Agent existed (packages/agents/specialists/quant_research.py
+    # only ever READS this table, it never writes a LearnedRule itself;
+    # packages/quant/learning/research.py's run_research_cycle is still the
+    # only writer). New rows going forward are tagged so the dashboard can
+    # show "proposed by" without guessing on old data.
+    proposed_by_agent: Mapped[str | None] = mapped_column(String)
 
 
 class MarketMemory(Base):
@@ -1109,3 +1120,174 @@ class ManualAction(Base):
     reason: Mapped[str | None] = mapped_column(Text)
     before: Mapped[dict] = mapped_column(JSON, default=dict)
     after: Mapped[dict] = mapped_column(JSON, default=dict)
+
+
+# -- "PROMPT 9" Multi-Agent Quant Intelligence Architecture ----------------
+
+
+class Agent(Base):
+    """One row per specialist agent. `packages/agents/specialists/__init__.py`'s
+    `SPECIALIST_REGISTRY` is the code-side source of truth for which 18
+    exist and what each one does; this table is only the runtime state
+    (quarantine/enabled) layered on top, upserted from that registry at
+    worker startup (`packages/agents/orchestrator.py`) — never the other
+    way around.
+    """
+
+    __tablename__ = "agents"
+    __table_args__ = (CheckConstraint("status IN ('active','quarantined','disabled')", name="ck_agents_status"),)
+
+    code: Mapped[str] = mapped_column(String, primary_key=True)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    directional: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    version: Mapped[str] = mapped_column(String, default="1.0", nullable=False)
+    status: Mapped[str] = mapped_column(String, default="active", nullable=False)
+    quarantined_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    quarantine_reason: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
+
+
+class AgentMessageRow(Base):
+    """Persisted history of every `AgentMessage` (`packages/agents/protocol.py`)
+    a specialist produced. Distinct Python class name from the dataclass it
+    stores — the same "Row" suffix convention already used for
+    `packages/risk/engine.py`'s `RiskDecision`/`RiskDecisionRow` pairing.
+    """
+
+    __tablename__ = "agent_messages"
+    __table_args__ = (
+        CheckConstraint("status IN ('ok','unavailable','quarantined')", name="ck_agent_messages_status"),
+        CheckConstraint(
+            "signal IN ('strong_long','long','neutral','short','strong_short','no_read')",
+            name="ck_agent_messages_signal",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    agent_code: Mapped[str] = mapped_column(ForeignKey("agents.code"), nullable=False)
+    asset_id: Mapped[int | None] = mapped_column(ForeignKey("assets.id"))
+    decision_id: Mapped[int | None] = mapped_column(ForeignKey("decisions.id"))
+    status: Mapped[str] = mapped_column(String, nullable=False)
+    signal: Mapped[str] = mapped_column(String, nullable=False)
+    confidence: Mapped[float] = mapped_column(Float, nullable=False)
+    evidence: Mapped[dict] = mapped_column(JSON, default=dict)
+    risk_flags: Mapped[list] = mapped_column(JSON, default=list)
+    rationale: Mapped[str | None] = mapped_column(Text)
+    generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class AgentPrediction(Base):
+    """One row per directional call a `directional=True` agent makes,
+    later settled against real forward price movement
+    (`packages/agents/reliability.py::settle_predictions`) — the raw
+    material for calibration/overconfidence detection (Prompt 9 §5-6,
+    §55-59). Only ever written for a real long/short signal (status=ok,
+    signal not in {neutral, no_read}); a NEUTRAL/guardian read has no
+    directional claim to grade, so non-directional agents never appear
+    here.
+    """
+
+    __tablename__ = "agent_predictions"
+    __table_args__ = (CheckConstraint("outcome IN ('pending','correct','incorrect')", name="ck_agent_predictions_outcome"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    agent_code: Mapped[str] = mapped_column(ForeignKey("agents.code"), nullable=False)
+    agent_message_id: Mapped[int] = mapped_column(ForeignKey("agent_messages.id"), nullable=False)
+    asset_id: Mapped[int] = mapped_column(ForeignKey("assets.id"), nullable=False)
+    predicted_direction: Mapped[str] = mapped_column(String, nullable=False)
+    confidence: Mapped[float] = mapped_column(Float, nullable=False)
+    reference_price: Mapped[float] = mapped_column(Float, nullable=False)
+    predicted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    evaluate_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    outcome: Mapped[str] = mapped_column(String, default="pending", nullable=False)
+    outcome_price: Mapped[float | None] = mapped_column(Float)
+    evaluated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class AgentReliability(Base):
+    """Rolling calibration snapshot per agent — `packages/agents/reliability.py`'s
+    only writer, mirroring `packages/quant/learning/strategy_stats.py`'s
+    `StrategyPerformance` shape: one row per `(agent_code, as_of)`, never
+    updated in place, so history stays auditable the same way.
+    """
+
+    __tablename__ = "agent_reliability"
+
+    agent_code: Mapped[str] = mapped_column(ForeignKey("agents.code"), primary_key=True)
+    as_of: Mapped[datetime] = mapped_column(DateTime(timezone=True), primary_key=True, default=_utcnow)
+    sample_size: Mapped[int] = mapped_column(nullable=False)
+    correct_count: Mapped[int] = mapped_column(nullable=False)
+    accuracy: Mapped[float | None] = mapped_column(Float)
+    avg_confidence_when_correct: Mapped[float | None] = mapped_column(Float)
+    avg_confidence_when_incorrect: Mapped[float | None] = mapped_column(Float)
+    # avg_confidence_when_incorrect - accuracy; positive means the agent is
+    # systematically MORE confident on calls it gets wrong than its overall
+    # hit rate would justify -- the overconfidence detector Prompt 9 §5 asks for.
+    overconfidence_gap: Mapped[float | None] = mapped_column(Float)
+    reliability_score: Mapped[float | None] = mapped_column(Float)
+
+
+class AgentHealth(Base):
+    """One row per `(agent_code, cycle)` heartbeat —
+    `packages/shared/worker_health.py`'s `SystemHealth` precedent, applied
+    per-agent instead of per-process.
+    """
+
+    __tablename__ = "agent_health"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    agent_code: Mapped[str] = mapped_column(ForeignKey("agents.code"), nullable=False)
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    status: Mapped[str] = mapped_column(String, nullable=False)
+    latency_ms: Mapped[float | None] = mapped_column(Float)
+    error_message: Mapped[str | None] = mapped_column(Text)
+
+
+class Decision(Base):
+    """One row per Chief Decision Engine output — one per (asset, worker
+    cycle), Prompt 9 §40-46. `agent_inputs` is the full explainability
+    trace (Prompt 9's DecisionTrace concept, folded in here rather than a
+    parallel table — see docs/multi-agent-architecture.md's deliberate-
+    divergence section): every agent's `AgentMessage` as of this decision,
+    keyed by agent_code.
+    """
+
+    __tablename__ = "decisions"
+    __table_args__ = (
+        CheckConstraint(
+            "decision_state IN ('strong_long_bias','long_bias','neutral','short_bias',"
+            "'strong_short_bias','no_trade','blocked')",
+            name="ck_decisions_decision_state",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    asset_id: Mapped[int] = mapped_column(ForeignKey("assets.id"), nullable=False)
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    decision_state: Mapped[str] = mapped_column(String, nullable=False)
+    consensus_score: Mapped[float] = mapped_column(Float, nullable=False)
+    contradiction_score: Mapped[float] = mapped_column(Float, nullable=False)
+    reasoning_summary: Mapped[str] = mapped_column(Text, nullable=False)
+    agent_inputs: Mapped[dict] = mapped_column(JSON, default=dict)
+    blocked_reason: Mapped[str | None] = mapped_column(String)
+    critical_agent_failure: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
+
+class Contradiction(Base):
+    """One row per pairwise agent conflict the `ContradictionEngine`
+    flagged for this decision — `packages/agents/contradiction.py`'s only
+    writer.
+    """
+
+    __tablename__ = "contradictions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    decision_id: Mapped[int] = mapped_column(ForeignKey("decisions.id"), nullable=False)
+    agent_code_a: Mapped[str] = mapped_column(String, nullable=False)
+    agent_code_b: Mapped[str] = mapped_column(String, nullable=False)
+    signal_a: Mapped[str] = mapped_column(String, nullable=False)
+    signal_b: Mapped[str] = mapped_column(String, nullable=False)
+    severity: Mapped[float] = mapped_column(Float, nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False)

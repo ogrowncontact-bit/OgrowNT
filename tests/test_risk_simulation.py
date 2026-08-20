@@ -18,13 +18,20 @@ from packages.risk.safety_belt import EMERGENCY, KILL_SWITCH, NORMAL, evaluate_s
 from packages.shared.models import Asset, Signal, StrategyRow, SystemState
 
 STARTING_EQUITY = 10_000.0
-NOW = datetime.now(timezone.utc)
 LIMITS = load_risk_limits()  # the real config/risk_limits.yaml, not a hand-rolled stand-in
+
+
+def _now() -> datetime:
+    # Computed fresh on every call, never once at module import time -- a
+    # module-level constant here would drift stale (relative to
+    # config/risk_limits.yaml's max_staleness_seconds=120) on a slow full-
+    # suite run, since this test isn't necessarily the first to execute.
+    return datetime.now(timezone.utc)
 
 
 def _state(**overrides) -> PortfolioState:
     base = dict(
-        ts=NOW, cash=STARTING_EQUITY, equity=STARTING_EQUITY, exposure_pct=0.0,
+        ts=_now(), cash=STARTING_EQUITY, equity=STARTING_EQUITY, exposure_pct=0.0,
         daily_pnl=0.0, daily_loss_pct=0.0, weekly_pnl=0.0, weekly_loss_pct=0.0,
         monthly_pnl=0.0, monthly_loss_pct=0.0, drawdown_pct=0.0, unrealized_pnl=0.0, open_positions=[],
     )
@@ -38,8 +45,9 @@ def _signal(db_session, asset) -> SignalForRisk:
         strategy = StrategyRow(code="simulation_strategy", name="Simulation", family="trend", version="1.0")
         db_session.add(strategy)
         db_session.commit()
+    now = _now()
     signal_row = Signal(
-        strategy_id=strategy.id, asset_id=asset.id, ts=NOW, direction="long",
+        strategy_id=strategy.id, asset_id=asset.id, ts=now, direction="long",
         entry_price=100.0, stop_price=95.0, target_price=115.0, status="scored",
     )
     db_session.add(signal_row)
@@ -47,7 +55,7 @@ def _signal(db_session, asset) -> SignalForRisk:
     return SignalForRisk(
         signal_id=signal_row.id, asset_id=asset.id, strategy_id=strategy.id, direction="long",
         entry_price=100.0, stop_price=95.0, target_price=115.0, risk_reward=3.0, confidence=1.0,
-        volatility_factor=1.0, data_quality="high", data_ts=NOW, tier="high_quality", asset_class=asset.asset_class,
+        volatility_factor=1.0, data_quality="high", data_ts=now, tier="high_quality", asset_class=asset.asset_class,
     )
 
 

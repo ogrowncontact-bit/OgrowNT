@@ -12,6 +12,7 @@ import logging
 
 from sqlalchemy.orm import Session
 
+from packages.agents import chief as chief_decision
 from packages.execution.adapters.base import ExecutionProvider
 from packages.execution.order_manager import open_position
 from packages.portfolio.manager import evaluate_allocation
@@ -58,9 +59,11 @@ def maybe_execute(
     signal: StrategySignal,
     signal_row: Signal,
     score: ScoreResult,
+    decision: chief_decision.Decision | None = None,
 ) -> str:
-    """Returns 'skipped_tier', 'risk_rejected', 'portfolio_rejected', or
-    'executed' for the caller's tally."""
+    """Returns 'skipped_tier', 'chief_blocked', 'chief_no_trade',
+    'risk_rejected', 'portfolio_rejected', or 'executed' for the caller's
+    tally."""
     if score.tier not in TIERS_ELIGIBLE_FOR_RISK_REVIEW:
         db.add(
             TradingEvent(
@@ -70,6 +73,31 @@ def maybe_execute(
         )
         db.commit()
         return "skipped_tier"
+
+    # "PROMPT 9" §14, §68 -- Chief Decision Engine gate: an ADDITIONAL
+    # pre-filter ahead of the sovereign Risk Engine below, never a
+    # replacement for it. A favorable Decision never approves a trade on
+    # its own -- evaluate_signal() still runs, unchanged, on every signal
+    # that reaches this point. `decision is None` (e.g. the Critical Safety
+    # Battery's direct maybe_execute() calls, which construct their own
+    # kwargs without running the multi-agent cycle) is treated as "no
+    # opinion", not as an implicit approval.
+    if decision is not None and decision.decision_state in (chief_decision.BLOCKED, chief_decision.NO_TRADE):
+        event_type = "risk_blocked" if decision.decision_state == chief_decision.BLOCKED else "no_trade"
+        db.add(
+            TradingEvent(
+                event_type=event_type, entity_type="signal", entity_id=signal_row.id,
+                payload={
+                    "layer": "chief_decision_engine", "decision_state": decision.decision_state,
+                    "reasoning": decision.reasoning_summary, "critical_agent_failure": decision.critical_agent_failure,
+                    "asset": asset.symbol, "strategy": strategy.code,
+                },
+            )
+        )
+        db.commit()
+        outcome = "chief_blocked" if decision.decision_state == chief_decision.BLOCKED else "chief_no_trade"
+        logger.info("%s %s CHIEF DECISION %s reason=%s", asset.symbol, strategy.code, outcome, decision.reasoning_summary)
+        return outcome
 
     system_state = _get_or_create_system_state(db)
     portfolio_state = compute_state(db)  # fresh each call: earlier signals this same cycle may have opened positions

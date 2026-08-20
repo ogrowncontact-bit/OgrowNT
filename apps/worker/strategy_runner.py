@@ -12,11 +12,15 @@ from typing import cast
 from sqlalchemy.orm import Session
 
 from apps.worker.risk_execution import maybe_execute
+from packages.agents.context import AgentContext
+from packages.agents.orchestrator import run_agent_cycle
 from packages.data.connectors.market.base import Candle, DataQuality
+from packages.data.quality import compute_quality_score
 from packages.execution.adapters.base import ExecutionProvider
 from packages.execution.adapters.paper import PaperExecutionProvider
 from packages.quant.indicators.core import MIN_CANDLES_REQUIRED, compute_indicators
 from packages.quant.learning.strategy_stats import MIN_TRADES_FOR_HEALTH_SCORE
+from packages.quant.news.context import build_asset_news_context
 from packages.quant.patterns.detector import PatternDetection, detect_all
 from packages.quant.regime.classifier import NewsSignal, classify_regime_with_news
 from packages.quant.scoring import build_scoring_inputs, compute_opportunity_confidence, compute_score
@@ -24,6 +28,7 @@ from packages.quant.strategies import ALL_STRATEGIES, MarketContext, Strategy
 from packages.shared.models import (
     OHLCV,
     Asset,
+    MacroEvent,
     MarketEvent,
     MarketMemory,
     MarketRegime,
@@ -45,6 +50,11 @@ NEWS_LOOKBACK_HOURS = 48  # widest possible horizon_hours we'll consider; filter
 # regime is too noisy to feed the score — same "don't manufacture a
 # confident number from a thin sample" rule as strategy health scoring.
 MIN_PATTERN_SAMPLE_FOR_HISTORICAL_EDGE = 5
+# "PROMPT 9" §37-39: the multi-agent cycle's own lookahead for the Macro
+# Agent's imminent-event window (packages/agents/specialists/macro.py's
+# IMMINENT_HOURS=24h) plus headroom, so the query below never has to be
+# widened just because that agent's own threshold changes.
+AGENT_MACRO_LOOKAHEAD_HOURS = 48
 
 
 def _load_recent_candles(db: Session, asset_id: int, timeframe: str, limit: int) -> list[Candle]:
@@ -175,6 +185,31 @@ def run_strategy_cycle(
         )
         evaluated += 1
 
+        # "PROMPT 9" §37-39, §68: one Chief Decision Engine verdict per
+        # (asset, cycle) -- not per strategy/signal, to keep the extra 18-
+        # agent read-only pass cheap relative to the strategy loop below.
+        # `strategy_row` is intentionally None here (asset-level, not
+        # strategy-level); the two agents that want one
+        # (quant_research/strategy_health) honestly report "no strategy in
+        # context" rather than guessing which strategy the decision is for.
+        agent_now = datetime.now(timezone.utc)
+        quality_report = compute_quality_score(
+            symbol=asset.symbol, latest_ts=candles[-1].ts, timeframe=TIMEFRAME, candle_count=len(candles),
+            expected_count=HISTORY_LIMIT, last_data_quality=candles[-1].data_quality, provider_connected=True,
+            now=agent_now,
+        )
+        macro_events = tuple(
+            db.query(MacroEvent)
+            .filter(MacroEvent.scheduled_at >= agent_now, MacroEvent.scheduled_at <= agent_now + timedelta(hours=AGENT_MACRO_LOOKAHEAD_HOURS))
+            .order_by(MacroEvent.scheduled_at.asc())
+            .all()
+        )
+        agent_ctx = AgentContext(
+            db=db, market=ctx, asset=asset, now=agent_now, strategy_row=None,
+            news_context=build_asset_news_context(db, asset.id), macro_events=macro_events, quality_report=quality_report,
+        )
+        decision, _decision_row = run_agent_cycle(db, agent_ctx)
+
         for strategy in strategies:
             strategy_row = strategy_rows.get(strategy.code)
             if strategy_row is None:
@@ -286,11 +321,11 @@ def run_strategy_cycle(
 
             outcome = maybe_execute(
                 db, provider, ctx=ctx, asset=asset, strategy=strategy, analysis=analysis,
-                signal=signal, signal_row=signal_row, score=score,
+                signal=signal, signal_row=signal_row, score=score, decision=decision,
             )
             if outcome == "executed":
                 executed += 1
-            elif outcome in ("risk_rejected", "portfolio_rejected"):
+            elif outcome in ("risk_rejected", "portfolio_rejected", "chief_blocked", "chief_no_trade"):
                 risk_rejected += 1
 
     db.commit()
