@@ -12,6 +12,7 @@ import { track } from "@/lib/analytics";
 import type { OpenResponseAiMeta } from "@/lib/openResponseAiMeta";
 import { ensureAiTelemetryRegistered } from "@/lib/aiTelemetry";
 import { getAiModelConfig } from "@/lib/aiConfig";
+import { getPublishedPersona } from "@/lib/promptTemplates";
 
 // Registers once per module instance — instrumentation.ts's startup hook runs
 // in a separate module realm from route handlers in Next.js's dev server, so
@@ -136,6 +137,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
   if (result.isComplete) {
     const { profileResult, dimensionScores, tensions, contradictions } = computeResult(config, result.state);
+    const persona = await getPublishedPersona(config.slug);
 
     // Profile AI only narrates the profile the deterministic matcher already
     // picked (§6) — collected tags come from this session's own open answers.
@@ -165,6 +167,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     // resolves to *something* structured, AI or not.
     const enrichment = await enrichProfileWithAI(
       {
+        assessmentSlug: config.slug,
+        assessmentVersion: config.version,
         primaryProfileName: profileResult.primary.name,
         secondaryProfileNames: profileResult.secondary.map((p) => p.name),
         dimensions: Object.entries(dimensionScores).map(([key, score]) => ({
@@ -177,7 +181,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         contradictions: contradictionInputs,
         openAnswerThemes: openAnswerTags,
       },
-      modelConfig
+      modelConfig,
+      persona
     );
 
     const aiSemanticNotes = {

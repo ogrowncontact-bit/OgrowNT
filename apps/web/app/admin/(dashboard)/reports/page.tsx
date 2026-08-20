@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { getReportStatusCounts, listReportsForAdmin } from "@/lib/admin/reportsReader";
 import { RetryReportButton } from "@/components/admin/RetryReportButton";
 
@@ -23,7 +24,12 @@ export default async function AdminReportsPage() {
 
   return (
     <div>
-      <h1 className="font-display mb-6 text-[24px] text-[var(--inner-ink)]">Reports</h1>
+      <div className="mb-6 flex items-center justify-between">
+        <h1 className="font-display text-[24px] text-[var(--inner-ink)]">Reports</h1>
+        <Link href="/admin/reports/preview" className="text-[13px] text-[var(--inner-accent)] underline underline-offset-2">
+          Preview a sample report →
+        </Link>
+      </div>
 
       <div className="mb-8 grid grid-cols-2 gap-3 sm:grid-cols-5">
         <div className={card}>

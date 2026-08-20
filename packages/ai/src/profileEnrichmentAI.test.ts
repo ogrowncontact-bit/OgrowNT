@@ -23,6 +23,23 @@ describe("enrichProfileWithAI fallback (no ANTHROPIC_API_KEY)", () => {
     expect(result.insights.length).toBeGreaterThan(0);
   });
 
+  it("accepts an optional persona without changing fallback behavior (AI disabled short-circuits before persona is ever used)", async () => {
+    const result = await enrichProfileWithAI(
+      { primaryProfileName: "The Independent Connector", secondaryProfileNames: [], dimensions, tensions: [], contradictions: [], openAnswerThemes: [] },
+      undefined,
+      {
+        assessmentSlug: "love",
+        name: "The Relationship Observer",
+        focus: "connection and independence",
+        prompt: "You notice the quiet negotiation between closeness and autonomy.",
+        tone: { warmth: 0.8, directness: 0.4, depth: 0.7, formality: 0.25 },
+        version: 2,
+      }
+    );
+    expect(result.aiGenerated).toBe(false);
+    expect(result.insights.length).toBeGreaterThan(0);
+  });
+
   it("surfaces the highest-scoring dimension as a strength insight", async () => {
     const result = await enrichProfileWithAI({
       primaryProfileName: "The Independent Connector",

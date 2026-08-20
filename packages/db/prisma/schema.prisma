@@ -474,14 +474,19 @@ model Report {
   assessmentSession   AssessmentSession @relation(fields: [assessmentSessionId], references: [id])
   orderId             String            @unique
   order               Order             @relation(fields: [orderId], references: [id])
+  /** @deprecated always hardcoded to 1 — superseded by assessmentVersion below. Kept (rather than dropped) so this migration stays additive-only; not read anywhere. */
   templateVersion     Int
+  /** The assessment content version (AssessmentConfig.version) this report was generated from — genuinely populated, unlike templateVersion above. Full reproducibility = this + reportEngineVersion + promptVersion + personaVersion + modelVersion. Default only backfills pre-migration rows; every write always sets a real value. */
+  assessmentVersion   Int               @default(1)
   status              ReportStatus      @default(ready)
-  /** null content is only valid alongside status=failed — see lib/commerce.ts's failure path. */
-  content             Json?             // assembled section-by-section report, source of truth
+  /** null content is only valid alongside status=failed — see lib/commerce.ts's failure path. Stores the full ReportDocument (packages/ai/src/reportDocument.ts) — the single shape both the web report page and the PDF renderer consume. */
+  content             Json?             // assembled ReportDocument, source of truth
   pdfObjectKey         String?
   language             String           @default("en")
   reportEngineVersion  Int?
   promptVersion        Int?
+  /** Which PromptTemplate.version (the published assessment persona at generation time) narrated this report — null for reports generated before the Prompt Orchestration System existed. */
+  personaVersion       Int?
   modelVersion         String?
   failureReason        String?
   generatedAt          DateTime         @default(now())
@@ -658,5 +663,55 @@ model AiSettings {
   updatedAt        DateTime  @updatedAt
   updatedByAdminId String?
 
+  @@schema("admin")
+}
+
+enum PromptTemplateStatus {
+  draft
+  testing
+  published
+  archived
+
+  @@schema("admin")
+}
+
+/**
+ * Layer 2 ("Assessment Persona") of the prompt orchestration system —
+ * docs/ARCHITECTURE.md's Prompt Engine. Deliberately keyed by
+ * `assessmentSlug` (a plain string, not a catalog.Assessment FK): prompts
+ * are an admin/AI concern, not assessment content, and this keeps
+ * packages/ai's PromptEngine itself free of any DB dependency — apps/web
+ * reads the published row and passes plain data in, same pattern as
+ * AiSettings/AIModelConfig. Never stores Layer 1 (the global INNER safety
+ * voice) — that stays a code constant nobody, including an admin, can edit
+ * from the UI, so a persona rewrite can never silently weaken a guardrail.
+ *
+ * Versioned like AssessmentVersion's draft -> publish flow: only ever one
+ * `published` row per assessmentSlug at a time (enforced in
+ * lib/promptTemplates.ts, not the DB, mirroring how assessment publishing
+ * already works) — editing never mutates a published row in place, it
+ * creates a new draft version instead.
+ */
+model PromptTemplate {
+  id               String               @id @default(cuid())
+  assessmentSlug   String
+  version          Int
+  status           PromptTemplateStatus @default(draft)
+  personaName      String
+  /** The perspective/focus description — e.g. "connection, trust, independence, vulnerability, emotional patterns". */
+  personaFocus     String
+  /** Layer 2 system-prompt text itself — the persona's voice instructions. */
+  personaPrompt    String               @db.Text
+  toneWarmth       Float                @default(0.5)
+  toneDirectness   Float                @default(0.5)
+  toneDepth        Float                @default(0.5)
+  toneFormality    Float                @default(0.5)
+  createdByAdminId String?
+  publishedAt      DateTime?
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
+
+  @@unique([assessmentSlug, version])
+  @@index([assessmentSlug, status])
   @@schema("admin")
 }

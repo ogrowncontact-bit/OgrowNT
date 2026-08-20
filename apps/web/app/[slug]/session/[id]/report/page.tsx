@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { prisma } from "@inner/db";
 import { Screen, LoadingState } from "@inner/ui";
+import type { ReportDocument } from "@inner/ai";
 import { getAssessmentConfig } from "@/lib/assessments";
 import { readAnonymousSessionId } from "@/lib/anonymousSession";
 import { readAccessUserId } from "@/lib/access";
@@ -9,15 +10,9 @@ import { selectRecommendation } from "@/lib/recommendation";
 import { track } from "@/lib/analytics";
 import { ReportPolling } from "@/components/ReportPolling";
 import { RecommendationLink } from "@/components/RecommendationLink";
+import { ReportView } from "@/components/ReportView";
 
 export const metadata = { robots: { index: false, follow: false } };
-
-interface ReportSection {
-  key: string;
-  title: string;
-  body: string;
-  aiGenerated: boolean;
-}
 
 export default async function ReportPage({ params }: { params: Promise<{ slug: string; id: string }> }) {
   const { slug, id } = await params;
@@ -115,34 +110,24 @@ export default async function ReportPage({ params }: { params: Promise<{ slug: s
     await track({ anonymousSessionId, eventName: "recommendation_viewed", assessmentId: session.assessmentId });
   }
 
-  const content = report.content as unknown as { sections: ReportSection[] };
+  const document = report.content as unknown as ReportDocument;
 
   return (
     <Screen align="top">
-      <p className="mb-3 text-xs font-medium uppercase tracking-[0.2em] text-[var(--inner-muted)]">
-        {config.name} — Full Report
-      </p>
-      <h1 className="font-display text-[30px] leading-tight text-[var(--inner-ink)]">{primary?.name}</h1>
-
       <a
         href={`/api/reports/${report.id}/pdf`}
-        className="mt-6 inline-block rounded-[var(--inner-radius-md)] border border-[var(--inner-line)] bg-[var(--inner-card)] px-5 py-3 text-[15px] font-medium text-[var(--inner-ink)]"
+        className="mb-6 inline-block rounded-[var(--inner-radius-md)] border border-[var(--inner-line)] bg-[var(--inner-card)] px-5 py-3 text-[15px] font-medium text-[var(--inner-ink)]"
       >
         Download PDF
       </a>
 
-      <div className="mt-10 space-y-8">
-        {content.sections.map((section) => (
-          <div key={section.key}>
-            <h2 className="font-display text-[19px] text-[var(--inner-accent)]">{section.title}</h2>
-            <p className="mt-2 text-[15px] leading-relaxed text-[var(--inner-ink-soft)]">{section.body}</p>
-          </div>
-        ))}
-      </div>
+      <ReportView
+        assessmentLabel={config.name}
+        document={document}
+        recommendationSlot={recommendation && <RecommendationCard recommendation={recommendation} fromAssessmentId={session.assessmentId} />}
+      />
 
-      {recommendation && <RecommendationCard recommendation={recommendation} fromAssessmentId={session.assessmentId} />}
-
-      <p className="mb-12 text-center">
+      <p className="mb-12 mt-12 text-center">
         <Link href="/explore" className="text-[13px] text-[var(--inner-muted)] underline underline-offset-4">
           Explore all INNER experiences
         </Link>

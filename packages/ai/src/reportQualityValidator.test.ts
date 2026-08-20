@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { validateReportQuality } from "./reportQualityValidator";
+import { validateReportQuality, validateReportDocument } from "./reportQualityValidator";
 import type { GeneratedReportSection } from "./reportAI";
+import type { ReportDocument } from "./reportDocument";
 
 function section(key: string, body: string): GeneratedReportSection {
   return { key, title: key, body, aiGenerated: true };
@@ -127,5 +128,87 @@ describe("validateReportQuality — word count", () => {
       sections: [section("signature", "one two three"), section("strengths", "four five")],
     });
     expect(result.wordCount).toBe(5);
+  });
+});
+
+function baseDocument(overrides: Partial<ReportDocument> = {}): ReportDocument {
+  return {
+    meta: {
+      assessmentName: "How Do You Love?",
+      assessmentSlug: "love",
+      assessmentVersion: 1,
+      reportEngineVersion: 1,
+      promptVersion: 3,
+      personaVersion: 1,
+      modelVersion: "claude-sonnet-5",
+      language: "en",
+      generatedAt: new Date().toISOString(),
+    },
+    profile: { name: "The Independent Connector", description: "Values closeness while protecting independence.", secondaryNames: [] },
+    summary: "Your responses point toward a strong pull between connection and independence.",
+    dimensions: [{ key: "connection", label: "Connection", normalized: 80, confidence: 0.8 }],
+    sections: [{ key: "signature", title: "Your INNER Signature", body: "Some real, specific text.", aiGenerated: true, role: "signature" }],
+    reflectionQuestions: ["When do you notice this pattern?"],
+    recommendation: { assessmentSlug: "intimacy", assessmentName: "How Deep Do You Go?", bridgeCopy: "Curious what's next?" },
+    ...overrides,
+  };
+}
+
+const VALID_PDF = Buffer.concat([Buffer.from("%PDF-1.7\n"), Buffer.alloc(2000, 0x20)]);
+
+describe("validateReportDocument", () => {
+  it("passes a complete document with a valid PDF", () => {
+    const result = validateReportDocument(baseDocument(), VALID_PDF);
+    expect(result.ok).toBe(true);
+    expect(result.issues).toEqual([]);
+  });
+
+  it("flags a missing profile name/description as a hard failure", () => {
+    const result = validateReportDocument(baseDocument({ profile: { name: "", description: "", secondaryNames: [] } }));
+    expect(result.ok).toBe(false);
+    expect(result.issues.some((i) => i.type === "missing_profile")).toBe(true);
+  });
+
+  it("flags a missing summary as a hard failure", () => {
+    const result = validateReportDocument(baseDocument({ summary: "   " }));
+    expect(result.ok).toBe(false);
+    expect(result.issues.some((i) => i.type === "missing_summary")).toBe(true);
+  });
+
+  it("flags zero sections as a hard failure", () => {
+    const result = validateReportDocument(baseDocument({ sections: [] }));
+    expect(result.ok).toBe(false);
+    expect(result.issues.some((i) => i.type === "missing_sections")).toBe(true);
+  });
+
+  it("flags placeholder text anywhere in the document as a hard failure", () => {
+    const result = validateReportDocument(
+      baseDocument({ sections: [{ key: "signature", title: "x", body: "Lorem ipsum dolor sit amet.", aiGenerated: false, role: "signature" }] })
+    );
+    expect(result.ok).toBe(false);
+    expect(result.issues.some((i) => i.type === "placeholder_text")).toBe(true);
+  });
+
+  it("flags a PDF that doesn't start with the %PDF- magic bytes as a hard failure", () => {
+    const result = validateReportDocument(baseDocument(), Buffer.from("not a real pdf"));
+    expect(result.ok).toBe(false);
+    expect(result.issues.some((i) => i.type === "pdf_invalid")).toBe(true);
+  });
+
+  it("flags an empty PDF buffer as a hard failure", () => {
+    const result = validateReportDocument(baseDocument(), Buffer.alloc(0));
+    expect(result.ok).toBe(false);
+    expect(result.issues.some((i) => i.type === "pdf_missing")).toBe(true);
+  });
+
+  it("doesn't check the PDF at all when none is given (e.g. web-only validation before rendering)", () => {
+    const result = validateReportDocument(baseDocument());
+    expect(result.ok).toBe(true);
+  });
+
+  it("records a missing recommendation but never treats it as a hard failure — not every profile has an eligible next assessment", () => {
+    const result = validateReportDocument(baseDocument({ recommendation: null }), VALID_PDF);
+    expect(result.ok).toBe(true);
+    expect(result.issues.some((i) => i.type === "recommendation_missing")).toBe(true);
   });
 });

@@ -12,12 +12,14 @@
     "generate": "prisma generate",
     "migrate": "prisma migrate dev",
     "seed": "tsx prisma/seed.ts",
+    "seed:prompts": "tsx prisma/seedPrompts.ts",
     "studio": "prisma studio"
   },
   "dependencies": {
     "@prisma/client": "^6.2.1"
   },
   "devDependencies": {
+    "@inner/ai": "workspace:*",
     "@inner/assessment-engine": "workspace:*",
     "@inner/content": "workspace:*",
     "@types/node": "^22.10.5",

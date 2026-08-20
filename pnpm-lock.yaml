@@ -113,6 +113,9 @@ importers:
         specifier: ^6.2.1
         version: 6.19.3(prisma@6.19.3(typescript@5.9.3))(typescript@5.9.3)
     devDependencies:
+      '@inner/ai':
+        specifier: workspace:*
+        version: link:../ai
       '@inner/assessment-engine':
         specifier: workspace:*
         version: link:../assessment-engine
@@ -161,6 +164,9 @@ importers:
         specifier: ^1.49.1
         version: 1.62.1
     devDependencies:
+      '@inner/ai':
+        specifier: workspace:*
+        version: link:../ai
       '@types/node':
         specifier: ^22.10.5
         version: 22.20.1

@@ -46,6 +46,32 @@ describe("generateReport fallback (no ANTHROPIC_API_KEY)", () => {
     expect(result.modelVersion).toBe("none");
   });
 
+  it("echoes back the generic persona's version (0) when no persona is passed", async () => {
+    const result = await generateReport(baseContext());
+    expect(result.personaVersion).toBe(0);
+  });
+
+  it("produces 4-6 non-empty, session-specific reflection questions even in fallback mode", async () => {
+    const result = await generateReport(baseContext());
+    expect(result.reflectionQuestions.length).toBeGreaterThanOrEqual(4);
+    expect(result.reflectionQuestions.length).toBeLessThanOrEqual(6);
+    for (const q of result.reflectionQuestions) expect(q.trim().length).toBeGreaterThan(0);
+    // parameterized by this session's own top dimension, not generic filler
+    expect(result.reflectionQuestions.some((q) => q.toLowerCase().includes("connection"))).toBe(true);
+  });
+
+  it("echoes back a real persona's version when one is passed, even in fallback mode", async () => {
+    const result = await generateReport(baseContext(), undefined, {
+      assessmentSlug: "love",
+      name: "The Relationship Observer",
+      focus: "connection and independence",
+      prompt: "You notice the quiet negotiation between closeness and autonomy.",
+      tone: { warmth: 0.8, directness: 0.4, depth: 0.7, formality: 0.25 },
+      version: 5,
+    });
+    expect(result.personaVersion).toBe(5);
+  });
+
   it("falls back to English when an unsupported language is requested", async () => {
     const result = await generateReport(baseContext({ language: "de" }));
     expect(result.language).toBe("en");

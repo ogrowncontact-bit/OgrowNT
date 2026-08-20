@@ -1,5 +1,6 @@
 import { findHardBannedTerms } from "./guardrails/nonDiagnosticFilter";
 import type { GeneratedReportSection } from "./reportAI";
+import type { ReportDocument } from "./reportDocument";
 
 export type ReportQualityIssueType =
   | "missing_section"
@@ -140,4 +141,83 @@ export function validateReportQuality(params: ValidateReportParams): ReportQuali
   const ok = !issues.some((i) => hardFailTypes.includes(i.type));
 
   return { ok, issues, wordCount };
+}
+
+export type ReportDocumentQualityIssueType =
+  | "missing_profile"
+  | "missing_summary"
+  | "missing_sections"
+  | "placeholder_text"
+  | "pdf_missing"
+  | "pdf_invalid"
+  | "recommendation_missing";
+
+export interface ReportDocumentQualityIssue {
+  type: ReportDocumentQualityIssueType;
+  detail: string;
+}
+
+export interface ReportDocumentQualityCheck {
+  /** False only for hard-fail issues (missing_profile/summary/sections, placeholder text, an unopenable PDF) — a missing recommendation is recorded but never blocks delivery, since not every profile has an eligible next assessment. */
+  ok: boolean;
+  issues: ReportDocumentQualityIssue[];
+}
+
+const PLACEHOLDER_PATTERNS: RegExp[] = [/\blorem ipsum\b/i, /\btodo\b/i, /\btbd\b/i, /\bplaceholder\b/i, /\{\{.*?\}\}/, /\[insert[^\]]*\]/i];
+
+const HARD_FAIL_DOCUMENT_TYPES: ReportDocumentQualityIssueType[] = [
+  "missing_profile",
+  "missing_summary",
+  "missing_sections",
+  "placeholder_text",
+  "pdf_missing",
+  "pdf_invalid",
+];
+
+/**
+ * Final gate before a Report is marked "ready" — the §QUALITY CONTROL
+ * checklist run once against the fully-assembled ReportDocument (and,
+ * where given, the rendered PDF bytes), on top of the per-section checks
+ * `validateReportQuality` already ran during generation. "Page count valid"
+ * and "links work" from the spec's checklist aren't implemented here: doing
+ * either honestly needs a real PDF-parsing/crawling dependency this repo
+ * doesn't carry, so they're a known, stated scope limit rather than a fake
+ * pass — the magic-byte + minimum-size check below is a genuine, if
+ * partial, substitute for "PDF generated, PDF opens".
+ */
+export function validateReportDocument(doc: ReportDocument, pdf?: Buffer): ReportDocumentQualityCheck {
+  const issues: ReportDocumentQualityIssue[] = [];
+
+  if (!doc.profile.name.trim() || !doc.profile.description.trim()) {
+    issues.push({ type: "missing_profile", detail: "profile.name or profile.description is empty." });
+  }
+  if (!doc.summary.trim()) {
+    issues.push({ type: "missing_summary", detail: "summary is empty." });
+  }
+  if (doc.sections.length === 0) {
+    issues.push({ type: "missing_sections", detail: "No sections were produced." });
+  }
+
+  const allText = [doc.summary, ...doc.sections.map((s) => s.body), ...doc.reflectionQuestions].join(" ");
+  for (const pattern of PLACEHOLDER_PATTERNS) {
+    if (pattern.test(allText)) {
+      issues.push({ type: "placeholder_text", detail: `Report contains placeholder-like text matching ${pattern.source}.` });
+      break;
+    }
+  }
+
+  if (pdf !== undefined) {
+    if (pdf.length === 0) {
+      issues.push({ type: "pdf_missing", detail: "PDF buffer is empty." });
+    } else if (pdf.subarray(0, 5).toString("latin1") !== "%PDF-" || pdf.length < 1000) {
+      issues.push({ type: "pdf_invalid", detail: "PDF buffer doesn't start with the %PDF- magic bytes, or is implausibly small." });
+    }
+  }
+
+  if (!doc.recommendation) {
+    issues.push({ type: "recommendation_missing", detail: "No next-discovery recommendation was available for this profile." });
+  }
+
+  const ok = !issues.some((i) => HARD_FAIL_DOCUMENT_TYPES.includes(i.type));
+  return { ok, issues };
 }

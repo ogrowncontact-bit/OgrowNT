@@ -1,5 +1,5 @@
 import { prisma, Prisma } from "@inner/db";
-import { generateReport, type ReportContext, type ReportTension, type ReportContradiction } from "@inner/ai";
+import { generateReport, assembleReportDocument, validateReportDocument, type ReportContext, type ReportTension, type ReportContradiction, type ReportDocumentRecommendation } from "@inner/ai";
 import { renderReportPdf } from "@inner/pdf";
 import { renderReportDeliveryEmail, renderPurchaseConfirmationEmail } from "@inner/email";
 import { dimensionPool } from "@inner/content/dimensions";
@@ -12,6 +12,8 @@ import { formatPrice } from "./money";
 import type { OpenResponseAiMeta } from "./openResponseAiMeta";
 import { ensureAiTelemetryRegistered } from "./aiTelemetry";
 import { getAiModelConfig } from "./aiConfig";
+import { getPublishedPersona } from "./promptTemplates";
+import { selectRecommendation } from "./recommendation";
 
 // See the comment in app/api/sessions/[id]/answer/route.ts — registered per
 // module realm, not just once globally via instrumentation.ts.
@@ -128,30 +130,60 @@ export async function completeOrder(orderId: string): Promise<void> {
       sections: config.premiumReportStructure.map((s) => ({ key: s.key, title: s.title })),
     };
 
-    const modelConfig = await getAiModelConfig();
-    const generated = await generateReport(reportContext, modelConfig);
+    const [modelConfig, persona, liveRecommendation] = await Promise.all([
+      getAiModelConfig(),
+      getPublishedPersona(config.slug),
+      selectRecommendation({
+        anonymousSessionId: session.anonymousSessionId,
+        fromConfig: config,
+        primaryProfileName: primary.name,
+        dimensionScores,
+      }),
+    ]);
+    const generated = await generateReport(reportContext, modelConfig, persona);
 
-    const pdf = await renderReportPdf({
-      assessmentName: config.name,
-      profileName: primary.name,
-      profileDescription: primary.descriptionTemplate,
-      sections: generated.sections,
-      dimensionScores: Object.entries(dimensionScores).map(([key, normalized]) => ({
-        key,
-        label: dimensionLabels[key] ?? key,
-        normalized,
-      })),
-      generatedAt: new Date(),
+    // Snapshotted once, at generation time — the PDF is a static artifact
+    // and can't recompute "already completed" filtering later the way the
+    // web report page does live. See ReportView's own note on this split.
+    const recommendation: ReportDocumentRecommendation | null = liveRecommendation
+      ? { assessmentSlug: liveRecommendation.slug, assessmentName: liveRecommendation.name, bridgeCopy: liveRecommendation.bridgeCopy }
+      : null;
+
+    const generatedAt = new Date();
+    const document = assembleReportDocument({
+      context: reportContext,
+      generated,
+      assessmentSlug: config.slug,
+      recommendation,
+      generatedAt,
     });
+
+    const pdf = await renderReportPdf(document);
+
+    const quality = validateReportDocument(document, pdf);
+    if (!quality.ok) {
+      // Never blocks delivery — the deterministic fallback already
+      // guarantees a non-empty, complete document, so a hard-fail here
+      // signals a genuine bug worth knowing about, not a reason to leave a
+      // paying customer with nothing. See reportQualityValidator.ts.
+      await track({
+        anonymousSessionId: session.anonymousSessionId,
+        eventName: "report_quality_check_failed",
+        assessmentId: session.assessmentId,
+        properties: { issues: quality.issues.map((i) => i.type) },
+      });
+    }
 
     const report = await prisma.report.upsert({
       where: { orderId: order.id },
       update: {
         status: "ready",
-        content: { sections: generated.sections, generatedAt: new Date().toISOString() } as any,
+        content: document as any,
         language: generated.language,
+        assessmentVersion: config.version,
         reportEngineVersion: generated.reportEngineVersion,
         promptVersion: generated.promptVersion,
+        personaVersion: generated.personaVersion,
         modelVersion: generated.modelVersion,
         failureReason: null,
       },
@@ -159,11 +191,13 @@ export async function completeOrder(orderId: string): Promise<void> {
         assessmentSessionId: session.id,
         orderId: order.id,
         templateVersion: 1,
+        assessmentVersion: config.version,
         status: "ready",
-        content: { sections: generated.sections, generatedAt: new Date().toISOString() } as any,
+        content: document as any,
         language: generated.language,
         reportEngineVersion: generated.reportEngineVersion,
         promptVersion: generated.promptVersion,
+        personaVersion: generated.personaVersion,
         modelVersion: generated.modelVersion,
       },
     });
@@ -230,7 +264,7 @@ export async function completeOrder(orderId: string): Promise<void> {
     await prisma.report.upsert({
       where: { orderId: order.id },
       update: { status: "failed", failureReason: reason },
-      create: { assessmentSessionId: session.id, orderId: order.id, templateVersion: 1, status: "failed", failureReason: reason, content: Prisma.JsonNull },
+      create: { assessmentSessionId: session.id, orderId: order.id, templateVersion: 1, assessmentVersion: config.version, status: "failed", failureReason: reason, content: Prisma.JsonNull },
     });
     await track({ anonymousSessionId: session.anonymousSessionId, eventName: "report_generation_failed", assessmentId: session.assessmentId });
     throw error;

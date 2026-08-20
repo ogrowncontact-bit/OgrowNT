@@ -1,6 +1,7 @@
 import { randomBytes, scryptSync } from "node:crypto";
 import { PrismaClient } from "@prisma/client";
 import { allAssessments, dimensionPool } from "@inner/content";
+import { DEFAULT_ASSESSMENT_PERSONAS } from "@inner/ai";
 import type { AssessmentConfig } from "@inner/assessment-engine";
 
 const prisma = new PrismaClient();
@@ -172,6 +173,31 @@ async function main() {
     }
   }
   console.log("Seeded recommendation graph.");
+
+  // Never touches a slug that already has a PromptTemplate row — an admin
+  // may have since published their own edited version, and re-running this
+  // script must not silently overwrite that (§PROMPT VERSIONING: "never
+  // silently modify a production prompt").
+  for (const persona of DEFAULT_ASSESSMENT_PERSONAS) {
+    const existing = await prisma.promptTemplate.findFirst({ where: { assessmentSlug: persona.assessmentSlug } });
+    if (existing) continue;
+    await prisma.promptTemplate.create({
+      data: {
+        assessmentSlug: persona.assessmentSlug,
+        version: 1,
+        status: "published",
+        personaName: persona.name,
+        personaFocus: persona.focus,
+        personaPrompt: persona.prompt,
+        toneWarmth: persona.tone.warmth,
+        toneDirectness: persona.tone.directness,
+        toneDepth: persona.tone.depth,
+        toneFormality: persona.tone.formality,
+        publishedAt: new Date(),
+      },
+    });
+  }
+  console.log(`Seeded ${DEFAULT_ASSESSMENT_PERSONAS.length} assessment personas (skipping any slug that already has one).`);
 
   const adminEmail = (process.env.ADMIN_EMAIL ?? "admin@inner.dev").toLowerCase();
   const adminPassword = process.env.ADMIN_PASSWORD ?? "changeme-dev-only";
