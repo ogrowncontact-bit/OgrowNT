@@ -22,10 +22,13 @@ export async function completeAssessmentSession(params: {
   config: AssessmentConfig;
   state: SessionState;
   modelConfig: AIModelConfig;
-}): Promise<void> {
-  const { id, anonymousSessionId, assessmentId, config, state, modelConfig } = params;
+  /** FASE 31 §QA SIMULATION — see recordSessionAnswer.ts's identical param. */
+  skipAnalytics?: boolean;
+}): Promise<ReturnType<typeof computeResult>> {
+  const { id, anonymousSessionId, assessmentId, config, state, modelConfig, skipAnalytics } = params;
 
-  const { profileResult, dimensionScores, tensions, contradictions } = computeResult(config, state);
+  const computed = computeResult(config, state);
+  const { profileResult, dimensionScores, tensions, contradictions } = computed;
   const persona = await getPublishedPersona(config.slug);
 
   // Profile AI only narrates the profile the deterministic matcher already
@@ -118,5 +121,9 @@ export async function completeAssessmentSession(params: {
     prisma.assessmentSession.update({ where: { id }, data: { status: "completed", completedAt: new Date() } }),
   ]);
 
-  await track({ anonymousSessionId, eventName: "assessment_completed", assessmentId });
+  if (!skipAnalytics) {
+    await track({ anonymousSessionId, eventName: "assessment_completed", assessmentId });
+  }
+
+  return computed;
 }

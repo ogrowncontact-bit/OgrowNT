@@ -1,5 +1,5 @@
 import type { Question, SessionState } from "@inner/assessment-engine";
-import { openTextAnswerFor, type DemoPersona } from "./demoPersonas";
+import { openTextAnswerFor, type AnswerSelectionPersona } from "./demoPersonas";
 
 export interface DemoAnswer {
   selectedOptionKeys?: string[];
@@ -19,7 +19,7 @@ export interface DemoAnswer {
  * settle into a genuinely balanced read across the whole session, rather
  * than drifting wherever LOVE's option authoring happens to lean.
  */
-export function chooseAnswerForPersona(question: Question, persona: DemoPersona, state: SessionState): DemoAnswer {
+export function chooseAnswerForPersona(question: Question, persona: AnswerSelectionPersona, state: SessionState): DemoAnswer {
   if (question.type === "open_text") {
     return { openText: openTextAnswerFor(persona, question.key) };
   }

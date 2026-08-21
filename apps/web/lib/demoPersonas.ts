@@ -1,12 +1,21 @@
 export type DimensionDirection = "high" | "low";
 
-export interface DemoPersona {
+/**
+ * Minimal shape lib/demoAnswerSelection.ts's chooseAnswerForPersona actually
+ * needs — DemoPersona (below) satisfies it, and so does the FASE 31 QA
+ * simulation's lighter QaPersona (lib/qa/loveQaPersonas.ts), which has no
+ * label/summary/flavored open text of its own.
+ */
+export interface AnswerSelectionPersona {
+  targetDirections: Partial<Record<string, DimensionDirection>>;
+  openTextAnswers?: Record<string, string>;
+}
+
+export interface DemoPersona extends AnswerSelectionPersona {
   key: string;
   label: string;
   /** Shown next to the persona in the admin picker — describes the pattern, never claims a specific profile name (the real matcher decides that). */
   summary: string;
-  /** Only the dimensions this persona deliberately pushes need an entry — everything else is left to answer naturally toward the middle, which is what produces Persona D's balanced read. */
-  targetDirections: Partial<Record<string, DimensionDirection>>;
   /** Persona-flavored answers for LOVE's two core open_text questions — the assessment's own real AI interpretation still runs on this text, same as a genuine answer. */
   openTextAnswers: Record<string, string>;
 }
@@ -107,6 +116,6 @@ export function getDemoPersona(key: string): DemoPersona | undefined {
   return LOVE_DEMO_PERSONAS.find((p) => p.key === key);
 }
 
-export function openTextAnswerFor(persona: DemoPersona, questionKey: string): string {
-  return persona.openTextAnswers[questionKey] ?? DEFAULT_OPEN_TEXT;
+export function openTextAnswerFor(persona: AnswerSelectionPersona, questionKey: string): string {
+  return persona.openTextAnswers?.[questionKey] ?? DEFAULT_OPEN_TEXT;
 }

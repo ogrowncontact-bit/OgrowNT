@@ -350,6 +350,24 @@ model Campaign {
   @@schema("catalog")
 }
 
+/**
+ * FASE 31 §100-PERSONA QA SIMULATION — one row per simulation run, so
+ * /admin/qa/love can show the latest result without re-running ~100
+ * synthetic sessions on every page load. `resultJson` holds the full
+ * computed report (profile/dimension/question distributions, redundancy,
+ * tension/contradiction rates, security self-checks) — see
+ * lib/qa/runLoveQaSimulation.ts for the exact shape.
+ */
+model QaSimulationRun {
+  id             String   @id @default(cuid())
+  assessmentSlug String
+  personaCount   Int
+  resultJson     Json
+  createdAt      DateTime @default(now())
+
+  @@schema("catalog")
+}
+
 /** Blog foundation (FASE 23 §BLOG FOUNDATION) — CMS + template only, not a full editorial system. */
 model JournalPost {
   id          String            @id @default(cuid())

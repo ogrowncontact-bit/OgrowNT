@@ -29,9 +29,24 @@ export async function recordSessionAnswer(params: {
   openText?: string;
   skipped: boolean;
   modelConfig: AIModelConfig;
+  /** FASE 31 §QA SIMULATION — synthetic QA-persona sessions still write real Response rows (so scoring/adaptive behavior is genuinely exercised) but must never inflate real funnel analytics. Defaults to false; every real caller is unaffected. */
+  skipAnalytics?: boolean;
 }): Promise<{ result: AnswerResult; supportResources?: string }> {
-  const { id, anonymousSessionId, assessmentId, config, state, expected, questionKey, selectedOptionKeys, scaleValue, openText, skipped, modelConfig } =
-    params;
+  const {
+    id,
+    anonymousSessionId,
+    assessmentId,
+    config,
+    state,
+    expected,
+    questionKey,
+    selectedOptionKeys,
+    scaleValue,
+    openText,
+    skipped,
+    modelConfig,
+    skipAnalytics,
+  } = params;
 
   let aiDimensionNudges: Record<string, number> | undefined;
   let aiChosenFollowupKey: string | undefined;
@@ -115,12 +130,14 @@ export async function recordSessionAnswer(params: {
     skipped,
   });
 
-  await track({
-    anonymousSessionId,
-    eventName: skipped ? "question_skipped" : expected.type === "open_text" ? "open_answer_submitted" : "question_answered",
-    assessmentId,
-    properties: { questionKey },
-  });
+  if (!skipAnalytics) {
+    await track({
+      anonymousSessionId,
+      eventName: skipped ? "question_skipped" : expected.type === "open_text" ? "open_answer_submitted" : "question_answered",
+      assessmentId,
+      properties: { questionKey },
+    });
+  }
 
   return { result, supportResources };
 }
