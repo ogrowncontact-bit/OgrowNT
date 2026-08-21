@@ -4,7 +4,7 @@
 **paper trading only** — no real orders are ever sent. See the full engineering
 specification in [`docs/blueprint/`](docs/blueprint/00-overview.md).
 
-## Status: Phase 7 (Advanced Analytics, Alerts, Optimization) + post-Phase-7 security hardening + Supervisor 24/7 + Market Data Engine + Scanner + Pattern/Strategy/Opportunity confidence & evidence + Risk Engine/Portfolio Intelligence hardening (Risk Center, Risk Heatmap, Strategy Health, configurable Safety Belts) + News Intelligence Center (sentiment, macro calendar, event risk, source consensus) + Strategy Lab (walk-forward optimization, Monte Carlo, stress testing, robustness/quality scoring, async backtest job system) + Autonomous Paper Trading (TradingMode gate, Portfolio Manager allocation cap, trailing stops, HOLD/REDUCE/CLOSE position risk policy, anti-martingale loss-streak protection, idempotency keys, event sourcing, reconciliation engine, RBAC, manual trading controls, Autonomous Trading Center dashboard) + Multi-Agent Quant Intelligence (18 named specialist agents, Consensus/Contradiction/Chief Decision Engine, reliability/calibration/quarantine, AI Command Center dashboard) + Autonomous Research & Evolution Engine (hypothesis generation, ExperimentEngine, bounded genetic search, StrategyVersion Champion/Challenger, drift detection, knowledge graph, human-approval-gated promotion, Autonomous Research Lab dashboard) + Global Market Intelligence & 24/7 Opportunity Discovery (global session clock, asset universe manager, fast-scan → deep-scan pipeline, multi-timeframe agreement/conflict, market structure, volatility regime transitions, anomaly scanner, closed-vocabulary opportunity classification, correlated-opportunity clustering, risk-adjusted ranking, dynamic watchlist, Global Market Command Center dashboard) + Advanced Risk & Capital Defense Engine (config-driven drawdown response ladder with recovery-cooldown hysteresis, portfolio concentration/hidden-factor exposure, transaction-cost-aware net expectancy gate, live Monte Carlo/Risk-of-Ruin/VaR/CVaR stress testing, system/execution/model/data risk engines, 6 named circuit breakers, 4-state Emergency Kill Switch with admin-gated recovery, a 7-level RiskState/RiskScore aggregator sitting alongside the existing Safety Belt, risk-config version audit trail, failover market data provider, Capital Defense Center dashboard)
+## Status: Phase 7 (Advanced Analytics, Alerts, Optimization) + post-Phase-7 security hardening + Supervisor 24/7 + Market Data Engine + Scanner + Pattern/Strategy/Opportunity confidence & evidence + Risk Engine/Portfolio Intelligence hardening (Risk Center, Risk Heatmap, Strategy Health, configurable Safety Belts) + News Intelligence Center (sentiment, macro calendar, event risk, source consensus) + Strategy Lab (walk-forward optimization, Monte Carlo, stress testing, robustness/quality scoring, async backtest job system) + Autonomous Paper Trading (TradingMode gate, Portfolio Manager allocation cap, trailing stops, HOLD/REDUCE/CLOSE position risk policy, anti-martingale loss-streak protection, idempotency keys, event sourcing, reconciliation engine, RBAC, manual trading controls, Autonomous Trading Center dashboard) + Multi-Agent Quant Intelligence (18 named specialist agents, Consensus/Contradiction/Chief Decision Engine, reliability/calibration/quarantine, AI Command Center dashboard) + Autonomous Research & Evolution Engine (hypothesis generation, ExperimentEngine, bounded genetic search, StrategyVersion Champion/Challenger, drift detection, knowledge graph, human-approval-gated promotion, Autonomous Research Lab dashboard) + Global Market Intelligence & 24/7 Opportunity Discovery (global session clock, asset universe manager, fast-scan → deep-scan pipeline, multi-timeframe agreement/conflict, market structure, volatility regime transitions, anomaly scanner, closed-vocabulary opportunity classification, correlated-opportunity clustering, risk-adjusted ranking, dynamic watchlist, Global Market Command Center dashboard) + Advanced Risk & Capital Defense Engine (config-driven drawdown response ladder with recovery-cooldown hysteresis, portfolio concentration/hidden-factor exposure, transaction-cost-aware net expectancy gate, live Monte Carlo/Risk-of-Ruin/VaR/CVaR stress testing, system/execution/model/data risk engines, 6 named circuit breakers, 4-state Emergency Kill Switch with admin-gated recovery, a 7-level RiskState/RiskScore aggregator sitting alongside the existing Safety Belt, risk-config version audit trail, failover market data provider, Capital Defense Center dashboard) + Universal Broker & Exchange Connectivity (BrokerAdapter protocol, PaperBrokerAdapter with volume-capped partial fills and marketable-limit orders, four-layer live-trading firewall, ExecutionGate final revalidation wiring the net-expectancy gate, instrument precision, broker health/quarantine, broker-level reconciliation, execution router, credential isolation, Execution Command Center dashboard)
 
 Per [`docs/blueprint/12-roadmap.md`](docs/blueprint/12-roadmap.md):
 
@@ -459,6 +459,48 @@ real browser click-through of the new Capital Defense Center panel. See
 [`docs/capital-defense-engine.md`](docs/capital-defense-engine.md) for the
 as-built reference.
 
+**Universal Broker & Exchange Connectivity.** A `BrokerAdapter` protocol
+widens the existing `ExecutionProvider` interface (Phase 3) into a
+broker-shaped one — `PaperBrokerAdapter` is a strict, drop-in-compatible
+superset, and it remains the only adapter this codebase's own processes
+ever construct. Live trading stays structurally unreachable behind four
+independent layers: `SystemState.trading_mode`'s DB `CHECK` constraint
+(`'live'` has never been a legal value), `packages/risk/engine.py`'s
+Prompt-8-era `trading_mode` gate, a hardcoded `ENABLE_LIVE_TRADING = False`
+with an import-time tripwire (`packages/execution/firewall.py`'s
+`LiveTradingFirewall`), and a `LiveBrokerAdapter` that self-destructs on
+construction and on every attribute access. A new `ExecutionGate`
+(`packages/execution/gate.py`) is the final revalidation immediately before
+an order reaches `order_manager.py`, finally wiring Prompt 12's
+`evaluate_net_expectancy` (left deliberately unlinked pending exactly this
+module) alongside signal-expiration, market-session, broker-health,
+price-deviation, and instrument-precision checks. `PaperBrokerAdapter`
+gained two genuinely new fill behaviors: volume-capped partial fills for
+oversized market orders (no fabricated resting order) and already-marketable
+limit-order support (a non-marketable limit is honestly rejected, never
+fabricated as a queued order). New `packages/execution/` modules cover
+instrument precision, a relocated fee engine (moved out of
+`packages/backtest` to avoid a circular dependency), execution quality,
+broker health with quarantine-on-streak, rate limiting, retry policy
+(order-mutating operations are structurally excluded from the retry
+allowlist), clock-drift detection, symbol mapping, a fee/latency-blended
+execution router, broker-level reconciliation layered on top of the
+existing cash-only engine (pausing trading via `trading_paused`, never the
+Kill Switch), and a credential-isolation abstraction only a `BrokerAdapter`
+itself may ever call. Deliberately just 7 new tables, not the spec's
+literal ~14 — the rest are runtime dataclasses computed fresh rather than
+persisted. 159 new tests (1401/1401 in the full suite), including a
+20-item AST-walk-based red-team battery, 7 chaos scenarios (broker
+timeout/outage, clock drift, duplicate/out-of-order events, UNKNOWN
+never coerced to FILLED), and 5 full end-to-end scenarios — one of which
+surfaced a fourth, already-existing live-trading defense layer this
+phase's own docs hadn't accounted for. Live-verified against real
+Postgres and a real browser click-through of the new Execution Command
+Center panel. See `docs/blueprint/12-roadmap.md`'s "PROMPT 13" section
+for the full list and
+[`docs/broker-execution-infrastructure.md`](docs/broker-execution-infrastructure.md)
+for the as-built reference.
+
 ## Architecture at a glance
 
 ```text
@@ -475,7 +517,9 @@ apps/
                sessions/structure/pairs/historical-analog), risk (advanced
                risk-score/state, circuit breakers, concentration, stress
                test, kill-switch state/recovery, risk-config version audit
-               trail))
+               trail), brokers (list/detail/health), execution (accounts,
+               order detail, executions, reconciliation runs, instruments,
+               execution health))
   worker/      24/7 loop: Market Data Agent (scan), Trade Monitor + safety-belt
                refresh + Learning Agent (per trade close, every scan), News
                Intelligence Agent (ingestion + DET analysis, own cadence),
@@ -490,7 +534,11 @@ apps/
                Strategy so it can enrich this cycle's fresh Signals),
                Capital Defense cycle (portfolio-wide RiskAssessment
                persisted every tick, capital-preservation/zero-trade sync,
-               escalation-only alerting, own cadence), Research Agent +
+               escalation-only alerting, own cadence), Broker Health cycle
+               (own cadence), Order Monitor cycle (sweeps stuck non-terminal
+               orders to expired, own cadence), Broker Reconciliation cycle
+               (broker-reported vs. internal ledger, pauses trading via
+               trading_paused on mismatch, own cadence), Research Agent +
                News Learning (own, longer cadence), Alert delivery cycle
                (own cadence) — never imports packages/backtest
   backtest_worker/ separate process (deliberately not a cadence inside worker/
@@ -531,7 +579,29 @@ packages/
                (risk-limit change audit trail)
   execution/   ExecutionProvider interface, PaperExecutionProvider, order manager
                (idempotency keys, expected-price/latency capture, partial-close
-               reduce_position), shared fill-simulation math (packages/execution/fills.py)
+               reduce_position, partial-fill-aware open_position, per-fill
+               Execution rows), shared fill-simulation math
+               (packages/execution/fills.py) — plus Universal Broker &
+               Exchange Connectivity: broker/ (BrokerAdapter protocol,
+               BrokerRegistry, PaperBrokerAdapter with volume-capped partial
+               fills + marketable-limit orders, self-destructing
+               LiveBrokerAdapter), firewall.py (four-layer live-trading
+               firewall — see risk/ above for the Prompt-8 gate that closes
+               it), gate.py (ExecutionGate final revalidation, wires the
+               net-expectancy gate from costs.py above), instrument.py
+               (tick/step/min-notional precision), fee_model.py + fees.py
+               (relocated from packages/backtest to avoid a circular
+               dependency), quality.py (execution quality read-aggregation),
+               health.py (broker health + quarantine-on-streak),
+               rate_limit.py + retry.py (retry allowlist structurally
+               excludes order-mutating operations) + clock.py +
+               symbol_mapper.py (architecture-ready, honestly untested
+               against a real second broker), router.py (ExecutionRouter,
+               fee+latency blended, never fee alone), broker_reconciliation.py
+               (layered on top of portfolio/reconciliation.py below, pauses
+               via trading_paused — never the Kill Switch), broker_events.py
+               (idempotent event dedup), secrets.py (credential isolation —
+               only a BrokerAdapter itself may call it)
   backtest/    event-driven Backtest Engine, isolated simulated portfolio,
                walk-forward validation (fixed-params, true optimization, and
                global grid-search variants), parameter-stability checks, Monte

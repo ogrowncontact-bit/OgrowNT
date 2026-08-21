@@ -12,63 +12,33 @@ different `FeeModel`/`SlippageModel`/`latency_bars` does behaviour change.
 
 §8 "Nunca assumir fees = 0 como padrão de produção" is satisfied by
 `default_fee_model()` never being a zero-fee model — see FEE_RATE below.
+
+`FeeModel`/`PROVIDER_FEE_RATES` moved to packages/execution/fee_model.py in
+"PROMPT 13" (§63-64's FeeEngine wires the same model into live paper
+execution, and packages/execution can't import packages/backtest — the
+dependency only ever runs the other way) and are re-exported here under the
+same names so every pre-existing import of them from this module keeps
+working unchanged.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from packages.execution.fills import BASE_SLIPPAGE_BPS, FEE_RATE, MAX_VOLUME_RATIO_FOR_SLIPPAGE, SPREAD_BPS
+from packages.execution.fee_model import FEE_KINDS, PROVIDER_FEE_RATES, FeeModel, default_fee_model
+from packages.execution.fills import BASE_SLIPPAGE_BPS, MAX_VOLUME_RATIO_FOR_SLIPPAGE, SPREAD_BPS
+
+__all__ = [
+    "FEE_KINDS", "PROVIDER_FEE_RATES", "FeeModel", "default_fee_model",
+    "SLIPPAGE_KINDS", "SlippageModel", "LatencyModel", "SimulatedFillV2",
+    "default_slippage_model", "default_latency_model", "simulate_fill_configurable", "ExecutionConfig",
+]
 
 # Same convention as packages/backtest/engine.py's BASELINE_ATR_PCT /
 # apps/worker/risk_execution.py: 1% ATR/price is treated as "normal"
 # volatility; VOLATILITY_BASED slippage scales above that baseline.
 BASELINE_ATR_PCT = 0.01
 
-FEE_KINDS = ("percentage", "fixed", "tiered", "provider_specific")
 SLIPPAGE_KINDS = ("fixed", "percentage", "volatility_based", "liquidity_based")
-
-# Illustrative, clearly-labeled placeholder rates for a handful of common
-# venue types -- NOT real fee schedules for any specific broker/exchange.
-# A real integration would source these from the actual provider's fee API/
-# published schedule (see packages/data/connectors' provider-abstraction
-# pattern) rather than hardcoding them here.
-PROVIDER_FEE_RATES: dict[str, float] = {
-    "crypto_spot_taker": 0.0010,
-    "crypto_spot_maker": 0.0004,
-    "forex_ecn": 0.00007,
-    "equities_retail": 0.0005,
-}
-
-
-@dataclass(frozen=True)
-class FeeModel:
-    kind: str = "percentage"
-    rate: float = FEE_RATE
-    fixed_amount: float = 0.0
-    # Ascending (notional_threshold, rate) pairs; the highest threshold the
-    # trade's notional meets or exceeds wins. An empty tuple with kind
-    # "tiered" falls back to `rate` (equivalent to a flat percentage fee).
-    tiers: tuple[tuple[float, float], ...] = ()
-    provider: str | None = None
-
-    def __post_init__(self) -> None:
-        if self.kind not in FEE_KINDS:
-            raise ValueError(f"unknown fee model kind: {self.kind!r} (expected one of {FEE_KINDS})")
-
-    def compute(self, *, price: float, qty: float) -> float:
-        notional = price * qty
-        if self.kind == "fixed":
-            return round(self.fixed_amount, 4)
-        if self.kind == "tiered":
-            rate = self.rate
-            for threshold, tier_rate in sorted(self.tiers):
-                if notional >= threshold:
-                    rate = tier_rate
-            return round(notional * rate, 4)
-        if self.kind == "provider_specific":
-            rate = PROVIDER_FEE_RATES.get(self.provider or "", self.rate)
-            return round(notional * rate, 4)
-        return round(notional * self.rate, 4)  # percentage
 
 
 @dataclass(frozen=True)
@@ -119,10 +89,6 @@ class SimulatedFillV2:
     price: float
     fees: float
     slippage_bps: float
-
-
-def default_fee_model() -> FeeModel:
-    return FeeModel(kind="percentage", rate=FEE_RATE)
 
 
 def default_slippage_model() -> SlippageModel:

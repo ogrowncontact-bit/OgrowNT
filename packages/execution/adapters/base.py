@@ -14,8 +14,21 @@ from datetime import datetime
 from typing import Literal, Protocol
 
 Side = Literal["buy", "sell"]
-OrderType = Literal["market", "limit", "stop"]
-OrderStatus = Literal["new", "submitted", "filled", "partially_filled", "cancelled", "rejected"]
+# "PROMPT 13" §8 widens the order-type vocabulary the schema can express;
+# only "market" and an already-marketable "limit" are actually activated by
+# PaperBrokerAdapter (packages/execution/broker/paper.py) — the rest are
+# capability-gated, not implemented, same as every other honestly-scoped gap
+# in this codebase (see docs/broker-execution-infrastructure.md).
+OrderType = Literal["market", "limit", "stop", "stop_limit", "take_profit", "take_profit_limit"]
+# "PROMPT 13" §10-11 widens the terminal-state vocabulary: 'new' has served
+# as CREATED/PENDING since Phase 3 and is kept as-is (every existing caller
+# already checks status == 'new'); 'cancel_pending'/'expired'/'failed'/
+# 'unknown' are additive states no pre-Prompt-13 code path could ever
+# produce, so every existing OrderStatus check keeps working unchanged.
+OrderStatus = Literal[
+    "new", "submitted", "filled", "partially_filled", "cancelled", "rejected",
+    "cancel_pending", "expired", "failed", "unknown",
+]
 
 
 @dataclass(frozen=True)

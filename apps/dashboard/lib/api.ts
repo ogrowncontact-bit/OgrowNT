@@ -866,6 +866,85 @@ export async function confirmKillSwitchRecovery(token: string, force: boolean) {
   return (await res.json()) as KillSwitchState;
 }
 
+// --- "PROMPT 13" (Universal Broker & Exchange Connectivity) --------------
+
+export type BrokerCapabilities = {
+  supports_market_orders: boolean;
+  supports_limit_orders: boolean;
+  supports_stop_orders: boolean;
+  supports_short: boolean;
+  supports_fractional: boolean;
+  supports_crypto: boolean;
+  supports_stocks: boolean;
+  supports_forex: boolean;
+  supports_futures: boolean;
+  supports_websocket: boolean;
+};
+export type Broker = {
+  id: number;
+  name: string;
+  kind: string;
+  status: string;
+  is_default: boolean;
+  configured: boolean;
+  capabilities: BrokerCapabilities;
+};
+export type BrokerHealth = { broker_name: string; state: string; latency_ms: number | null; recent_error_count: number; reasons: string[] };
+export type Account = {
+  broker_name: string;
+  balance: number;
+  available_balance: number;
+  equity: number;
+  margin: number;
+  margin_used: number;
+  margin_available: number;
+  currency: string;
+  ts: string;
+};
+export type Execution = {
+  id: number;
+  order_id: number;
+  broker_order_id: string | null;
+  symbol: string;
+  side: string;
+  quantity: number;
+  price: number;
+  fee: number;
+  fee_currency: string;
+  slippage_bps: number | null;
+  ts: string;
+  liquidity: string;
+  execution_mode: string;
+};
+export type ReconciliationRun = {
+  id: number;
+  broker_name: string;
+  ts: string;
+  ok: boolean;
+  violations: string[];
+  position_mismatches: string[];
+  order_mismatches: string[];
+  balance_diff: number | null;
+};
+export type ExecutionHealth = {
+  evaluated: boolean;
+  orders_evaluated: number;
+  filled_orders: number;
+  rejected_orders: number;
+  fill_ratio: number | null;
+  avg_latency_ms: number | null;
+  avg_slippage_bps: number | null;
+  avg_price_deviation_pct: number | null;
+  market_impact_estimate_bps: number | null;
+};
+
+export const getBrokers = (token: string) => apiFetch<Broker[]>("/api/brokers", token);
+export const getBrokerHealth = (token: string, brokerId: number) => apiFetch<BrokerHealth>(`/api/brokers/${brokerId}/health`, token);
+export const getAccounts = (token: string) => apiFetch<Account[]>("/api/accounts", token);
+export const getExecutions = (token: string) => apiFetch<Execution[]>("/api/executions?limit=20", token);
+export const getReconciliationRuns = (token: string) => apiFetch<ReconciliationRun[]>("/api/reconciliation?limit=10", token);
+export const getExecutionHealth = (token: string) => apiFetch<ExecutionHealth>("/api/execution/health", token);
+
 export async function login(email: string, password: string) {
   const res = await fetch(`${API_URL}/api/auth/login`, {
     method: "POST",

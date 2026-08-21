@@ -34,6 +34,15 @@ that uses them:
     recovery_mode/capital_preservation_mode/zero_trade_mode added to
     system_state and risk_score/risk_state/per-dimension-state/expiration
     added to risk_decisions
+  Post-Phase-7 ("Prompt 13" universal broker & exchange connectivity):
+    brokers, broker_health_checks, account_snapshots,
+    broker_position_snapshots, executions, broker_events,
+    reconciliation_runs, plus execution_mode/broker_id/decision_id/
+    risk_decision_id/stop_price/take_profit_price/time_in_force added to
+    orders (+ new order_type/status values), tick_size/step_size/
+    min_quantity/min_notional added to assets, and two new trading_events
+    event types (order_partially_filled/order_cancelled/
+    broker_health_degraded)
 """
 from datetime import datetime, timezone
 
@@ -121,6 +130,21 @@ class Asset(Base):
     liquidity_score: Mapped[float | None] = mapped_column(Float)
     data_quality_score: Mapped[float | None] = mapped_column(Float)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    # -- "PROMPT 13" (universal broker & execution infrastructure) --
+    # Instrument precision (§60-62): the smallest legal price increment
+    # (tick_size), the smallest legal quantity increment (step_size), and
+    # the minimum order quantity/notional a broker will accept.
+    # packages/execution/instrument.py::get_instrument() reads these
+    # directly rather than a separate Instrument table -- in this
+    # single-venue-per-asset system an instrument IS an asset, so a second
+    # table would only ever hold a 1:1 shadow copy of these four numbers.
+    # NULL means "not yet known" (an honest gap, not a fabricated default);
+    # validate_precision() skips a check whose limit is NULL rather than
+    # inventing one.
+    tick_size: Mapped[float | None] = mapped_column(Float)
+    step_size: Mapped[float | None] = mapped_column(Float)
+    min_quantity: Mapped[float | None] = mapped_column(Float)
+    min_notional: Mapped[float | None] = mapped_column(Float)
 
 
 class OHLCV(Base):
@@ -591,11 +615,29 @@ class Position(Base):
 class Order(Base):
     __tablename__ = "orders"
     __table_args__ = (
-        CheckConstraint("order_type IN ('market','limit','stop')", name="ck_orders_order_type"),
-        CheckConstraint("side IN ('buy','sell')", name="ck_orders_side"),
         CheckConstraint(
-            "status IN ('new','submitted','filled','partially_filled','cancelled','rejected')",
+            "order_type IN ('market','limit','stop','stop_limit','take_profit','take_profit_limit')",
+            name="ck_orders_order_type",
+        ),
+        CheckConstraint("side IN ('buy','sell')", name="ck_orders_side"),
+        # 'new' has served as the CREATED/PENDING state since Phase 3 and is
+        # kept as-is (every existing call site checks status=='new'/'filled'/
+        # etc. already) -- "PROMPT 13" §10-11 adds the terminal states that
+        # didn't exist before: a broker-reported state this system doesn't
+        # recognize (UNKNOWN — §11 "nunca assumir FILLED"), a cancellation
+        # still in flight (CANCEL_PENDING), a signal/order that aged out
+        # before it could fill (EXPIRED), and a hard submission failure
+        # distinct from a broker-side REJECTED (FAILED).
+        CheckConstraint(
+            "status IN ('new','submitted','filled','partially_filled','cancelled','rejected',"
+            "'cancel_pending','expired','failed','unknown')",
             name="ck_orders_status",
+        ),
+        CheckConstraint(
+            "execution_mode IN ('paper','sandbox','simulation','live')", name="ck_orders_execution_mode"
+        ),
+        CheckConstraint(
+            "time_in_force IS NULL OR time_in_force IN ('day','gtc','ioc','fok')", name="ck_orders_time_in_force"
         ),
     )
 
@@ -618,7 +660,10 @@ class Order(Base):
     # Deterministic per attempt (packages/execution/order_manager.py derives
     # it from signal_id/position_id + a purpose tag, e.g. "open"/"close") —
     # a retried call with the same key hits the unique constraint instead of
-    # submitting a second real order (§67-68).
+    # submitting a second real order (§67-68). "PROMPT 13" §12's
+    # client_order_id is this SAME value under a different name — see
+    # docs/broker-execution-infrastructure.md; a second, physically distinct
+    # column would only ever hold a duplicate of this one.
     idempotency_key: Mapped[str | None] = mapped_column(String, unique=True)
     # What the strategy/exit logic expected to pay/receive (signal.entry_price
     # or the position's current_stop/target at exit time) — filled_price
@@ -628,6 +673,37 @@ class Order(Base):
     # Milliseconds between this order being decided (risk-approved / exit
     # condition detected) and submit_order() returning — §54's "latency".
     latency_ms: Mapped[float | None] = mapped_column(Float)
+    # -- "PROMPT 13" (universal broker & execution infrastructure) --------
+    # Which BrokerAdapter handled this order — nullable so every pre-existing
+    # Order row (created before this column existed) stays valid; every new
+    # order gets the registry's default (paper) broker id.
+    broker_id: Mapped[int | None] = mapped_column(ForeignKey("brokers.id"))
+    # §4 ExecutionMode — additive alongside is_paper (kept exactly as-is, no
+    # existing call site touched): 'live' can be written here, but the
+    # LiveTradingFirewall (packages/execution/firewall.py) and
+    # SystemState.trading_mode's own CHECK constraint (which still has no
+    # 'live' value) both independently refuse to ever let an order reach
+    # this state — a defense-in-depth belt-and-braces pair, not a single
+    # point of failure.
+    execution_mode: Mapped[str] = mapped_column(String, default="paper", nullable=False)
+    # §71-72 ExecutionRequest/ExecutionApproval traceability — which Chief
+    # Decision Engine Decision and which sovereign RiskDecision authorized
+    # this order. Both nullable: the Critical Safety Battery and some older
+    # tests call open_position()/close_position() directly without routing
+    # through the full agent/risk pipeline. See docs/broker-execution-
+    # infrastructure.md for why this is enough of an audit trail without a
+    # dedicated ExecutionRequest/ExecutionApproval table.
+    decision_id: Mapped[int | None] = mapped_column(ForeignKey("decisions.id"))
+    risk_decision_id: Mapped[int | None] = mapped_column(ForeignKey("risk_decisions.id"))
+    # §7 order-type fields the schema is now ready for; PaperBrokerAdapter's
+    # BrokerCapabilities only actually activates 'market' and an
+    # already-marketable 'limit' (see packages/execution/broker/paper.py) —
+    # stop_price/take_profit_price stay NULL for every order type this phase
+    # actually submits, exactly like limit_price already did for market
+    # orders before this phase.
+    stop_price: Mapped[float | None] = mapped_column(Float)
+    take_profit_price: Mapped[float | None] = mapped_column(Float)
+    time_in_force: Mapped[str | None] = mapped_column(String)
 
 
 class Trade(Base):
@@ -1171,7 +1247,8 @@ class TradingEvent(Base):
             "'trading_paused','trading_resumed','kill_switch_triggered',"
             "'kill_switch_released','reconciliation_mismatch',"
             "'portfolio_emergency_action','loss_streak_detected',"
-            "'worker_restarted','crash_loop_protection_triggered')",
+            "'worker_restarted','crash_loop_protection_triggered',"
+            "'order_partially_filled','order_cancelled','broker_health_degraded')",
             name="ck_trading_events_event_type",
         ),
     )
@@ -1891,3 +1968,185 @@ class RiskAssessment(Base):
         ),
         CheckConstraint("risk_score >= 0 AND risk_score <= 100", name="ck_risk_assessments_risk_score_range"),
     )
+
+
+# -- "PROMPT 13" Universal Broker & Exchange Connectivity -------------------
+#
+# 7 new tables, deliberately not the ~14 the prompt names: BrokerCapability,
+# Instrument, ExecutionRequest, ExecutionApproval, BrokerCredentialReference,
+# and Fee are all runtime dataclasses (packages/execution/broker/
+# capabilities.py, instrument.py, gate.py, secrets.py, fees.py) computed
+# fresh from a broker adapter call or from Asset's own new precision
+# columns, never persisted — a persisted row for any of them would either
+# always mirror the same adapter call (BrokerCapability, Instrument) or
+# always mirror data another table already owns in full
+# (ExecutionRequest/ExecutionApproval's audit trail is the Order row itself
+# plus its decision_id/risk_decision_id FKs; a Fee is just Execution.fee).
+# See docs/broker-execution-infrastructure.md.
+
+
+class Broker(Base):
+    """One row per registered BrokerAdapter (packages/execution/broker/
+    registry.py). Exactly one row exists in this deployment — 'paper', the
+    only adapter this codebase actually instantiates — but the table exists
+    so BrokerRegistry/ExecutionRouter have something real to query instead
+    of a hardcoded single-adapter special case, and so the schema is ready
+    for a second (sandbox) adapter without a migration."""
+
+    __tablename__ = "brokers"
+    __table_args__ = (
+        CheckConstraint("kind IN ('paper','sandbox','live')", name="ck_brokers_kind"),
+        CheckConstraint("status IN ('active','inactive')", name="ck_brokers_status"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String, unique=True, nullable=False)
+    kind: Mapped[str] = mapped_column(String, nullable=False)
+    status: Mapped[str] = mapped_column(String, default="active", nullable=False)
+    is_default: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, nullable=False)
+
+
+class BrokerHealthCheck(Base):
+    """Append-only broker health history — §46-47, same
+    "a persisted trend a live view doesn't keep" role as SystemHealth
+    (Prompt 8) played for the worker loop's own liveness."""
+
+    __tablename__ = "broker_health_checks"
+    __table_args__ = (
+        CheckConstraint("state IN ('healthy','degraded','unavailable','quarantined')", name="ck_broker_health_checks_state"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    broker_id: Mapped[int] = mapped_column(ForeignKey("brokers.id"), nullable=False)
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, nullable=False, index=True)
+    state: Mapped[str] = mapped_column(String, nullable=False)
+    latency_ms: Mapped[float | None] = mapped_column(Float)
+    error_count: Mapped[int] = mapped_column(default=0, nullable=False)
+    detail: Mapped[dict] = mapped_column(JSON, default=dict)
+
+
+class AccountSnapshot(Base):
+    """§31 — append-only, one row per broker_reconciliation cadence tick
+    (apps/worker/broker_reconciliation.py). Distinct from PortfolioSnapshot
+    (Phase 3, single-account cash/equity ledger): this is specifically
+    "what the BrokerAdapter reports," the reconciliation comparison's other
+    side, not this system's own computed truth."""
+
+    __tablename__ = "account_snapshots"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    broker_id: Mapped[int] = mapped_column(ForeignKey("brokers.id"), nullable=False)
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, nullable=False, index=True)
+    balance: Mapped[float] = mapped_column(Float, nullable=False)
+    available_balance: Mapped[float] = mapped_column(Float, nullable=False)
+    equity: Mapped[float] = mapped_column(Float, nullable=False)
+    margin: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    margin_used: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    margin_available: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    currency: Mapped[str] = mapped_column(String, default="USD", nullable=False)
+
+
+class BrokerPositionSnapshot(Base):
+    """§32 — what the broker reports holding, as of a reconciliation tick.
+    NOT a duplicate of the `positions` table (this system's own internal
+    ledger, the source of truth for paper trading) — this is the other
+    side of the reconciliation comparison in
+    packages/execution/broker_reconciliation.py, e.g. what a real broker's
+    getPositions() call would return."""
+
+    __tablename__ = "broker_position_snapshots"
+    __table_args__ = (CheckConstraint("side IN ('long','short')", name="ck_broker_position_snapshots_side"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    broker_id: Mapped[int] = mapped_column(ForeignKey("brokers.id"), nullable=False)
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, nullable=False, index=True)
+    symbol: Mapped[str] = mapped_column(String, nullable=False)
+    quantity: Mapped[float] = mapped_column(Float, nullable=False)
+    average_price: Mapped[float] = mapped_column(Float, nullable=False)
+    mark_price: Mapped[float | None] = mapped_column(Float)
+    unrealized_pnl: Mapped[float | None] = mapped_column(Float)
+    realized_pnl: Mapped[float | None] = mapped_column(Float)
+    side: Mapped[str] = mapped_column(String, nullable=False)
+    leverage: Mapped[float] = mapped_column(Float, default=1.0, nullable=False)
+    margin: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+
+
+class Execution(Base):
+    """§39-42 — one row per FILL EVENT, not per order: "nunca assumir one
+    order = one fill" (§40). A fully-filled market order (today's only
+    live path before this phase) still produces exactly one Execution row;
+    a volume-capped partial fill (packages/execution/broker/paper.py, new
+    this phase) produces one Execution row for the filled slice and leaves
+    the order in a terminal 'partially_filled' state rather than fabricating
+    a resting order nothing will ever complete (see
+    docs/broker-execution-infrastructure.md's divergence on resting/queued
+    limit orders). A rejected order (0 fills) produces none."""
+
+    __tablename__ = "executions"
+    __table_args__ = (
+        CheckConstraint("side IN ('buy','sell')", name="ck_executions_side"),
+        CheckConstraint("liquidity IN ('maker','taker')", name="ck_executions_liquidity"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    order_id: Mapped[int] = mapped_column(ForeignKey("orders.id"), nullable=False)
+    broker_order_id: Mapped[str | None] = mapped_column(String)
+    symbol: Mapped[str] = mapped_column(String, nullable=False)
+    side: Mapped[str] = mapped_column(String, nullable=False)
+    quantity: Mapped[float] = mapped_column(Float, nullable=False)
+    price: Mapped[float] = mapped_column(Float, nullable=False)
+    fee: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    fee_currency: Mapped[str] = mapped_column(String, default="USD", nullable=False)
+    slippage_bps: Mapped[float | None] = mapped_column(Float)
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, nullable=False)
+    liquidity: Mapped[str] = mapped_column(String, default="taker", nullable=False)
+    execution_mode: Mapped[str] = mapped_column(String, default="paper", nullable=False)
+
+    order: Mapped["Order"] = relationship()
+
+
+class BrokerEvent(Base):
+    """§102-103 — an append-only event log for idempotent broker-event
+    processing. `payload_hash` + the unique constraint below is what makes
+    "the same event received twice" a no-op (§103) — a genuine second,
+    different event with the same (broker_id, event_type) never collides
+    because the hash covers the payload too."""
+
+    __tablename__ = "broker_events"
+    __table_args__ = (
+        UniqueConstraint("broker_id", "event_type", "payload_hash", name="uq_broker_events_dedup"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    broker_id: Mapped[int] = mapped_column(ForeignKey("brokers.id"), nullable=False)
+    event_type: Mapped[str] = mapped_column(String, nullable=False)
+    payload_hash: Mapped[str] = mapped_column(String, nullable=False)
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, nullable=False)
+    sequence: Mapped[int | None] = mapped_column()
+    processed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    detail: Mapped[dict] = mapped_column(JSON, default=dict)
+
+
+class ReconciliationRun(Base):
+    """§33-38, §78 — one row per broker_reconciliation cadence tick
+    (apps/worker/broker_reconciliation.py), including successful runs, so
+    the dashboard's Reconciliation panel (§78) has a real trend rather than
+    only ever showing the most recent failure. Distinct from — and layered
+    on top of — the existing cash-only PaperReconciliationEngine
+    (packages/portfolio/reconciliation.py, "PROMPT 8" §69-71, unchanged):
+    that one reconstructs cash from first principles every
+    RECONCILIATION_INTERVAL_SECONDS tick and already pauses trading on a
+    mismatch; this table additionally compares BrokerAdapter-reported
+    positions/orders/balances against the internal ledger."""
+
+    __tablename__ = "reconciliation_runs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    broker_id: Mapped[int] = mapped_column(ForeignKey("brokers.id"), nullable=False)
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, nullable=False, index=True)
+    ok: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    violations: Mapped[list] = mapped_column(JSON, default=list)
+    position_mismatches: Mapped[list] = mapped_column(JSON, default=list)
+    order_mismatches: Mapped[list] = mapped_column(JSON, default=list)
+    balance_diff: Mapped[float | None] = mapped_column(Float)

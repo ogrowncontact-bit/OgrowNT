@@ -14,6 +14,8 @@ from sqlalchemy.orm import Session
 
 from packages.agents import chief as chief_decision
 from packages.execution.adapters.base import ExecutionProvider
+from packages.execution.broker.base import BrokerAdapter
+from packages.execution.gate import evaluate as evaluate_execution_gate
 from packages.execution.order_manager import open_position
 from packages.portfolio.manager import evaluate_allocation
 from packages.portfolio.state import compute_state
@@ -64,8 +66,8 @@ def maybe_execute(
     advanced_risk: AdvancedRiskAssessment | None = None,
 ) -> str:
     """Returns 'skipped_tier', 'chief_blocked', 'chief_no_trade',
-    'risk_rejected', 'portfolio_rejected', or 'executed' for the caller's
-    tally."""
+    'risk_rejected', 'portfolio_rejected', 'gate_rejected', or 'executed'
+    for the caller's tally."""
     if score.tier not in TIERS_ELIGIBLE_FOR_RISK_REVIEW:
         db.add(
             TradingEvent(
@@ -177,6 +179,34 @@ def maybe_execute(
     approved_quantity = verdict.approved_quantity
     if allocation.reason == "approved_capped" and candidate_notional_pct > 0:
         approved_quantity = verdict.approved_quantity * (allocation.approved_notional_pct / candidate_notional_pct)
+
+    # "PROMPT 13" §5-6, §14-19, §65-66 — ExecutionGate: the final
+    # revalidation immediately before submit. `provider` is a
+    # PaperBrokerAdapter in the live worker loop (apps/worker/main.py) and
+    # therefore has health_check(); anything that only satisfies the
+    # narrower ExecutionProvider protocol (e.g. a test's bare
+    # PaperExecutionProvider) simply skips the broker-health sub-check
+    # rather than failing — same optional/additive discipline as
+    # advanced_risk above.
+    broker = provider if isinstance(provider, BrokerAdapter) else None
+    approval = evaluate_execution_gate(
+        db, signal_row=signal_row, asset=asset, direction=signal.direction, entry_price=signal.entry_price,
+        stop_price=signal.stop_price, quantity=approved_quantity, system_state=system_state, broker=broker,
+    )
+    if not approval.approved:
+        signal_row.status = "risk_rejected"
+        db.add(
+            TradingEvent(
+                event_type="risk_blocked", entity_type="signal", entity_id=signal_row.id,
+                payload={
+                    "layer": "execution_gate", "reason": approval.reason, "checks": approval.checks,
+                    "asset": asset.symbol, "strategy": strategy.code,
+                },
+            )
+        )
+        db.commit()
+        logger.info("%s %s GATE REJECTED reason=%s", asset.symbol, strategy.code, approval.reason)
+        return "gate_rejected"
 
     signal_row.status = "approved"
     db.commit()

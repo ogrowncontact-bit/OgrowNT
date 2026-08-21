@@ -1,5 +1,6 @@
 import { cookies } from "next/headers";
 import {
+  getAccounts,
   getActivityFeed,
   getAdvancedRisk,
   getAgents,
@@ -8,11 +9,15 @@ import {
   getAssets,
   getAutonomousStatus,
   getBacktests,
+  getBrokerHealth,
+  getBrokers,
   getCircuitBreakers,
   getConcentration,
   getContradictions,
   getDecisions,
   getDynamicWatchlist,
+  getExecutionHealth,
+  getExecutions,
   getGlobalMarketSessions,
   getHealth,
   getKillSwitchState,
@@ -30,6 +35,7 @@ import {
   getPortfolioExposure,
   getPositions,
   getPromotionCheck,
+  getReconciliationRuns,
   getRegimes,
   getResearchReport,
   getRiskState,
@@ -58,6 +64,7 @@ import { AICommandCenter } from "@/components/AICommandCenter";
 import { AutonomousResearchLab } from "@/components/AutonomousResearchLab";
 import { GlobalMarketCommandCenter } from "@/components/GlobalMarketCommandCenter";
 import { CapitalDefenseCenter } from "@/components/CapitalDefenseCenter";
+import { ExecutionCommandCenter } from "@/components/ExecutionCommandCenter";
 import { StrategyLab } from "@/components/StrategyLab";
 import { AutonomousStatusBadge } from "@/components/AutonomousStatusBadge";
 import { PauseResumeButton } from "@/components/PauseResumeButton";
@@ -125,7 +132,7 @@ export default async function DashboardPage() {
       getContradictions(token, 20),
     ]);
 
-  const [backtests, promotionChecks, analytics, researchReport, marketUniverse, volatilityEvents, marketAnomalies, dynamicWatchlist, opportunityClusters, globalMarketSessions, advancedRisk, circuitBreakers, concentration, killSwitchState] =
+  const [backtests, promotionChecks, analytics, researchReport, marketUniverse, volatilityEvents, marketAnomalies, dynamicWatchlist, opportunityClusters, globalMarketSessions, advancedRisk, circuitBreakers, concentration, killSwitchState, brokers, accounts, executions, reconciliationRuns, executionHealth] =
     await Promise.all([
       getBacktests(token, 8),
       Promise.all((strategyLearning ?? []).map((s) => getPromotionCheck(token, s.strategy_id))),
@@ -141,10 +148,22 @@ export default async function DashboardPage() {
       getCircuitBreakers(token),
       getConcentration(token),
       getKillSwitchState(token),
+      getBrokers(token),
+      getAccounts(token),
+      getExecutions(token),
+      getReconciliationRuns(token),
+      getExecutionHealth(token),
     ]);
   const promotionByStrategyId = new Map(
     (strategyLearning ?? []).map((s, i) => [s.strategy_id, promotionChecks[i]])
   );
+  // Broker health needs each broker's id, only known once `brokers` above
+  // resolves — a third, dependent round-trip, same pattern as
+  // promotionChecks depending on strategyLearning.
+  const brokerHealthEntries = await Promise.all(
+    (brokers ?? []).map(async (b) => [b.id, await getBrokerHealth(token, b.id)] as const)
+  );
+  const brokerHealth = Object.fromEntries(brokerHealthEntries);
 
   const systemOnline = health?.overall === "green";
   const dailyPnl = portfolio?.daily_pnl ?? 0;
@@ -486,6 +505,15 @@ export default async function DashboardPage() {
         breakers={circuitBreakers}
         concentration={concentration}
         killSwitchState={killSwitchState}
+      />
+
+      <ExecutionCommandCenter
+        brokers={brokers}
+        brokerHealth={brokerHealth}
+        accounts={accounts}
+        executions={executions}
+        reconciliationRuns={reconciliationRuns}
+        executionHealth={executionHealth}
       />
 
       <NewsIntelligenceCenter

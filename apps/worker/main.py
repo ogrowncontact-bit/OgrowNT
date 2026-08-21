@@ -62,6 +62,21 @@ Runs three independent cadences (docs/blueprint/05-event-flow.md §Cadência):
   when a signal arrives), keeping SystemState.capital_preservation_mode/
   zero_trade_mode fresh and raising an Alert on a fresh escalation into
   HIGH_RISK or worse.
+- Every BROKER_HEALTH_INTERVAL_SECONDS: BrokerHealthWorker
+  (apps/worker/broker_health.py, packages/execution/health.py, "PROMPT 13"
+  §46-47) — a BrokerHealthCheck row per registered broker, alerting only on
+  a fresh transition into UNAVAILABLE/QUARANTINED.
+- Every ORDER_MONITOR_INTERVAL_SECONDS: OrderMonitorWorker
+  (apps/worker/order_monitor.py, "PROMPT 13" §106) — sweeps any Order row
+  stuck in a non-terminal status past its staleness window to EXPIRED; a
+  hygiene check, not a matching engine (PaperBrokerAdapter fills
+  synchronously).
+- Every BROKER_RECONCILIATION_INTERVAL_SECONDS: ReconciliationWorker
+  (apps/worker/broker_reconciliation.py, packages/execution/
+  broker_reconciliation.py, "PROMPT 13" §33-38) — compares BrokerAdapter-
+  reported positions/orders/balances against the internal ledger, layered
+  on top of (not replacing) the existing cash-only PaperReconciliationEngine
+  cadence below.
 
 Prompt 6 §37 asks for NewsIngestionWorker / NewsAnalysisWorker /
 EventDetectionWorker / SentimentWorker / MacroCalendarWorker /
@@ -98,12 +113,15 @@ import signal
 import time
 
 from apps.worker.alerts import run_alert_delivery_cycle
+from apps.worker.broker_health import run_broker_health_cycle
+from apps.worker.broker_reconciliation import run_broker_reconciliation_cycle
 from apps.worker.capital_defense import run_capital_defense_cycle
 from apps.worker.history import backfill_active_assets
 from apps.worker.macro_agent import run_macro_calendar_cycle
 from apps.worker.market_alerts import MarketAlertTracker
 from apps.worker.market_intelligence import run_market_intelligence_cycle, run_universe_cycle
 from apps.worker.news_agent import run_news_cycle
+from apps.worker.order_monitor import run_order_monitor_cycle
 from apps.worker.scanner import run_scan_cycle
 from apps.worker.sentiment_agent import run_sentiment_shift_cycle
 from apps.worker.strategy_runner import run_strategy_cycle
@@ -112,7 +130,8 @@ from apps.worker.trade_monitor import run_trade_monitor_cycle
 from packages.data.connectors.macro.factory import get_macro_calendar_provider
 from packages.data.connectors.market.factory import get_market_data_provider
 from packages.data.connectors.news.factory import get_news_provider
-from packages.execution.adapters.paper import PaperExecutionProvider
+from packages.execution.broker.paper import PaperBrokerAdapter
+from packages.execution.broker.registry import BrokerRegistry
 from packages.llm.client import LLMClient
 from packages.notifications.dispatcher import NotificationDispatcher
 from packages.portfolio.reconciliation import reconcile_and_enforce
@@ -148,7 +167,8 @@ def main() -> None:
         "Worker starting — market_data=%s news=%s macro=%s llm_configured=%s "
         "scan_interval=%ss news_interval=%ss strategy_interval=%ss research_interval=%ss "
         "macro_calendar_interval=%ss sentiment_shift_interval=%ss alert_delivery_interval=%ss "
-        "universe_interval=%ss market_intelligence_interval=%ss capital_defense_interval=%ss",
+        "universe_interval=%ss market_intelligence_interval=%ss capital_defense_interval=%ss "
+        "broker_health_interval=%ss order_monitor_interval=%ss broker_reconciliation_interval=%ss",
         provider.name, news_provider.name, macro_provider.name, llm_client.is_available(),
         settings.scan_interval_seconds, settings.news_interval_seconds,
         settings.strategy_interval_seconds, settings.research_interval_seconds,
@@ -156,6 +176,8 @@ def main() -> None:
         settings.alert_delivery_interval_seconds,
         settings.universe_interval_seconds, settings.market_intelligence_interval_seconds,
         settings.capital_defense_interval_seconds,
+        settings.broker_health_interval_seconds, settings.order_monitor_interval_seconds,
+        settings.broker_reconciliation_interval_seconds,
     )
     if not llm_client.is_available():
         logger.warning(
@@ -196,16 +218,27 @@ def main() -> None:
     last_universe_run = 0.0
     last_market_intelligence_run = 0.0
     last_capital_defense_run = 0.0
+    last_broker_health_run = 0.0
+    last_order_monitor_run = 0.0
+    last_broker_reconciliation_run = 0.0
     tracker = CadenceFailureTracker()
     market_alert_tracker = MarketAlertTracker()
 
     while _running:
         cycle_start = time.monotonic()
         db = SessionLocal()
-        # Paper execution provider — never a real broker/exchange adapter.
-        # Built outside any cadence's try/except so a scan/monitor failure
-        # can't leave later cadences in this same iteration without one.
-        exec_provider = PaperExecutionProvider(db)
+        # Paper broker adapter — never a real broker/exchange adapter (see
+        # packages/execution/broker/live.py + packages/execution/
+        # firewall.py for why "live" stays structurally unreachable). Built
+        # outside any cadence's try/except so a scan/monitor failure can't
+        # leave later cadences in this same iteration without one.
+        # "PROMPT 13": PaperBrokerAdapter is a strict superset of the
+        # PaperExecutionProvider this variable used to hold — every
+        # existing caller (open_position/close_position/reduce_position,
+        # run_strategy_cycle) accepts it unmodified.
+        exec_provider = PaperBrokerAdapter(db)
+        broker_registry = BrokerRegistry()
+        broker_registry.register(exec_provider, is_default=True)
         try:
             try:
                 run_scan_cycle(db, provider, market_alert_tracker)
@@ -292,6 +325,33 @@ def main() -> None:
                     logger.exception("capital_defense cadence failed")
                     tracker.record_failure(db, "capital_defense", str(exc))
                 last_capital_defense_run = cycle_start
+
+            if cycle_start - last_broker_health_run >= settings.broker_health_interval_seconds:
+                try:
+                    run_broker_health_cycle(db, broker_registry)
+                    tracker.record_success("broker_health")
+                except Exception as exc:  # noqa: BLE001
+                    logger.exception("broker_health cadence failed")
+                    tracker.record_failure(db, "broker_health", str(exc))
+                last_broker_health_run = cycle_start
+
+            if cycle_start - last_order_monitor_run >= settings.order_monitor_interval_seconds:
+                try:
+                    run_order_monitor_cycle(db)
+                    tracker.record_success("order_monitor")
+                except Exception as exc:  # noqa: BLE001
+                    logger.exception("order_monitor cadence failed")
+                    tracker.record_failure(db, "order_monitor", str(exc))
+                last_order_monitor_run = cycle_start
+
+            if cycle_start - last_broker_reconciliation_run >= settings.broker_reconciliation_interval_seconds:
+                try:
+                    run_broker_reconciliation_cycle(db, broker_registry)
+                    tracker.record_success("broker_reconciliation")
+                except Exception as exc:  # noqa: BLE001
+                    logger.exception("broker_reconciliation cadence failed")
+                    tracker.record_failure(db, "broker_reconciliation", str(exc))
+                last_broker_reconciliation_run = cycle_start
 
             if cycle_start - last_research_run >= settings.research_interval_seconds:
                 try:

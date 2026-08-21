@@ -1410,3 +1410,125 @@ class HistoricalAnalogOut(BaseModel):
     worst_pnl: float | None
     quality: str
     disclaimer: str
+
+
+# --- "PROMPT 13" Universal Broker & Exchange Connectivity ---------------
+
+
+class BrokerCapabilitiesOut(BaseModel):
+    supports_market_orders: bool
+    supports_limit_orders: bool
+    supports_stop_orders: bool
+    supports_short: bool
+    supports_fractional: bool
+    supports_crypto: bool
+    supports_stocks: bool
+    supports_forex: bool
+    supports_futures: bool
+    supports_websocket: bool
+
+
+class BrokerOut(BaseModel):
+    id: int
+    name: str
+    kind: str
+    status: str
+    is_default: bool
+    configured: bool
+    capabilities: BrokerCapabilitiesOut
+
+
+class BrokerHealthOut(BaseModel):
+    broker_name: str
+    state: str
+    latency_ms: float | None
+    recent_error_count: int
+    reasons: list[str]
+
+
+class AccountOut(BaseModel):
+    broker_name: str
+    balance: float
+    available_balance: float
+    equity: float
+    margin: float
+    margin_used: float
+    margin_available: float
+    currency: str
+    ts: datetime
+
+
+class ExecutionOut(BaseModel):
+    id: int
+    order_id: int
+    broker_order_id: str | None
+    symbol: str
+    side: str
+    quantity: float
+    price: float
+    fee: float
+    fee_currency: str
+    slippage_bps: float | None
+    ts: datetime
+    liquidity: str
+    execution_mode: str
+
+
+class OrderDetailOut(BaseModel):
+    id: int
+    position_id: int | None
+    signal_id: int | None
+    broker_order_id: str | None
+    broker_name: str | None
+    order_type: str
+    side: str
+    qty: float
+    limit_price: float | None
+    stop_price: float | None
+    take_profit_price: float | None
+    time_in_force: str | None
+    status: str
+    execution_mode: str
+    submitted_at: datetime | None
+    filled_at: datetime | None
+    filled_price: float | None
+    expected_price: float | None
+    fees: float | None
+    slippage_bps: float | None
+    latency_ms: float | None
+    idempotency_key: str | None
+    decision_id: int | None
+    risk_decision_id: int | None
+    fills: list[ExecutionOut]
+
+
+class ReconciliationOut(BaseModel):
+    id: int
+    broker_name: str
+    ts: datetime
+    ok: bool
+    violations: list[str]
+    position_mismatches: list[str]
+    order_mismatches: list[str]
+    balance_diff: float | None
+
+
+class InstrumentOut(BaseModel):
+    symbol: str
+    asset_class: str
+    tick_size: float | None
+    step_size: float | None
+    min_quantity: float | None
+    min_notional: float | None
+
+
+class ExecutionHealthOut(BaseModel):
+    evaluated: bool
+    orders_evaluated: int
+    filled_orders: int
+    rejected_orders: int
+    fill_ratio: float | None
+    avg_latency_ms: float | None
+    avg_slippage_bps: float | None
+    avg_price_deviation_pct: float | None
+    market_impact_estimate_bps: float | None

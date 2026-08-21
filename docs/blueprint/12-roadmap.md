@@ -2228,6 +2228,212 @@ Divergências deliberadas, documentadas (não silenciosas):
    ausência de bibliotecas estatísticas além de Python puro já
    documentada no Prompt 11.
 
+## "PROMPT 13" — Universal Broker & Exchange Connectivity + Execution Infrastructure (pós-Fase 12) — **status: implementada e validada nesta sessão**
+
+O "PROMPT 13" pede uma camada `BrokerAdapter` universal, um `ExecutionGate`
+final antes de submeter qualquer ordem, infraestrutura de ciclo de vida de
+ordens (idempotência, fills parciais, estados UNKNOWN), health/reconciliação
+de broker, e uma bateria extensa de segurança — sobre a restrição central
+citada literalmente: **"EXECUTION MUST BE BLOCKED"** para tudo exceto paper,
+**"Mesmo que credenciais de produção existam: EXECUTION MUST BE BLOCKED"**,
+e **"se broker retornar estado desconhecido: UNKNOWN. Nunca assumir
+FILLED."** Mapeando os 113 §§ contra o código já existente — o
+`ExecutionProvider`/`PaperExecutionProvider` da Fase 3, o esquema de
+idempotência e a `PaperReconciliationEngine` cash-only do Prompt 8, o motor
+de sessões de mercado do Prompt 11, e o `evaluate_net_expectancy` do Prompt
+12 (deixado deliberadamente por ligar até este módulo existir) — este prompt
+não reconstrói execução do zero: estende aditivamente, com uma pegada de
+schema deliberadamente fina de 7 tabelas novas (não as ~14 nomeadas no
+prompt — `BrokerCapability`, `Instrument`, `ExecutionRequest`,
+`ExecutionApproval`, `BrokerCredentialReference` e `Fee` são todas
+dataclasses computadas em runtime, nunca persistidas — ver
+`packages/shared/models.py`'s comentário de secção "PROMPT 13" e
+`docs/broker-execution-infrastructure.md`).
+
+- [x] **DB — migração `0020`: 7 tabelas novas + extensões** (§3, §31-32,
+      §40, §102, §104) — `brokers`, `broker_health_checks`,
+      `account_snapshots`, `broker_position_snapshots`, `executions` (uma
+      linha por FILL, nunca por ordem — §40 "nunca assumir one order = one
+      fill"), `broker_events` (dedupe idempotente por hash de payload),
+      `reconciliation_runs`; `assets` ganha `tick_size`/`step_size`/
+      `min_quantity`/`min_notional`; `orders` ganha `broker_id`/
+      `execution_mode`/`decision_id`/`risk_decision_id`/`stop_price`/
+      `take_profit_price`/`time_in_force` + CHECK constraints de
+      `order_type`/`status` alargadas aditivamente (todo valor pré-existente
+      mantido). upgrade→downgrade→upgrade verificado contra Postgres real
+- [x] **`packages/execution/broker/` — BrokerAdapter + Registry + Paper +
+      Live** (§3, §20-25) — `BrokerAdapter` é um `Protocol` `@runtime_checkable`,
+      superset estrutural do `ExecutionProvider` já existente (nada na
+      interface original mudou; `PaperBrokerAdapter(PaperExecutionProvider)`
+      é um superset estrito, drop-in). Capacidades novas e genuínas:
+      fill parcial limitado por volume (`PARTIAL_FILL_VOLUME_THRESHOLD=3.0`
+      — uma ordem que pede mais do que 3× o volume da barra enche só a
+      porção realista, `status="partially_filled"`, resto simplesmente não
+      enche — nunca uma ordem-resto fabricada); ordem limit já-marketable
+      enche imediatamente sem nunca encher pior que o limite; uma ordem
+      limit NÃO-marketable é honestamente REJEITADA
+      (`reason="limit_queuing_not_implemented"`) em vez de fabricar um
+      estado pendente que nada neste broker paper síncrono voltaria a
+      resolver. `LiveBrokerAdapter` autodestrói-se em `__init__` e em
+      qualquer acesso a atributo via `__getattr__`
+- [x] **`packages/execution/firewall.py` — LiveTradingFirewall** (§2, §26-27,
+      §83, §97) — três camadas independentes mantêm live trading
+      estruturalmente inalcançável: (1) o CHECK constraint de
+      `SystemState.trading_mode` (só `'paper'`/`'live_disabled'` — `'live'`
+      nunca foi valor legal); (2) `ENABLE_LIVE_TRADING: Final[bool] = False`
+      hardcoded, com um tripwire que levanta `RuntimeError` no import se
+      alguma vez for `True`; (3) `LiveBrokerAdapter`. O TWO-KEY SAFETY do
+      §27 (SYSTEM_ENABLE + USER_ENABLE) é deliberadamente NÃO implementado
+      como mecanismo de desbloqueio funcional nesta fase — construir um
+      desbloqueio real agora seria construir a própria porta que esta fase
+      tem de manter soldada
+- [x] **`packages/execution/gate.py` — ExecutionGate** (§5-6, §14-19, §65-66,
+      §71-72) — revalidação final imediatamente antes de
+      `order_manager.py`, inserida em `apps/worker/risk_execution.py::
+      maybe_execute()` entre a aprovação do Portfolio Manager e
+      `open_position()`. Pipeline: firewall (primeiro, incondicional) →
+      expiração do sinal → quantidade>0 → estado da sessão de mercado →
+      saúde do broker (opcional) → disponibilidade de dados → desvio de
+      preço (`MAX_PRICE_DEVIATION_PCT=1.0`, constante de engenharia fixa,
+      não configurável via YAML) → precisão do instrumento →
+      **net expectancy** (liga finalmente o `evaluate_net_expectancy` do
+      Prompt 12, deixado deliberadamente por ligar até este módulo existir)
+- [x] **`packages/execution/instrument.py` + `fees.py`** (§60-64) —
+      `InstrumentSpec`/`validate_precision` sobre as novas colunas de
+      precisão de `Asset`; `FeeEngine` sobre o `FeeModel` já existente,
+      relocalizado de `packages/backtest/execution_models.py` para um novo
+      `packages/execution/fee_model.py` para evitar uma dependência
+      circular (`packages/execution` nunca pode importar de
+      `packages/backtest`) — `execution_models.py` reexporta os mesmos
+      nomes, os 5 consumidores pré-existentes continuam a funcionar sem
+      alteração
+- [x] **`packages/execution/quality.py` + `health.py`** (§43-47) —
+      `assess_execution_quality` é agregação read-side pura sobre campos já
+      capturados em `Order` (Prompt 8) mais as novas linhas `Execution`;
+      `assess_broker_health` segue o mesmo padrão "chamada atual + tendência
+      persistida" de `worker_health.py`, promovendo UNAVAILABLE a
+      QUARANTINED só após uma sequência de falhas, nunca uma falha isolada
+- [x] **`packages/execution/rate_limit.py` + `retry.py` + `clock.py` +
+      `symbol_mapper.py`** (§51-59) — arquitetura pronta, não exercida
+      contra um limite/relógio/símbolo real (`PaperBrokerAdapter` não faz
+      chamadas de rede nenhumas) — mesma honestidade de scoping do
+      `FailoverMarketDataProvider` (Prompt 12); `RETRYABLE_OPERATIONS` é uma
+      allowlist que exclui estruturalmente `create_order`/`submit_order`/
+      `cancel_order`/`replace_order` — nunca reenvio automático de uma
+      ordem (§53-54)
+- [x] **`packages/execution/router.py` — ExecutionRouter** (§67-70) —
+      pré-filtros duros (nunca um adapter `kind=="live"`; capacidade;
+      saúde) antes de pontuar sobrevivntes num blend fee(0.6)+latência(0.4)
+      — nunca só fee (§69), estruturalmente provado pelo red-team #9
+- [x] **`packages/execution/broker_reconciliation.py` + `secrets.py`**
+      (§28-38, §78, §92-94) — camada de reconciliação a nível de broker
+      SOBRE, nunca substituindo, a `PaperReconciliationEngine` cash-only do
+      Prompt 8; num mismatch pausa via `SystemState.trading_paused`
+      (nunca o Kill Switch — parar por integridade contabilística é
+      distinto de parar por risco de mercado). Honestidade documentada:
+      como `PaperBrokerAdapter` deriva a sua própria vista das MESMAS
+      tabelas contra as quais é comparada, este check nunca encontrará
+      divergência real por construção nesta implantação — testado com um
+      stub que reporta números deliberadamente diferentes. `SecretProvider`
+      só é chamável por um `BrokerAdapter`, nunca por agent/strategy/LLM —
+      provado pelo red-team AST #3
+- [x] **Ciclo de vida de ordens** (§40-41, §79-81) — `open_position()`
+      trata honestamente um fill `partially_filled`, dimensiona a
+      `Position` à quantidade REALMENTE enchida, e cria uma linha
+      `Execution` por fill; `close_position()`/`reduce_position()` ganham
+      criação de `Execution` no caminho de fill completo (deliberadamente
+      sem tratamento de fill parcial no close/reduce — ver divergências)
+- [x] **Wiring — ExecutionGate + 3 cadências novas** (§46-47, §106) —
+      `apps/worker/main.py` troca `PaperExecutionProvider` por
+      `PaperBrokerAdapter`; `broker_health` (60s), `order_monitor` (60s,
+      varre ordens não-terminais presas para `expired`),
+      `broker_reconciliation` (300s, mesmo intervalo da reconciliação de
+      caixa já existente)
+- [x] **API — `apps/api/routers/brokers.py` + `execution.py`** (§105) —
+      `GET /api/brokers`, `/{id}`, `/{id}/health`, `GET /api/accounts`,
+      `GET /api/orders/{id}`, `GET /api/executions`,
+      `GET /api/reconciliation`, `GET /api/instruments[/{symbol}]`,
+      `GET /api/execution/health` — todos admin-only
+- [x] **Dashboard "Execution Command Center"** — brokers registados, saúde,
+      contas/posições reportadas pelo broker, ordens recentes, execuções,
+      corridas de reconciliação, qualidade de execução
+- [x] **Testes** — 159 novos (1401/1401 no total): `test_broker_adapter.py`
+      (22), `test_broker_registry.py` (7), `test_live_trading_firewall.py`
+      (8), `test_execution_gate.py` (11), `test_broker_health.py` (5),
+      `test_broker_reconciliation.py` (8), `test_execution_router.py` (7),
+      `test_instrument_precision.py` (8), `test_fee_engine.py` (6),
+      `test_execution_quality.py` (5), `test_rate_limit_manager.py` (5),
+      `test_retry_policy.py` (6), `test_clock_service.py` (5),
+      `test_symbol_mapper.py` (3), `test_broker_event_store.py` (4),
+      `test_order_lifecycle.py` (5), `test_execution_broker_api.py` (12),
+      bateria red-team de 20 itens (`test_execution_red_team.py`, AST-walk +
+      comportamental), chaos testing de 7 itens (`test_execution_chaos.py`
+      — timeout de broker, outage a meio de reconciliação, clock drift,
+      evento duplicado/fora de ordem, estado UNKNOWN nunca tratado como
+      FILLED), e 5 cenários end-to-end (`test_broker_e2e_scenarios.py`):
+      Cenário A (pipeline paper completo via `maybe_execute()` até
+      `outcome=="executed"` + linha `Execution` + reconciliação limpa),
+      Cenário B (falha de rede do broker → UNKNOWN → sistema continua com
+      segurança para um sinal seguinte), Cenário C (mismatch de
+      reconciliação → `trading_paused=True` → um sinal novo genuinamente
+      bloqueado pelo `evaluate_signal()` sovereign), Cenário D (um ciclo
+      real dos 18 agentes nunca cria Order/Position — prova dinâmica
+      complementando a prova estática AST #1-#4), Cenário E (tentativa de
+      trading live bloqueada através do pipeline `maybe_execute()`
+      completo — revelou uma QUARTA camada de defesa já existente desde o
+      Prompt 8, `packages/risk/engine.py`'s passo 1c, que bloqueia
+      `trading_mode` fora de `(None,'paper')` antes mesmo do
+      ExecutionGate)
+- [x] **verificado ao vivo** contra Postgres real + browser real: worker
+      completo corrido (`python -m apps.worker.main`) produziu ciclos reais
+      `broker_health`/`order_monitor`/`broker_reconciliation`; API real com
+      token admin real (`/api/brokers`/`/api/accounts`/`/api/executions`/
+      `/api/execution/health` todos 200 com dados reais); dashboard real
+      (login via browser, painel "Execution Command Center" com dados reais,
+      zero erros de consola). `ruff`/`mypy`/suite completa limpos
+      (1401/1401) numa corrida exclusiva, mais `tsc --noEmit`/`eslint`
+      limpos no dashboard
+
+Divergências deliberadas, documentadas (não silenciosas):
+
+1. 7 tabelas novas, não as ~14 nomeadas no prompt — `BrokerCapability`,
+   `Instrument`, `ExecutionRequest`, `ExecutionApproval`,
+   `BrokerCredentialReference` e `Fee` são dataclasses runtime, nunca
+   persistidas (ver `packages/shared/models.py`'s comentário de secção).
+2. Fill parcial só para ordens MARKET (limitado por volume); uma ordem
+   LIMIT não-marketable é honestamente rejeitada em vez de deixada como
+   ordem pendente fabricada — este broker paper síncrono não tem order
+   book/matching engine.
+3. `FeeModel`/`PROVIDER_FEE_RATES`/`FEE_KINDS`/`default_fee_model()` foram
+   fisicamente movidos de `packages/backtest/execution_models.py` para um
+   novo `packages/execution/fee_model.py`, para evitar uma dependência
+   circular (`packages/execution` não pode importar de `packages/backtest`);
+   `execution_models.py` reexporta os mesmos nomes, zero quebra nos 5
+   consumidores pré-existentes.
+4. `MAX_PRICE_DEVIATION_PCT` (ExecutionGate) é uma constante de engenharia
+   fixa, não configurável via `risk_limits.yaml` — é uma tolerância de
+   "o preço moveu-se demasiado desde que o sinal foi pontuado para
+   reenviar às cegas", não um limite de risco de portfólio.
+5. Reconciliação a nível de broker é "limpa por construção" nesta
+   implantação — `PaperBrokerAdapter` deriva a sua vista das mesmas
+   tabelas contra as quais é comparada, então nunca encontrará uma
+   divergência real por si só; testada com um stub que reporta números
+   deliberadamente diferentes, mesma honestidade já usada para o
+   `FailoverMarketDataProvider` (Prompt 12).
+6. Sem um segundo broker real para testar failover/routing contra — mesmo
+   precedente do Prompt 12. `RateLimitManager`/`ClockService`/
+   `SymbolMapper` estão arquitetura-pronta mas não exercidos contra uma
+   segunda fonte real, mesma honestidade de scoping.
+7. O TWO-KEY SAFETY (§27) não é implementado como mecanismo de desbloqueio
+   funcional — LIVE continua bloqueado independentemente do estado de
+   qualquer chave nesta fase.
+8. `close_position()`/`reduce_position()` não recebem o mesmo tratamento
+   de fill parcial que `open_position()` — uma ordem de fecho/redução é
+   quase sempre muito menor que a ordem de abertura original, raramente
+   ultrapassa o limiar de volume; um fill parcial nesse caminho é tratado
+   de forma conservadora (nada muda, o Trade Monitor tenta de novo no
+   próximo ciclo), a mesma forma como uma rejeição total já era tratada.
+
 ## Evolução futura (fora de âmbito até validação completa)
 
 Live brokers, exchanges reais (crypto/forex/ações), ML avançado, deep learning,

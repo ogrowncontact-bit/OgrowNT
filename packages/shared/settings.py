@@ -164,6 +164,21 @@ class Settings(BaseSettings):
     max_worker_restarts_per_window: int = 5
     restart_window_seconds: int = 3600
 
+    # "PROMPT 13" §46-47/§106's BrokerHealthWorker cadence
+    # (apps/worker/broker_health.py) — short, matching alert_delivery's own
+    # "time-sensitive" framing: a degraded broker should be caught quickly.
+    broker_health_interval_seconds: int = 60
+    # §106's OrderMonitorWorker cadence (apps/worker/order_monitor.py) — a
+    # hygiene sweep for stuck non-terminal orders, same cadence length as
+    # broker health since both are cheap, defensive checks.
+    order_monitor_interval_seconds: int = 60
+    # §33-38/§106's ReconciliationWorker cadence
+    # (apps/worker/broker_reconciliation.py) — matches the existing cash-
+    # only reconciliation_interval_seconds (Prompt 8), since both compare
+    # the SAME internal ledger against a second source of truth on the same
+    # "catch a mismatch quickly" rationale.
+    broker_reconciliation_interval_seconds: int = 300
+
 
 @lru_cache
 def get_settings() -> Settings:

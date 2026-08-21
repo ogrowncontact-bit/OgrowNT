@@ -3,6 +3,24 @@ exit into ExecutionProvider calls, and persists the result (orders,
 positions, trades) plus the resulting cash/equity change via the Portfolio
 Engine. This is the only code that creates Position/Trade rows — the
 Execution Engine agent (docs/blueprint/04-agents-architecture.md#agent-11).
+
+"PROMPT 13" §40-41: open_position() now honestly handles a
+'partially_filled' OrderResult (PaperBrokerAdapter, packages/execution/
+broker/paper.py — the original PaperExecutionProvider never returns this
+status, so every pre-existing caller/test is unaffected) by opening the
+Position at the quantity that ACTUALLY filled (result.detail["filled_qty"],
+falling back to the originally requested quantity when a provider doesn't
+supply it) rather than either rejecting the whole order or silently
+pretending the full size filled. close_position()/reduce_position()
+deliberately do NOT get the same treatment — a closing/reducing order is
+essentially always much smaller than the position's own original opening
+order, so it practically never trips PaperBrokerAdapter's volume-based
+partial-fill threshold, and building full partial-close semantics (a
+position simultaneously mid-close and still partially open) is a
+meaningfully bigger change than this phase's scope calls for; a partial
+fill on close/reduce is treated the same conservative way a full rejection
+already was (nothing changes, Trade Monitor retries next cycle). See
+docs/broker-execution-infrastructure.md.
 """
 from __future__ import annotations
 
@@ -13,7 +31,7 @@ from sqlalchemy.orm import Session
 
 from packages.execution.adapters.base import ExecutionProvider, OrderRequest, Side
 from packages.portfolio.state import get_latest_cash, refresh_snapshot
-from packages.shared.models import Asset, Order, Position, Signal, SystemState, Trade, TradingEvent
+from packages.shared.models import Asset, Execution, Order, Position, Signal, SystemState, Trade, TradingEvent
 
 
 def _current_belt_level(db: Session) -> str:
@@ -73,7 +91,7 @@ def open_position(db: Session, provider: ExecutionProvider, *, signal: Signal, a
     db.flush()
     db.add(TradingEvent(event_type="order_submitted", entity_type="order", entity_id=order.id, payload={"side": side, "qty": quantity, "purpose": "open"}))
 
-    if result.status != "filled" or result.filled_price is None:
+    if result.status not in ("filled", "partially_filled") or result.filled_price is None:
         db.add(
             TradingEvent(
                 event_type="order_rejected", entity_type="order", entity_id=order.id,
@@ -83,6 +101,11 @@ def open_position(db: Session, provider: ExecutionProvider, *, signal: Signal, a
         db.commit()
         return None
 
+    # "PROMPT 13" §40-41 — never assume the requested quantity is what
+    # actually filled. min()-clamped defensively: a provider's own
+    # filled_qty can never legitimately exceed what was requested.
+    filled_qty = min(result.detail.get("filled_qty", quantity), quantity)
+
     position = Position(
         asset_id=asset.id,
         strategy_id=signal.strategy_id,
@@ -91,7 +114,7 @@ def open_position(db: Session, provider: ExecutionProvider, *, signal: Signal, a
         entry_price=result.filled_price,
         current_stop=signal.stop_price,
         target_price=signal.target_price,
-        size=quantity,
+        size=filled_qty,
         opened_at=result.filled_at,
         status="open",
     )
@@ -99,16 +122,30 @@ def open_position(db: Session, provider: ExecutionProvider, *, signal: Signal, a
     db.flush()
     order.position_id = position.id
     signal.status = "executed"
-    db.add(TradingEvent(event_type="order_filled", entity_type="order", entity_id=order.id, payload={"filled_price": result.filled_price}))
+    db.add(
+        Execution(
+            order_id=order.id, broker_order_id=order.broker_order_id, symbol=asset.symbol, side=side,
+            quantity=filled_qty, price=result.filled_price, fee=result.fees or 0.0, fee_currency="USD",
+            slippage_bps=result.slippage_bps, ts=result.filled_at or datetime.now(timezone.utc),
+            liquidity="taker", execution_mode=getattr(provider, "kind", "paper"),
+        )
+    )
+    fill_event_type = "order_filled" if result.status == "filled" else "order_partially_filled"
+    db.add(
+        TradingEvent(
+            event_type=fill_event_type, entity_type="order", entity_id=order.id,
+            payload={"filled_price": result.filled_price, "filled_qty": filled_qty, "requested_qty": quantity},
+        )
+    )
     db.add(
         TradingEvent(
             event_type="position_opened", entity_type="position", entity_id=position.id,
-            payload={"asset": asset.symbol, "direction": position.direction, "entry_price": position.entry_price, "size": quantity},
+            payload={"asset": asset.symbol, "direction": position.direction, "entry_price": position.entry_price, "size": filled_qty},
         )
     )
     db.commit()
 
-    notional = result.filled_price * quantity
+    notional = result.filled_price * filled_qty
     new_cash = get_latest_cash(db) - notional - (result.fees or 0.0)
     refresh_snapshot(db, cash=new_cash, safety_belt_level=_current_belt_level(db))
 
@@ -181,6 +218,14 @@ def close_position(
         closed_at=result.filled_at,
     )
     db.add(trade)
+    db.add(
+        Execution(
+            order_id=order.id, broker_order_id=order.broker_order_id, symbol=asset.symbol, side=side,
+            quantity=order.qty, price=result.filled_price, fee=result.fees or 0.0, fee_currency="USD",
+            slippage_bps=result.slippage_bps, ts=result.filled_at or datetime.now(timezone.utc),
+            liquidity="taker", execution_mode=getattr(provider, "kind", "paper"),
+        )
+    )
     db.add(TradingEvent(event_type="order_filled", entity_type="order", entity_id=order.id, payload={"filled_price": result.filled_price}))
     db.add(
         TradingEvent(
@@ -274,6 +319,14 @@ def reduce_position(
         closed_at=result.filled_at,
     )
     db.add(trade)
+    db.add(
+        Execution(
+            order_id=order.id, broker_order_id=order.broker_order_id, symbol=asset.symbol, side=side,
+            quantity=reduce_qty, price=result.filled_price, fee=result.fees or 0.0, fee_currency="USD",
+            slippage_bps=result.slippage_bps, ts=result.filled_at or datetime.now(timezone.utc),
+            liquidity="taker", execution_mode=getattr(provider, "kind", "paper"),
+        )
+    )
     db.add(TradingEvent(event_type="order_filled", entity_type="order", entity_id=order.id, payload={"filled_price": result.filled_price}))
     db.add(
         TradingEvent(
