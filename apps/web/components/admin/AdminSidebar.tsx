@@ -53,6 +53,7 @@ const NAV_GROUPS: NavGroup[] = [
   {
     label: "System",
     items: [
+      { href: "/admin/demo", label: "Demo Mode" },
       { href: "/admin/settings", label: "Settings" },
       { href: "/admin/audit", label: "Audit Logs" },
     ],
