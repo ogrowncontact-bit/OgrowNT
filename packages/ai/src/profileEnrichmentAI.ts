@@ -1,5 +1,6 @@
 import { callStructured, isAiEnabled } from "./client";
 import { enforceNonDiagnostic } from "./guardrails/nonDiagnosticFilter";
+import { containsAbsoluteClaim } from "./reportQualityValidator";
 import { resolveModelConfig, type AIModelConfig } from "./modelConfig";
 import { bucketConfidence } from "./confidence";
 import { compilePrompt, type AssessmentPersona } from "./promptEngine";
@@ -164,7 +165,7 @@ export async function enrichProfileWithAI(
     .filter((i) => validTypes.has(i.type as InsightType))
     .map((i) => {
       const filtered = enforceNonDiagnostic(i.text ?? "");
-      return filtered.ok
+      return filtered.ok && !containsAbsoluteClaim(filtered.text)
         ? { type: i.type as InsightType, text: filtered.text, confidence: clamp01(i.confidence) }
         : null;
     })

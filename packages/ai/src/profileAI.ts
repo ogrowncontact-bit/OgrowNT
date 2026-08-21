@@ -1,5 +1,6 @@
 import { callStructured, isAiEnabled } from "./client";
 import { enforceNonDiagnostic } from "./guardrails/nonDiagnosticFilter";
+import { containsAbsoluteClaim } from "./reportQualityValidator";
 import { resolveModelConfig, type AIModelConfig } from "./modelConfig";
 
 interface GenerateInsightParams {
@@ -57,6 +58,7 @@ export async function generateFreeInsight(params: GenerateInsightParams, modelCo
 
   const filtered = enforceNonDiagnostic(result.data.insight);
   if (!filtered.ok) return null; // don't guess at a rewrite for hard-banned clinical terms — fall back to static copy
+  if (containsAbsoluteClaim(filtered.text)) return null; // "always"/"never"/"guaranteed" — same quality bar the premium report enforces
 
   return { insight: filtered.text, aiGenerated: true };
 }

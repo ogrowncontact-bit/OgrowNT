@@ -44,6 +44,18 @@ const LANGUAGE_MARKERS: Record<string, RegExp> = {
   pt: /\b(seu|sua|sugerem|que|para|com)\b/i,
 };
 
+/**
+ * Shared with the free-tier callers (profileAI.ts's generateFreeInsight,
+ * profileEnrichmentAI.ts's per-insight filter) so a single short AI sentence
+ * gets the same "no unsupported absolute claim" check the premium report's
+ * per-section validateReportQuality already runs — without pulling in the
+ * rest of that function's multi-section-shaped checks (repetition,
+ * personalization-by-dimension-count), which don't apply to one sentence.
+ */
+export function containsAbsoluteClaim(text: string): boolean {
+  return ABSOLUTE_CLAIM_PATTERNS.some((pattern) => pattern.test(text));
+}
+
 function normalizeForComparison(text: string): string {
   return text.toLowerCase().replace(/[^\w\s]/g, "").replace(/\s+/g, " ").trim();
 }

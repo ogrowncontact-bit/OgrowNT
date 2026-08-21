@@ -11,7 +11,7 @@ export { generateReport, deriveStrengthsAndFriction, REPORT_ENGINE_VERSION, REPO
 export type { ReportSectionSpec, GeneratedReportSection, ReportContext, ReportTension, ReportContradiction, GenerateReportResult } from "./reportAI";
 export { bucketConfidence } from "./confidence";
 export type { ConfidenceBucket } from "./confidence";
-export { validateReportQuality, validateReportDocument } from "./reportQualityValidator";
+export { validateReportQuality, validateReportDocument, containsAbsoluteClaim } from "./reportQualityValidator";
 export type { ReportQualityCheck, ReportQualityIssue, ReportDocumentQualityCheck, ReportDocumentQualityIssue } from "./reportQualityValidator";
 export { generateRecommendationCopy } from "./recommendationAI";
 export type { GeneratedRecommendation } from "./recommendationAI";

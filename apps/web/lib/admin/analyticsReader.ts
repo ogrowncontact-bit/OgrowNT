@@ -14,6 +14,7 @@ export const FUNNEL_STAGES = [
   { key: "assessment_completed", label: "Completed" },
   { key: "free_result_viewed", label: "Free result viewed" },
   { key: "paywall_viewed", label: "Paywall viewed" },
+  { key: "report_preview_viewed", label: "Report preview viewed" },
   { key: "checkout_started", label: "Checkout started" },
   { key: "payment_completed", label: "Purchased" },
   { key: "report_viewed", label: "Report viewed" },

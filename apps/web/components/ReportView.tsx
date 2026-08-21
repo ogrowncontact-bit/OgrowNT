@@ -14,8 +14,8 @@ interface ReportViewProps {
   recommendationSlot?: React.ReactNode;
 }
 
-const CARD = "rounded-[var(--inner-radius-lg)] border border-[var(--inner-line)] bg-[var(--inner-card)] p-6";
-const EYEBROW = "mb-2 text-xs font-medium uppercase tracking-[0.2em] text-[var(--inner-muted)]";
+export const CARD = "rounded-[var(--inner-radius-lg)] border border-[var(--inner-line)] bg-[var(--inner-card)] p-6";
+export const EYEBROW = "mb-2 text-xs font-medium uppercase tracking-[0.2em] text-[var(--inner-muted)]";
 
 /**
  * The single renderer both the web report page and (via packages/pdf's
@@ -94,7 +94,8 @@ export function ReportView({ assessmentLabel, document, recommendationSlot }: Re
   );
 }
 
-function ReportSectionBlock({ section }: { section: ReportDocumentSection }) {
+/** Exported for app/[slug]/session/[id]/report-preview/page.tsx — the same real per-section visual treatment, reused rather than reinvented for a smaller, pre-purchase set of sections. */
+export function ReportSectionBlock({ section }: { section: ReportDocumentSection }) {
   if (section.role === "core_pattern") {
     return (
       <div className="border-l-2 border-[var(--inner-accent)] pl-4">

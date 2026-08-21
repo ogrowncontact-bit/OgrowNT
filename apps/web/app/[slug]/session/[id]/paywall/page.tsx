@@ -48,13 +48,13 @@ export default async function PaywallPage({
     <Screen
       align="top"
       footer={
-        <Link href={`/${slug}/session/${id}/checkout`}>
+        <Link href={paymentFailed ? `/${slug}/session/${id}/checkout` : `/${slug}/session/${id}/report-preview`}>
           <Button>
             {paymentFailed
               ? "Try Again"
               : price
-                ? `Unlock My Profile — ${formatPrice(price.amountCents, price.currency)}`
-                : "Unlock My Profile"}
+                ? `See a Preview — ${formatPrice(price.amountCents, price.currency)}`
+                : "See a Preview"}
           </Button>
         </Link>
       }

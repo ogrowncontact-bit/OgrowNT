@@ -30,7 +30,10 @@ const NAV_GROUPS: NavGroup[] = [
   },
   {
     label: "Reports",
-    items: [{ href: "/admin/reports", label: "Reports" }],
+    items: [
+      { href: "/admin/sessions", label: "Sessions" },
+      { href: "/admin/reports", label: "Reports" },
+    ],
   },
   {
     label: "Commerce",
