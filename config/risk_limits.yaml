@@ -69,3 +69,34 @@ position_risk_policy:
   news_risk: reduce
   portfolio_emergency: close
   reduce_fraction: 0.5
+# "PROMPT 12" §10: a graduated portfolio-drawdown response ladder, layered
+# on top of (not replacing) the safety_belt_multipliers above -- see
+# packages/risk/capital_state.py::DrawdownEngine. Deliberately monotonic
+# thresholds; level_5's 15 matches loss_limits.max_portfolio_drawdown_pct
+# on purpose (that's also where the Safety Belt's own EMERGENCY state and
+# should_trigger_kill_switch's 1.5x window begin), so DD_LEVEL_5 and
+# Safety Belt EMERGENCY are always reached together, never one without the
+# other.
+drawdown_levels:
+  level_1:
+    threshold_pct: 3
+    response: reduce_exposure
+  level_2:
+    threshold_pct: 6
+    response: reduce_new_positions
+  level_3:
+    threshold_pct: 9
+    response: highest_quality_only
+  level_4:
+    threshold_pct: 12
+    response: block_new_trades
+  level_5:
+    threshold_pct: 15
+    response: close_and_contain
+# "PROMPT 12" §61's recovery cooldown: once a drawdown level is breached,
+# DrawdownEngine won't de-escalate until the portfolio's drawdown has
+# stayed below that level's threshold for this many minutes -- a stateless
+# hysteresis computed from portfolio_snapshots history (see
+# packages/risk/capital_state.py), not a fresh "one good tick" bounce.
+recovery:
+  cooldown_minutes: 60

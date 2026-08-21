@@ -73,6 +73,25 @@ def _peak_equity(db: Session, current_equity: float, epoch: datetime | None) -> 
     return max(historical_max or 0.0, current_equity)
 
 
+def get_reset_epoch(db: Session) -> datetime | None:
+    """Public entry point for "PROMPT 12"'s CapitalState.realized_pnl —
+    the same RESET PAPER ACCOUNT cutoff _reset_epoch() already applies to
+    every other period-P&L query in this module, exposed once rather than
+    reimplemented by a caller outside this module."""
+    return _reset_epoch(db)
+
+
+def get_peak_equity(db: Session, current_equity: float | None = None) -> float:
+    """Public entry point for "PROMPT 12"'s CapitalState.peak_equity —
+    _peak_equity() above already computes this for the drawdown_pct math
+    inline; this just exposes the same reset-epoch-aware query rather than
+    a second implementation.
+    """
+    epoch = _reset_epoch(db)
+    current_equity = get_latest_cash(db) if current_equity is None else current_equity
+    return _peak_equity(db, current_equity, epoch)
+
+
 def _equity_at_start_of_day(db: Session, now: datetime, epoch: datetime | None) -> float:
     day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     if epoch is not None and epoch > day_start:

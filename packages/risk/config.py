@@ -108,6 +108,35 @@ class PositionRiskPolicyConfig:
 
 
 @dataclass(frozen=True)
+class DrawdownLevelConfig:
+    threshold_pct: float
+    response: str
+
+
+@dataclass(frozen=True)
+class DrawdownLevelsConfig:
+    """"PROMPT 12" §10 -- see packages/risk/capital_state.py::DrawdownEngine.
+    Five levels, deliberately monotonic (enforced by load_risk_limits, not
+    just by convention in the YAML)."""
+
+    level_1: DrawdownLevelConfig
+    level_2: DrawdownLevelConfig
+    level_3: DrawdownLevelConfig
+    level_4: DrawdownLevelConfig
+    level_5: DrawdownLevelConfig
+
+    def ordered(self) -> list[DrawdownLevelConfig]:
+        return [self.level_1, self.level_2, self.level_3, self.level_4, self.level_5]
+
+
+@dataclass(frozen=True)
+class RecoveryConfig:
+    """"PROMPT 12" §61 -- DrawdownEngine's de-escalation hysteresis window."""
+
+    cooldown_minutes: float
+
+
+@dataclass(frozen=True)
 class RiskLimits:
     capital: CapitalConfig
     per_trade: PerTradeConfig
@@ -120,10 +149,22 @@ class RiskLimits:
     leverage: LeverageConfig
     loss_streak: LossStreakConfig
     position_risk_policy: PositionRiskPolicyConfig
+    drawdown_levels: DrawdownLevelsConfig
+    recovery: RecoveryConfig
 
 
 def load_risk_limits(path: Path = CONFIG_PATH) -> RiskLimits:
     raw = yaml.safe_load(path.read_text())
+    drawdown_levels = DrawdownLevelsConfig(
+        level_1=DrawdownLevelConfig(**raw["drawdown_levels"]["level_1"]),
+        level_2=DrawdownLevelConfig(**raw["drawdown_levels"]["level_2"]),
+        level_3=DrawdownLevelConfig(**raw["drawdown_levels"]["level_3"]),
+        level_4=DrawdownLevelConfig(**raw["drawdown_levels"]["level_4"]),
+        level_5=DrawdownLevelConfig(**raw["drawdown_levels"]["level_5"]),
+    )
+    thresholds = [lvl.threshold_pct for lvl in drawdown_levels.ordered()]
+    if thresholds != sorted(thresholds):
+        raise ValueError("drawdown_levels thresholds must be strictly increasing (level_1 < level_2 < ... < level_5)")
     return RiskLimits(
         capital=CapitalConfig(**raw["capital"]),
         per_trade=PerTradeConfig(**raw["per_trade"]),
@@ -136,4 +177,6 @@ def load_risk_limits(path: Path = CONFIG_PATH) -> RiskLimits:
         leverage=LeverageConfig(**raw["leverage"]),
         loss_streak=LossStreakConfig(**raw["loss_streak"]),
         position_risk_policy=PositionRiskPolicyConfig(**raw["position_risk_policy"]),
+        drawdown_levels=drawdown_levels,
+        recovery=RecoveryConfig(**raw["recovery"]),
     )

@@ -25,6 +25,8 @@ from packages.quant.patterns.detector import PatternDetection, detect_all
 from packages.quant.regime.classifier import NewsSignal, classify_regime_with_news
 from packages.quant.scoring import build_scoring_inputs, compute_opportunity_confidence, compute_score
 from packages.quant.strategies import ALL_STRATEGIES, MarketContext, Strategy
+from packages.risk.advanced_engine import assess_portfolio_risk
+from packages.risk.config import load_risk_limits
 from packages.shared.models import (
     OHLCV,
     Asset,
@@ -151,6 +153,14 @@ def run_strategy_cycle(
     assets = db.query(Asset).filter(Asset.is_active.is_(True)).all()
     evaluated, signals_created, insufficient_data = 0, 0, 0
     risk_rejected, executed = 0, 0
+
+    # "PROMPT 12" §1-15: one AdvancedRiskEngine assessment per cycle, not per
+    # signal -- it's a portfolio-wide snapshot (system/execution/model/data
+    # health, drawdown, concentration) that doesn't meaningfully change
+    # between one signal and the next within the same cycle, unlike
+    # portfolio_state (recomputed per signal in maybe_execute() because
+    # positions genuinely can open mid-cycle).
+    advanced_risk = assess_portfolio_risk(db, load_risk_limits())
 
     for asset in assets:
         candles = _load_recent_candles(db, asset.id, TIMEFRAME, HISTORY_LIMIT)
@@ -321,7 +331,7 @@ def run_strategy_cycle(
 
             outcome = maybe_execute(
                 db, provider, ctx=ctx, asset=asset, strategy=strategy, analysis=analysis,
-                signal=signal, signal_row=signal_row, score=score, decision=decision,
+                signal=signal, signal_row=signal_row, score=score, decision=decision, advanced_risk=advanced_risk,
             )
             if outcome == "executed":
                 executed += 1

@@ -4,7 +4,7 @@
 **paper trading only** — no real orders are ever sent. See the full engineering
 specification in [`docs/blueprint/`](docs/blueprint/00-overview.md).
 
-## Status: Phase 7 (Advanced Analytics, Alerts, Optimization) + post-Phase-7 security hardening + Supervisor 24/7 + Market Data Engine + Scanner + Pattern/Strategy/Opportunity confidence & evidence + Risk Engine/Portfolio Intelligence hardening (Risk Center, Risk Heatmap, Strategy Health, configurable Safety Belts) + News Intelligence Center (sentiment, macro calendar, event risk, source consensus) + Strategy Lab (walk-forward optimization, Monte Carlo, stress testing, robustness/quality scoring, async backtest job system) + Autonomous Paper Trading (TradingMode gate, Portfolio Manager allocation cap, trailing stops, HOLD/REDUCE/CLOSE position risk policy, anti-martingale loss-streak protection, idempotency keys, event sourcing, reconciliation engine, RBAC, manual trading controls, Autonomous Trading Center dashboard) + Multi-Agent Quant Intelligence (18 named specialist agents, Consensus/Contradiction/Chief Decision Engine, reliability/calibration/quarantine, AI Command Center dashboard) + Autonomous Research & Evolution Engine (hypothesis generation, ExperimentEngine, bounded genetic search, StrategyVersion Champion/Challenger, drift detection, knowledge graph, human-approval-gated promotion, Autonomous Research Lab dashboard) + Global Market Intelligence & 24/7 Opportunity Discovery (global session clock, asset universe manager, fast-scan → deep-scan pipeline, multi-timeframe agreement/conflict, market structure, volatility regime transitions, anomaly scanner, closed-vocabulary opportunity classification, correlated-opportunity clustering, risk-adjusted ranking, dynamic watchlist, Global Market Command Center dashboard)
+## Status: Phase 7 (Advanced Analytics, Alerts, Optimization) + post-Phase-7 security hardening + Supervisor 24/7 + Market Data Engine + Scanner + Pattern/Strategy/Opportunity confidence & evidence + Risk Engine/Portfolio Intelligence hardening (Risk Center, Risk Heatmap, Strategy Health, configurable Safety Belts) + News Intelligence Center (sentiment, macro calendar, event risk, source consensus) + Strategy Lab (walk-forward optimization, Monte Carlo, stress testing, robustness/quality scoring, async backtest job system) + Autonomous Paper Trading (TradingMode gate, Portfolio Manager allocation cap, trailing stops, HOLD/REDUCE/CLOSE position risk policy, anti-martingale loss-streak protection, idempotency keys, event sourcing, reconciliation engine, RBAC, manual trading controls, Autonomous Trading Center dashboard) + Multi-Agent Quant Intelligence (18 named specialist agents, Consensus/Contradiction/Chief Decision Engine, reliability/calibration/quarantine, AI Command Center dashboard) + Autonomous Research & Evolution Engine (hypothesis generation, ExperimentEngine, bounded genetic search, StrategyVersion Champion/Challenger, drift detection, knowledge graph, human-approval-gated promotion, Autonomous Research Lab dashboard) + Global Market Intelligence & 24/7 Opportunity Discovery (global session clock, asset universe manager, fast-scan → deep-scan pipeline, multi-timeframe agreement/conflict, market structure, volatility regime transitions, anomaly scanner, closed-vocabulary opportunity classification, correlated-opportunity clustering, risk-adjusted ranking, dynamic watchlist, Global Market Command Center dashboard) + Advanced Risk & Capital Defense Engine (config-driven drawdown response ladder with recovery-cooldown hysteresis, portfolio concentration/hidden-factor exposure, transaction-cost-aware net expectancy gate, live Monte Carlo/Risk-of-Ruin/VaR/CVaR stress testing, system/execution/model/data risk engines, 6 named circuit breakers, 4-state Emergency Kill Switch with admin-gated recovery, a 7-level RiskState/RiskScore aggregator sitting alongside the existing Safety Belt, risk-config version audit trail, failover market data provider, Capital Defense Center dashboard)
 
 Per [`docs/blueprint/12-roadmap.md`](docs/blueprint/12-roadmap.md):
 
@@ -409,6 +409,56 @@ for the full list and
 [`docs/global-market-intelligence.md`](docs/global-market-intelligence.md)
 for the as-built reference.
 
+**Advanced Risk & Capital Defense Engine.** Almost every mechanism this
+phase needed already existed from earlier phases (Safety Belts, Loss
+Streak Detector, Kill Switch, Strategy/Asset quarantine, Monte Carlo/Risk
+of Ruin, the shared fill-cost model, agent contradiction scoring, market
+clustering, data-quality scoring, worker-health heartbeats) — this pass is
+almost entirely a thin aggregation layer on top of them, deliberately just
+2 new tables. A config-driven drawdown ladder
+(`config/risk_limits.yaml`'s `drawdown_levels`, strictly-increasing
+thresholds enforced at load time) applies a stateless recovery-cooldown
+hysteresis computed from existing `portfolio_snapshots` history — the same
+technique already used for weekly/monthly lookback windows. New
+`packages/risk/` modules cover portfolio concentration/hidden-factor
+exposure (reusing the correlation-clustering algorithm from Prompt 11,
+repointed at open positions), a transaction-cost-aware net-expectancy gate
+(reusing the shared fill-simulation cost model), live Monte Carlo/Risk-of-
+Ruin/VaR/CVaR stress testing against real trade history, and System/
+Execution/Model/Data risk engines. Six named circuit breakers (four wrap
+existing mechanisms — Kill Switch, Safety Belt, Strategy/Asset quarantine
+— two are genuinely new) and a 4-state `EmergencyKillSwitch`
+(ARMED/TRIGGERED/LOCKED/RECOVERY) layered onto the same
+`SystemState.trading_enabled` boolean, with admin-gated, readiness-checked
+recovery. A new 7-level `RiskState`/`RiskScore` aggregator
+(`packages/risk/advanced_engine.py`) sits **alongside**, never replacing,
+the existing 5-level Safety Belt, combining seven dimensions via `max()` —
+never an average — so no lower severity can ever override a higher one;
+`HALTED` is reserved for a tripped system/portfolio circuit breaker alone.
+A genuine mid-phase bug was found and fixed here: the original RiskScore
+formula floored the weighted blend at the aggregate state's own severity
+unconditionally, which is mathematically unreachable dead code (weights
+sum to 1.0, so no blend can ever exceed that floor) — caught by an
+end-to-end multi-dimension stacking test, fixed to floor only when a
+circuit breaker actually trips. `AdvancedRiskAssessment` is computed once
+per worker cycle and wired into `evaluate_signal()` as a fully optional,
+additive gate (zero-trade-mode hard block, capital-preservation tier
+floor, caution/defensive size multipliers reusing the Safety Belt's own
+values) plus a new independent worker cadence
+(`apps/worker/capital_defense.py`) that persists a risk snapshot every
+120s and alerts only on a fresh escalation. Every live risk-limit change
+is now versioned and attributed (`packages/risk/config_version.py`). A
+`FailoverMarketDataProvider` rounds out the phase, architecture-ready
+though untested against a real second live provider (this codebase has
+exactly one). 158 new tests (1242/1242 in the full suite), including a
+14-item AST-walk-based red-team battery proving no AI/agent/research code
+path can reach the kill switch or bypass the risk-config audit trail, and
+4 full end-to-end scenarios. Live-verified against real Postgres and a
+real browser click-through of the new Capital Defense Center panel. See
+`docs/blueprint/12-roadmap.md`'s "PROMPT 12" section for the full list and
+[`docs/capital-defense-engine.md`](docs/capital-defense-engine.md) for the
+as-built reference.
+
 ## Architecture at a glance
 
 ```text
@@ -422,20 +472,27 @@ apps/
                close-position/cancel-order/reset-account manual controls,
                agents (AI Command Center), research-lab (Autonomous Research Lab),
                global-market (universe/volatility/anomalies/watchlist/clusters/
-               sessions/structure/pairs/historical-analog))
+               sessions/structure/pairs/historical-analog), risk (advanced
+               risk-score/state, circuit breakers, concentration, stress
+               test, kill-switch state/recovery, risk-config version audit
+               trail))
   worker/      24/7 loop: Market Data Agent (scan), Trade Monitor + safety-belt
                refresh + Learning Agent (per trade close, every scan), News
                Intelligence Agent (ingestion + DET analysis, own cadence),
                Macro Calendar Worker (own cadence), Sentiment Worker (shift
                detection, own cadence), Strategy Engine cycle (history
-               backfill, regime, patterns, strategies, scoring, Risk Engine, paper
-               execution), Universe cycle (own cadence), Global Market
-               Intelligence cycle (fast-scan → structure/volatility/anomaly/
-               multi-timeframe on the Top-N → opportunity classification →
-               clustering, own cadence, after Strategy so it can enrich this
-               cycle's fresh Signals), Research Agent + News Learning (own,
-               longer cadence), Alert delivery cycle (own cadence) — never
-               imports packages/backtest
+               backfill, regime, patterns, strategies, scoring,
+               AdvancedRiskEngine assessment computed once per cycle, Risk
+               Engine, paper execution), Universe cycle (own cadence),
+               Global Market Intelligence cycle (fast-scan →
+               structure/volatility/anomaly/multi-timeframe on the Top-N →
+               opportunity classification → clustering, own cadence, after
+               Strategy so it can enrich this cycle's fresh Signals),
+               Capital Defense cycle (portfolio-wide RiskAssessment
+               persisted every tick, capital-preservation/zero-trade sync,
+               escalation-only alerting, own cadence), Research Agent +
+               News Learning (own, longer cadence), Alert delivery cycle
+               (own cadence) — never imports packages/backtest
   backtest_worker/ separate process (deliberately not a cadence inside worker/
                above — see packages/backtest below): polls backtest_jobs and
                dispatches by kind (backtest/walk_forward/walk_forward_optimization/
@@ -457,8 +514,21 @@ packages/
                (reconciliation.py), reset-epoch-aware history filtering
   risk/        position sizing, correlation guard, safety belts, TradingMode +
                PAUSE + short-selling-honesty + leverage-ceiling gates, loss-streak
-               anti-martingale detector, HOLD/REDUCE/CLOSE position risk policy,
-               the veto-power decision pipeline
+               anti-martingale detector (extended with strategy/asset/regime
+               dimensions + win-streak observation), HOLD/REDUCE/CLOSE
+               position risk policy, the veto-power decision pipeline —
+               plus the Advanced Risk & Capital Defense Engine:
+               capital_state.py (CapitalState + config-driven drawdown
+               ladder + recovery-cooldown hysteresis), concentration.py
+               (hidden-factor exposure over open positions), costs.py
+               (transaction-cost-aware net-expectancy gate), stress.py
+               (live Monte Carlo/Risk-of-Ruin/VaR/CVaR), systemic_risk.py
+               (System/Execution/Model/Data risk engines),
+               circuit_breakers.py (6 named breakers + 4-state
+               EmergencyKillSwitch), advanced_engine.py (7-level
+               RiskState/RiskScore aggregator, alongside — never
+               replacing — the 5-level Safety Belt), config_version.py
+               (risk-limit change audit trail)
   execution/   ExecutionProvider interface, PaperExecutionProvider, order manager
                (idempotency keys, expected-price/latency capture, partial-close
                reduce_position), shared fill-simulation math (packages/execution/fills.py)

@@ -11,7 +11,8 @@ decision.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from typing import TYPE_CHECKING
 
 from sqlalchemy.orm import Session
 
@@ -25,6 +26,21 @@ from packages.risk.safety_belt import evaluate_safety_belt, policy_for, tier_mee
 from packages.risk.strategy_health import classify_strategy_health
 from packages.shared.models import RiskCheck, StrategyPerformance, SystemState
 from packages.shared.models import RiskDecision as RiskDecisionRow
+
+if TYPE_CHECKING:
+    # Deferred to type-checking only: packages.risk.advanced_engine imports
+    # back through the packages.risk package (`from packages.risk import
+    # circuit_breakers`), and packages/risk/__init__.py imports THIS module
+    # eagerly -- a module-level import here would be circular. evaluate_signal
+    # never constructs or isinstance()-checks this type, only reads attributes
+    # off whatever the caller passes, so a type-checking-only import is enough.
+    from packages.risk.advanced_engine import AdvancedRiskAssessment
+
+# "PROMPT 12" §100: how long an AdvancedRiskAssessment may be trusted before
+# a RiskDecision built from it should be treated as stale -- matches the
+# cadence apps/worker is expected to recompute it on (a later task wires
+# that cadence in), not a number specific to this module.
+RISK_ASSESSMENT_TTL_MINUTES = 15
 
 # "PROMPT 8" §7-11: asset classes where this system can honestly simulate a
 # short (cash-settled paper accounting, no borrow/margin mechanics needed —
@@ -81,12 +97,36 @@ class RiskVerdict:
     checks: list[RiskCheckOutcome]
 
 
-def _persist(db: Session, signal_id: int, checks: list[RiskCheckOutcome], *, approved: bool, approved_size: float | None, reason: str, belt: str) -> None:
+def _persist(
+    db: Session, signal_id: int, checks: list[RiskCheckOutcome], *, approved: bool, approved_size: float | None,
+    reason: str, belt: str, advanced_risk: AdvancedRiskAssessment | None = None,
+) -> None:
     for check in checks:
         db.add(RiskCheck(signal_id=signal_id, check_name=check.name, passed=check.passed, detail=check.detail))
+    # "PROMPT 12" §100's richer RiskDecision fields -- all left None when no
+    # advanced_risk was supplied (every pre-"PROMPT 12" caller/test), never
+    # a fabricated 0/"normal" for a dimension nobody actually assessed.
+    drawdown_state = advanced_risk.drawdown.risk_state if advanced_risk and advanced_risk.drawdown else None
+    correlation_state = (
+        advanced_risk.concentration.concentration_state if advanced_risk and advanced_risk.concentration else None
+    )
+    model_state = advanced_risk.model_risk.state if advanced_risk and advanced_risk.model_risk else None
+    data_state = advanced_risk.data_risk.state if advanced_risk and advanced_risk.data_risk else None
+    system_risk_state = advanced_risk.system_risk.state if advanced_risk and advanced_risk.system_risk else None
+    expiration = (advanced_risk.ts + timedelta(minutes=RISK_ASSESSMENT_TTL_MINUTES)) if advanced_risk else None
+
     db.add(
         RiskDecisionRow(
-            signal_id=signal_id, approved=approved, approved_size=approved_size, reason=reason, safety_belt_level=belt
+            signal_id=signal_id, approved=approved, approved_size=approved_size, reason=reason, safety_belt_level=belt,
+            risk_score=advanced_risk.risk_score if advanced_risk else None,
+            risk_state=advanced_risk.risk_state if advanced_risk else None,
+            drawdown_state=drawdown_state, correlation_state=correlation_state,
+            # liquidity_state/event_state: no dedicated AdvancedRiskEngine
+            # dimension for these yet (liquidity has no real orderbook feed
+            # -- see step 8 below; event risk is already News Risk Guard's
+            # job, step 11) -- left honestly None rather than duplicated.
+            liquidity_state=None, event_state=None,
+            model_state=model_state, data_state=data_state, system_state=system_risk_state, expiration=expiration,
         )
     )
     db.commit()
@@ -98,7 +138,16 @@ def evaluate_signal(
     portfolio_state: PortfolioState,
     system_state: SystemState,
     limits: RiskLimits | None = None,
+    advanced_risk: AdvancedRiskAssessment | None = None,
 ) -> RiskVerdict:
+    """`advanced_risk` (packages/risk/advanced_engine.py's portfolio-wide
+    RiskScore/RiskState) is optional and additive -- "PROMPT 12" §1-15's
+    engine feeds richer context into this ALREADY-sovereign pipeline, it
+    does not replace any step above. Every caller/test that predates
+    "PROMPT 12" (and every call that omits it, e.g. the Critical Safety
+    Battery's direct evaluate_signal() calls) gets exactly the pre-"PROMPT
+    12" behavior, unchanged.
+    """
     limits = limits or load_risk_limits()
     checks: list[RiskCheckOutcome] = []
     belt = evaluate_safety_belt(portfolio_state, limits)
@@ -106,7 +155,7 @@ def evaluate_signal(
 
     def blocked(name: str, detail: dict, reason: str) -> RiskVerdict:
         checks.append(RiskCheckOutcome(name, False, detail))
-        _persist(db, signal.signal_id, checks, approved=False, approved_size=None, reason=reason, belt=belt)
+        _persist(db, signal.signal_id, checks, approved=False, approved_size=None, reason=reason, belt=belt, advanced_risk=advanced_risk)
         return RiskVerdict(False, None, reason, belt, checks)
 
     def ok(name: str, detail: dict | None = None) -> None:
@@ -147,6 +196,31 @@ def evaluate_signal(
             "short_disabled_insufficient_data",
         )
     ok("short_selling_supported", {"asset_class": signal.asset_class})
+
+    # 1e. Advanced Risk Engine gate ("PROMPT 12" §1-15) -- an ADDITIONAL
+    # veto layer for dimensions safety_belt_level alone can't see
+    # (correlation concentration, system/execution/model/data risk,
+    # DD_LEVEL_4/5 drawdown escalation). Optional: only runs when a caller
+    # supplies advanced_risk.
+    if advanced_risk is not None:
+        if advanced_risk.zero_trade_mode:
+            return blocked(
+                "advanced_risk_zero_trade_mode",
+                {"risk_state": advanced_risk.risk_state, "risk_score": advanced_risk.risk_score, "reasons": advanced_risk.reasons},
+                "advanced_risk_zero_trade_mode",
+            )
+        ok("advanced_risk_zero_trade_mode", {"risk_state": advanced_risk.risk_state})
+
+        if advanced_risk.capital_preservation_mode and not tier_meets_floor(signal.tier, "high_quality"):
+            return blocked(
+                "advanced_risk_capital_preservation_tier_floor",
+                {"tier": signal.tier, "min_tier": "high_quality", "risk_state": advanced_risk.risk_state},
+                "advanced_risk_capital_preservation_mode",
+            )
+        ok(
+            "advanced_risk_capital_preservation_tier_floor",
+            {"capital_preservation_mode": advanced_risk.capital_preservation_mode},
+        )
 
     # Safety belt policy: does the current belt allow new trades at all, and
     # does this signal's tier clear the belt's floor (docs/blueprint/08-risk-engine.md
@@ -283,10 +357,27 @@ def evaluate_signal(
         {"consecutive_losses": loss_streak.consecutive_losses, "triggered": loss_streak.triggered},
     )
 
+    # Advanced Risk Engine size multiplier ("PROMPT 12" §10's DD_LEVEL_1/2
+    # "reduce_exposure"/"reduce_new_positions" responses): CAUTION/DEFENSIVE
+    # RiskStates reuse the SAME already-configured belt multipliers
+    # (config/risk_limits.yaml's safety_belt_multipliers) rather than a
+    # second, parallel set of numbers -- these RiskState labels were chosen
+    # to match the Safety Belt's own vocabulary at exactly these two levels
+    # for this reason. HIGH_RISK and above are already fully handled by the
+    # tier-floor/zero_trade_mode gates above (a signal that reaches this
+    # point at HIGH_RISK already cleared the high_quality floor), so no
+    # further multiplier is needed there.
+    advanced_risk_multiplier = 1.0
+    if advanced_risk is not None:
+        if advanced_risk.risk_state == "caution":
+            advanced_risk_multiplier = limits.safety_belt_multipliers.caution
+        elif advanced_risk.risk_state == "defensive":
+            advanced_risk_multiplier = limits.safety_belt_multipliers.defensive
+
     # Position sizing — always the smallest of every applicable cap, then
     # scaled down further by the current safety belt's multiplier, the
-    # strategy health multiplier, the news risk multiplier, and the loss
-    # streak multiplier.
+    # strategy health multiplier, the news risk multiplier, the loss streak
+    # multiplier, and (when supplied) the Advanced Risk Engine multiplier.
     sizing = calculate_position_size(
         capital=equity,
         entry_price=signal.entry_price,
@@ -303,6 +394,7 @@ def evaluate_signal(
         * health_verdict.size_multiplier
         * news_verdict.size_multiplier
         * loss_streak.size_multiplier
+        * advanced_risk_multiplier
     )
 
     # 13. Leverage ceiling (§41) — a hard assertion, not just a consequence
@@ -332,8 +424,12 @@ def evaluate_signal(
             "belt_multiplier": policy.size_multiplier,
             "strategy_health_multiplier": health_verdict.size_multiplier,
             "news_risk_multiplier": news_verdict.size_multiplier,
+            "advanced_risk_multiplier": advanced_risk_multiplier,
         },
     )
 
-    _persist(db, signal.signal_id, checks, approved=True, approved_size=approved_quantity, reason="approved", belt=belt)
+    _persist(
+        db, signal.signal_id, checks, approved=True, approved_size=approved_quantity, reason="approved", belt=belt,
+        advanced_risk=advanced_risk,
+    )
     return RiskVerdict(True, approved_quantity, "approved", belt, checks)

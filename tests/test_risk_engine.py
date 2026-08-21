@@ -293,3 +293,120 @@ def test_every_check_is_persisted_for_audit(db_session):
     assert len(checks) > 0
     assert decision is not None
     assert decision.approved is True
+
+
+# -- "PROMPT 12" advanced_risk wiring ---------------------------------------
+
+
+def _advanced_risk(**overrides):
+    from packages.risk.advanced_engine import AdvancedRiskAssessment
+
+    base = dict(
+        ts=_now(), risk_score=0.0, risk_state="normal", capital_state=None, drawdown=None, concentration=None,
+        loss_streak=None, system_risk=None, execution_risk=None, model_risk=None, data_risk=None, breakers=[],
+        capital_preservation_mode=False, zero_trade_mode=False, degraded=False, reasons=[],
+    )
+    base.update(overrides)
+    return AdvancedRiskAssessment(**base)
+
+
+def test_advanced_risk_none_leaves_risk_decision_fields_null(db_session):
+    from packages.shared.models import RiskDecision
+
+    asset = _asset(db_session, "RISKADVNONE")
+    sfr = _signal_for_risk(db_session, asset)
+    verdict = evaluate_signal(db_session, sfr, _portfolio_state(), SystemState(id=True, trading_enabled=True))
+    assert verdict.approved
+
+    decision = db_session.query(RiskDecision).filter(RiskDecision.signal_id == sfr.signal_id).first()
+    assert decision is not None
+    assert decision.risk_score is None
+    assert decision.risk_state is None
+    assert decision.expiration is None
+
+
+def test_advanced_risk_zero_trade_mode_blocks_the_signal(db_session):
+    asset = _asset(db_session, "RISKADVZERO")
+    sfr = _signal_for_risk(db_session, asset)
+    advanced_risk = _advanced_risk(risk_state="critical", zero_trade_mode=True, capital_preservation_mode=True)
+
+    verdict = evaluate_signal(
+        db_session, sfr, _portfolio_state(), SystemState(id=True, trading_enabled=True), advanced_risk=advanced_risk,
+    )
+    assert not verdict.approved
+    assert verdict.reason == "advanced_risk_zero_trade_mode"
+
+
+def test_advanced_risk_capital_preservation_mode_blocks_below_high_quality_tier(db_session):
+    asset = _asset(db_session, "RISKADVPRESERVE")
+    sfr = _signal_for_risk(db_session, asset, tier="possible")
+    advanced_risk = _advanced_risk(risk_state="high_risk", capital_preservation_mode=True)
+
+    verdict = evaluate_signal(
+        db_session, sfr, _portfolio_state(), SystemState(id=True, trading_enabled=True), advanced_risk=advanced_risk,
+    )
+    assert not verdict.approved
+    assert verdict.reason == "advanced_risk_capital_preservation_mode"
+
+
+def test_advanced_risk_capital_preservation_mode_allows_high_quality_tier(db_session):
+    asset = _asset(db_session, "RISKADVPRESERVEOK")
+    sfr = _signal_for_risk(db_session, asset, tier="high_quality")
+    advanced_risk = _advanced_risk(risk_state="high_risk", capital_preservation_mode=True)
+
+    verdict = evaluate_signal(
+        db_session, sfr, _portfolio_state(), SystemState(id=True, trading_enabled=True), advanced_risk=advanced_risk,
+    )
+    assert verdict.approved
+
+
+def test_advanced_risk_caution_state_applies_belt_caution_multiplier(db_session):
+    from packages.risk.config import load_risk_limits
+
+    limits = load_risk_limits()
+    asset = _asset(db_session, "RISKADVCAUTION")
+    sfr = _signal_for_risk(db_session, asset)
+    baseline = evaluate_signal(db_session, sfr, _portfolio_state(), SystemState(id=True, trading_enabled=True))
+
+    cautious_sfr = _signal_for_risk(db_session, _asset(db_session, "RISKADVCAUTION2"), strategy_id=sfr.strategy_id)
+    advanced_risk = _advanced_risk(risk_state="caution")
+    cautious = evaluate_signal(
+        db_session, cautious_sfr, _portfolio_state(), SystemState(id=True, trading_enabled=True), advanced_risk=advanced_risk,
+    )
+    assert cautious.approved
+    assert cautious.approved_quantity == baseline.approved_quantity * limits.safety_belt_multipliers.caution
+
+
+def test_advanced_risk_defensive_state_applies_belt_defensive_multiplier(db_session):
+    from packages.risk.config import load_risk_limits
+
+    limits = load_risk_limits()
+    asset = _asset(db_session, "RISKADVDEFENSIVE")
+    sfr = _signal_for_risk(db_session, asset)
+    baseline = evaluate_signal(db_session, sfr, _portfolio_state(), SystemState(id=True, trading_enabled=True))
+
+    defensive_sfr = _signal_for_risk(db_session, _asset(db_session, "RISKADVDEFENSIVE2"), strategy_id=sfr.strategy_id)
+    advanced_risk = _advanced_risk(risk_state="defensive")
+    defensive = evaluate_signal(
+        db_session, defensive_sfr, _portfolio_state(), SystemState(id=True, trading_enabled=True), advanced_risk=advanced_risk,
+    )
+    assert defensive.approved
+    assert defensive.approved_quantity == baseline.approved_quantity * limits.safety_belt_multipliers.defensive
+
+
+def test_advanced_risk_fields_persisted_on_risk_decision(db_session):
+    from packages.shared.models import RiskDecision
+
+    asset = _asset(db_session, "RISKADVPERSIST")
+    sfr = _signal_for_risk(db_session, asset, tier="high_quality")
+    advanced_risk = _advanced_risk(risk_state="high_risk", risk_score=72.5, capital_preservation_mode=True, reasons=["test reason"])
+
+    evaluate_signal(
+        db_session, sfr, _portfolio_state(), SystemState(id=True, trading_enabled=True), advanced_risk=advanced_risk,
+    )
+    decision = db_session.query(RiskDecision).filter(RiskDecision.signal_id == sfr.signal_id).first()
+    assert decision is not None
+    assert decision.risk_score == 72.5
+    assert decision.risk_state == "high_risk"
+    assert decision.expiration is not None
+    assert decision.expiration > advanced_risk.ts

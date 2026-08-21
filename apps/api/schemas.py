@@ -283,6 +283,98 @@ class RiskLimitsUpdate(BaseModel):
     data_quality: dict | None = None
     safety_belt_multipliers: dict | None = None
     news_risk_multipliers: dict | None = None
+    drawdown_levels: dict | None = None
+    recovery: dict | None = None
+
+
+# -- "PROMPT 12" Advanced Risk & Capital Defense Engine ---------------------
+
+
+class AdvancedRiskOut(BaseModel):
+    ts: datetime
+    risk_score: float
+    risk_state: str
+    capital_preservation_mode: bool
+    zero_trade_mode: bool
+    degraded: bool
+    reasons: list[str]
+    equity: float | None = None
+    drawdown_pct: float | None = None
+    peak_equity: float | None = None
+    drawdown_state: str | None = None
+    drawdown_level: int | None = None
+    concentration_state: str | None = None
+    system_risk_state: str | None = None
+    execution_risk_state: str | None = None
+    model_risk_state: str | None = None
+    data_risk_state: str | None = None
+
+
+class CircuitBreakerOut(BaseModel):
+    name: str
+    tripped: bool
+    reason: str | None
+    scope_id: int | None = None
+
+
+class ConcentrationClusterOut(BaseModel):
+    symbols: list[str]
+    direction: str
+    factor: str | None
+    avg_correlation: float
+    ranking_penalty: float
+
+
+class ConcentrationOut(BaseModel):
+    open_position_count: int
+    total_exposure_notional: float
+    max_cluster_exposure_pct: float
+    concentration_state: str
+    asset_class_exposure_pct: dict[str, float]
+    hidden_factor_warnings: list[str]
+    clusters: list[ConcentrationClusterOut]
+
+
+class PortfolioStressTestOut(BaseModel):
+    """Distinct from StressTestOut (a single BACKTEST's stress-scenario
+    result, "PROMPT 7") -- this is the LIVE portfolio's Monte Carlo/Risk of
+    Ruin/VaR assessment ("PROMPT 12" §77-84)."""
+
+    trades_used: int
+    sufficient_history: bool
+    monte_carlo: dict | None = None
+    risk_of_ruin: dict | None = None
+    var_pct: float | None = None
+    cvar_pct: float | None = None
+    var_confidence: float | None = None
+    var_num_returns: int | None = None
+    var_note: str | None = None
+
+
+class RiskConfigVersionOut(BaseModel):
+    version: int
+    created_at: datetime
+    approved_by: str | None
+    reason: str
+    status: str
+    parameters: dict
+
+
+class ConfigDiffOut(BaseModel):
+    key: str
+    old_value: object | None
+    new_value: object | None
+
+
+class RecoveryReadinessOut(BaseModel):
+    ready: bool
+    reasons: list[str]
+
+
+class KillSwitchStateOut(BaseModel):
+    kill_switch_state: str
+    recovery_mode: bool
+    trading_enabled: bool
 
 
 class PositionOut(BaseModel):

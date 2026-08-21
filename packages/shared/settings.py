@@ -147,6 +147,16 @@ class Settings(BaseSettings):
     # to scan sub-minute, and the mock provider ticks once a minute anyway.
     market_intelligence_interval_seconds: int = 120
 
+    # "PROMPT 12" §107-108's Risk Event Timeline / periodic risk reports --
+    # how often apps/worker/capital_defense.py runs AdvancedRiskEngine
+    # (packages/risk/advanced_engine.py) and persists a RiskAssessment row,
+    # independent of the strategy cycle so a quiet market still has a
+    # continuous risk-state history. Faster than universe_interval_seconds
+    # (capital defense state can matter on a shorter horizon than asset
+    # liquidity/quality standing) but not as fast as scan_interval_seconds
+    # (a full portfolio-wide assessment is heavier than a price scan).
+    capital_defense_interval_seconds: int = 120
+
     # "PROMPT 8" §66 crash-loop protection (SystemState.worker_restart_count):
     # more worker-process restarts than this within restart_window_seconds
     # auto-pauses trading rather than letting a silently crash-looping

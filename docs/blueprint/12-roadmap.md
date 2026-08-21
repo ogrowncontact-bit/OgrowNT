@@ -2004,6 +2004,230 @@ Divergências deliberadas, documentadas (não silenciosas):
    sintéticos prova ausência de blowup O(n²) ou query sem limite sem
    fingir que este ambiente tem infraestrutura ao nível de uma bolsa.
 
+## "PROMPT 12" — Advanced Risk & Capital Defense Engine (pós-Fase 11) — **status: implementada e validada nesta sessão**
+
+O "PROMPT 12" pede um `AdvancedRiskEngine` que compõe capital/drawdown,
+concentração/correlação, model risk (desacordo entre agentes),
+system/execution/data risk e um `RiskScore`/`RiskState` num único
+`EmergencyKillSwitch` com recuperação humana-only, sobre a base já muito
+madura das Fases 3/4/8/9 e dos Prompts 6/7/10/11. Restrições explícitas
+citadas literalmente no prompt: **"RiskScore NÃO representa probabilidade
+de perda. É um indicador composto de condições de risco"**; a lista
+PROIBIDO — perda→aumentar tamanho/leverage/revenge trade, sequência de
+perdas→dobrar risco, drawdown→remover stop, performance fraca→desativar
+controlos de risco; **"Nenhum: LLM/Agent/Strategy/Research Engine pode
+desativar o kill switch"**; **"Somente: SUPER_ADMIN pode iniciar
+recuperação... recuperação deve exigir: system health, risk review,
+manual confirmation"**; **"Nenhum nível inferior pode substituir um nível
+superior"** (hierarquia de prioridade); e o mandato fail-closed **"Se o
+sistema não sabe se é seguro: NÃO operar."** Mapeando os 138 §§ contra o
+código já existente: o pipeline sovereign de 13 passos
+`evaluate_signal()` (Fase 3), o Safety Belt de 5 níveis (Prompt 4), o
+Loss Streak Detector anti-martingale (Prompt 8), o Kill Switch (Prompt
+4/8), a Strategy Quarantine (Fase 5) e o `Asset.status="quarantined"`
+(Prompt 11) como circuit breakers já existentes, os primitivos Monte
+Carlo/Risk of Ruin (Prompt 7), o modelo de custos partilhado
+`simulate_fill` (Fase 6) e `find_contradictions`/`contradiction_score`
+(Prompt 9) — este prompt não reconstrói um subsistema de risco do zero,
+constrói uma camada fina de orquestração/agregação em cima dessa
+infraestrutura, deliberadamente escolhendo apenas 2 tabelas novas
+(`risk_config_versions`, `risk_assessments`) + extensões a `SystemState`/
+`RiskDecision` já existentes.
+
+- [x] **DB — `risk_config_versions` + `risk_assessments` + extensões +
+      migração `0019`** (§100, §116-119) — `SystemState` ganha
+      `kill_switch_state`/`recovery_mode`/`capital_preservation_mode`/
+      `zero_trade_mode`; `RiskDecision` ganha `risk_score`/`risk_state`/
+      `drawdown_state`/`correlation_state`/`liquidity_state`/
+      `event_state`/`model_state`/`data_state`/`system_state`/
+      `expiration` (todos `NULL` honesto quando nenhum `AdvancedRiskAssessment`
+      foi fornecido). `RiskConfigVersion` versiona cada alteração aos
+      limites (nunca edição silenciosa do ficheiro); `RiskAssessment` é
+      append-only, uma linha por ciclo do Advanced Risk Engine — upgrade→
+      downgrade→upgrade verificado contra Postgres real
+- [x] **`packages/risk/capital_state.py` — CapitalState + DrawdownEngine**
+      (§6-15) — `CapitalState` embrulha `PortfolioState` já existente
+      (`available_capital`, `margin_used` sempre `0.0` — sem mecânica de
+      margem nesta fase, mesmo precedente de `leverage.max_leverage=1.0`
+      do Prompt 8 —, `peak_equity`, `realized_pnl`). `RiskState` de 7
+      níveis (NORMAL/CAUTION/DEFENSIVE/HIGH_RISK/CRITICAL/EMERGENCY/
+      HALTED) — novo e separado do Safety Belt de 5 níveis (nunca
+      substituído). `DD_LEVEL_1..5` configuráveis em
+      `config/risk_limits.yaml` (nunca hardcoded — provado pelo red-team
+      #6), `level_5`=15% coincide deliberadamente com o
+      `max_portfolio_drawdown_pct` já existente; cooldown de recuperação
+      (§61) implementado sem estado novo — histerese sobre o histórico já
+      persistido de `portfolio_snapshots`, mesma técnica já usada para as
+      janelas semanal/mensal
+- [x] **`packages/risk/loss_streak.py` — dimensões + Win Streak Guard**
+      (§22, §40) — `evaluate_dimensional_loss_streaks` adiciona
+      streaks por estratégia/activo/regime sobre o já existente
+      `evaluate_loss_streak` portfolio-wide (nunca substituído — o gate
+      sovereign continua a chamar a versão original); `combined_size_
+      multiplier` é sempre o mínimo entre dimensões, nunca aumenta.
+      `WinStreakObservation` é estruturalmente incapaz de influenciar
+      tamanho — sem campo `size_multiplier`, provado pelo red-team
+      (nenhum campo além de `consecutive_wins`)
+- [x] **`packages/risk/concentration.py` — PortfolioConcentration**
+      (§31-36) — reutiliza o union-find de `packages/market/clustering.py`
+      (Prompt 11) sobre as posições ABERTAS em vez de oportunidades
+      candidatas; "hidden factor exposure" é a concentração por
+      `asset_class` + o `factor` já emitido pelos clusters — sem modelo
+      de factores real (PCA/regressão), documentado honestamente como
+      proxy
+- [x] **`packages/risk/costs.py` — TransactionCostModel + Net Expectancy
+      Gate** (§37-40) — reutiliza `simulate_fill` (Fase 6, o mesmo modelo
+      partilhado entre paper trading e backtest) para o custo de
+      round-trip; expected edge vem da `StrategyPerformance.expectancy`
+      já computada (R-multiple real), nunca de uma win-rate assumida —
+      `evaluated=False` honesto quando a estratégia ainda não tem
+      evidência
+- [x] **`packages/risk/stress.py` — RiskStressEngine + VaR/CVaR**
+      (§77-84) — Monte Carlo/Risk of Ruin (Prompt 7) aplicados ao
+      histórico real de `Trade` da carteira ao vivo em vez de exigir um
+      backtest isolado; VaR/CVaR por simulação histórica sobre
+      `portfolio_snapshots` é o componente genuinamente novo — nunca a
+      única métrica (§84), sempre devolvido junto do stress test
+- [x] **`packages/risk/systemic_risk.py` — System/Execution/Model/Data**
+      (§48-53) — cada motor reutiliza um sinal já computado em vez de o
+      recalcular: system risk lê `worker_health.py` (Prompt 8), model
+      risk lê `Decision.contradiction_score` já persistido pelo Chief
+      Decision Engine (Prompt 9, nunca chama `find_contradictions` outra
+      vez), data risk lê `Asset.data_quality_score` já persistido pelo
+      ciclo de universe (Prompt 11); execution risk (taxa de rejeição +
+      slippage excessivo vs. `BASE_SLIPPAGE_BPS`) é o único genuinamente
+      novo. Vocabulário partilhado NORMAL/ELEVATED/HIGH/CRITICAL — mesmo
+      do News Risk Guard (Prompt 6)
+- [x] **`packages/risk/circuit_breakers.py` — 6 breakers + Emergency Kill
+      Switch** (§61-69) — 4 dos 6 (system/portfolio/strategy/asset)
+      embrulham mecanismos já existentes (Kill Switch, Safety Belt
+      EMERGENCY, Strategy Quarantine, `Asset.status="quarantined"`);
+      execution/data são genuinamente novos. `EmergencyKillSwitch` de 4
+      estados (ARMED/TRIGGERED/LOCKED/RECOVERY) sobre o mesmo
+      `SystemState.trading_enabled` já existente — nunca um segundo
+      interruptor concorrente; `start_recovery`/`confirm_recovery`
+      exigem um `actor` humano (aplicação de RBAC é responsabilidade da
+      camada API, `require_admin_role` já existente); `confirm_recovery`
+      exige `check_recovery_readiness()` (reutiliza o System Risk Engine)
+      a menos que `force=True` — o override explícito, ele próprio
+      auditado
+- [x] **`packages/risk/advanced_engine.py` — AdvancedRiskEngine** (§1-15)
+      — agrega 7 dimensões num `RiskState` por `max()` sobre a tupla
+      ordenada (nunca uma média — "nenhum nível inferior pode substituir
+      um nível superior" é estrutural, não convenção) e um `RiskScore`
+      por blend ponderado (pesos fixos somando 1.0, mesmo estilo do
+      `health_score` de `strategy_stats.py`). Um breaker disparado
+      (system/portfolio→HALTED, execution/data→EMERGENCY) impõe um chão
+      no score; sem breaker, o score é o blend genuíno — descoberto e
+      corrigido durante esta fase que um chão universal ao `severity`
+      do estado tornaria o blend matematicamente inatingível (pesos
+      somam 1.0, nenhuma dimensão excede a severidade do estado máximo),
+      reduzindo "indicador composto" a um espelho do estado. Fail-closed:
+      cada dimensão corre em `try`/`except` isolado — uma falha marca
+      `degraded=True` e força HALTED só para essa dimensão, nunca lida
+      como "seguro" silenciosamente
+- [x] **`packages/risk/config_version.py` — auditoria de versões**
+      (§116-119) — cada versão guarda o snapshot completo (nunca só o
+      diff); `PATCH /api/system/risk-limits` já existente (Prompt 4)
+      agora chama `record_config_version` a cada alteração
+- [x] **`packages/data/connectors/market/failover.py` —
+      FailoverMarketDataProvider** (§52-53) — primary→secondary com
+      `DATA_CONFLICT` explícito via `cross_check_latest` (chamado à
+      parte, nunca no caminho quente); arquitetura pronta, não exercida
+      contra um segundo provider real — este repositório só tem
+      `MockMarketDataProvider`, mesma honestidade de scoping já usada
+      para as classes de activo etf/future/bond/option do Prompt 11
+- [x] **Wiring — `evaluate_signal` + cadência `capital_defense`** (§1-15,
+      §107-108) — `evaluate_signal()` ganha um parâmetro opcional
+      `advanced_risk` (aditivo, backward-compatible — todo teste/chamador
+      anterior a este prompt continua a passar sem alterações): gate
+      `zero_trade_mode` (bloqueia tudo), gate `capital_preservation_mode`
+      (exige tier `high_quality`+), multiplicador CAUTION/DEFENSIVE
+      reutilizando os `safety_belt_multipliers` já configurados (os
+      nomes dos `RiskState` foram escolhidos para coincidir aqui de
+      propósito). `apps/worker/strategy_runner.py` computa
+      `AdvancedRiskAssessment` uma vez por ciclo (não por sinal — é um
+      snapshot portfolio-wide, ao contrário de `portfolio_state` que
+      muda a cada posição aberta). Nova cadência independente
+      `apps/worker/capital_defense.py` (`CAPITAL_DEFENSE_INTERVAL_SECONDS`)
+      persiste um `RiskAssessment` a cada tick, sincroniza as duas flags
+      em `SystemState`, e emite um `Alert` só numa transição fresca para
+      HIGH_RISK+ (nunca a cada tick enquanto já elevado)
+- [x] **API — extensões a `apps/api/routers/risk.py`** (§100, §61-62,
+      §116-119) — `GET /api/risk/advanced`, `/breakers`, `/concentration`,
+      `/stress`, `/kill-switch/state`, `POST .../recovery/start`,
+      `GET .../recovery/readiness`, `POST .../recovery/confirm`,
+      `GET /api/risk/config-versions[/{v}][/diff/{a}/{b}]` — todos
+      admin-only (`get_current_admin`); as mutações de recovery exigem
+      `require_admin_role`
+- [x] **Dashboard "Capital Defense Center"** — RiskScore/RiskState,
+      drawdown/capital-preservation/zero-trade em destaque, os 6
+      breakers como grelha tripped/armed, resumo de concentração, caixa
+      do Emergency Kill Switch com `RecoveryButton` (só aparece em
+      LOCKED/RECOVERY) — deliberadamente sem duplicar o Risk Center já
+      existente (Prompt 4)
+- [x] **Testes** — 158 novos (1242/1242 no total): migração + modelos,
+      `capital_state.py` (17), `loss_streak.py` dimensional (7 novos
+      sobre os 8 já existentes), `concentration.py` (8),
+      `costs.py` (8), `stress.py` (6), `systemic_risk.py` (17),
+      `circuit_breakers.py` (16), `advanced_engine.py` (12),
+      `config_version.py` (10), `failover.py` (12), wiring em
+      `evaluate_signal` (8 novos), cadência `capital_defense` (5), API
+      (14), red-team battery de 14 itens (ataques estruturais via AST +
+      comportamentais), 4 cenários end-to-end (drawdown profundo→
+      recuperação por histerese, kill switch→recuperação admin-only,
+      degradação de execução→EMERGENCY sem forçar fecho de posições,
+      empilhamento de múltiplas dimensões moderadas)
+- [x] **verificado ao vivo** contra Postgres real + browser real: worker
+      completo corrido (`python -m apps.worker.main`) produziu um ciclo
+      `capital_defense` real (`risk_state=critical risk_score=66.7
+      capital_preservation=True zero_trade=True`, refletindo heartbeat
+      real do worker e falhas de cadência reais nesse ambiente — nunca
+      fabricado); API real com token admin real
+      (`/api/risk/advanced`/`/breakers`/`/concentration`/`/kill-switch/state`
+      todos 200 com dados reais); dashboard real (login via browser,
+      screenshot do painel "Capital Defense Center" com RiskScore 67,
+      6 sub-dimensões, 4 breakers ARMED, Emergency Kill Switch ARMED,
+      zero erros de consola). `ruff`/`mypy`/suite completa limpos
+      (1242/1242) numa corrida exclusiva
+
+Divergências deliberadas, documentadas (não silenciosas):
+
+1. `RiskState` de 7 níveis é um composto NOVO e separado do Safety Belt
+   de 5 níveis já existente — nunca substituído, nunca renomeado. Os dois
+   podem divergir (ex.: concentração alta empurra `RiskState` para
+   HIGH_RISK enquanto o drawdown, e portanto o Safety Belt, continua
+   NORMAL) porque veem dimensões diferentes.
+2. `HALTED` só é alcançável por um circuit breaker system/portfolio
+   disparado — nunca pela escada de drawdown sozinha (que termina em
+   EMERGENCY) nem por qualquer combinação das dimensões smooth. Um
+   breaker execution/data disparado atinge EMERGENCY, nunca HALTED — um
+   problema de execução não implica parar o sistema inteiro.
+3. `RiskScore` não tem chão em `severity(risk_state)` excepto quando um
+   breaker disparou — ver a nota no item `advanced_engine.py` acima; esta
+   foi uma correcção feita durante a construção da bateria de testes
+   end-to-end desta fase, não uma decisão de design original.
+4. Sem mecânica de margem real nesta fase (`CapitalState.margin_used`
+   sempre `0.0`) — mesmo precedente já estabelecido por
+   `leverage.max_leverage=1.0` no Prompt 8; paper trading continua a
+   dimensionar posições só a partir de equity real, nunca capital
+   emprestado.
+5. `FailoverMarketDataProvider` é arquitetura pronta, não exercida contra
+   um segundo provider real — testado com dois stubs independentes
+   (nenhum `MockMarketDataProvider` real duplicado, já que essa classe é
+   determinística por minuto e nunca discordaria de si mesma).
+6. `liquidity_state`/`event_state`/`volatility_state` ficam `NULL` em
+   `RiskDecision`/`RiskAssessment` — sem dimensão dedicada do Advanced
+   Risk Engine para eles ainda (liquidez não tem order book real; risco
+   de evento já é o News Risk Guard, passo 11 do pipeline sovereign) —
+   `NULL` honesto em vez de duplicar lógica já existente sob um nome
+   novo.
+7. Cointegração/testes estatísticos avançados para VaR paramétrico não
+   foram implementados — `compute_value_at_risk` usa simulação histórica
+   (sem assumir distribuição normal dos retornos), consistente com a
+   ausência de bibliotecas estatísticas além de Python puro já
+   documentada no Prompt 11.
+
 ## Evolução futura (fora de âmbito até validação completa)
 
 Live brokers, exchanges reais (crypto/forex/ações), ML avançado, deep learning,

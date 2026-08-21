@@ -1,17 +1,21 @@
 import { cookies } from "next/headers";
 import {
   getActivityFeed,
+  getAdvancedRisk,
   getAgents,
   getAlerts,
   getAnalyticsOverview,
   getAssets,
   getAutonomousStatus,
   getBacktests,
+  getCircuitBreakers,
+  getConcentration,
   getContradictions,
   getDecisions,
   getDynamicWatchlist,
   getGlobalMarketSessions,
   getHealth,
+  getKillSwitchState,
   getLearnedRules,
   getMacroEvents,
   getMarketAnomalies,
@@ -53,6 +57,7 @@ import { NewsIntelligenceCenter } from "@/components/NewsIntelligenceCenter";
 import { AICommandCenter } from "@/components/AICommandCenter";
 import { AutonomousResearchLab } from "@/components/AutonomousResearchLab";
 import { GlobalMarketCommandCenter } from "@/components/GlobalMarketCommandCenter";
+import { CapitalDefenseCenter } from "@/components/CapitalDefenseCenter";
 import { StrategyLab } from "@/components/StrategyLab";
 import { AutonomousStatusBadge } from "@/components/AutonomousStatusBadge";
 import { PauseResumeButton } from "@/components/PauseResumeButton";
@@ -120,7 +125,7 @@ export default async function DashboardPage() {
       getContradictions(token, 20),
     ]);
 
-  const [backtests, promotionChecks, analytics, researchReport, marketUniverse, volatilityEvents, marketAnomalies, dynamicWatchlist, opportunityClusters, globalMarketSessions] =
+  const [backtests, promotionChecks, analytics, researchReport, marketUniverse, volatilityEvents, marketAnomalies, dynamicWatchlist, opportunityClusters, globalMarketSessions, advancedRisk, circuitBreakers, concentration, killSwitchState] =
     await Promise.all([
       getBacktests(token, 8),
       Promise.all((strategyLearning ?? []).map((s) => getPromotionCheck(token, s.strategy_id))),
@@ -132,6 +137,10 @@ export default async function DashboardPage() {
       getDynamicWatchlist(token),
       getOpportunityClusters(token, 20),
       getGlobalMarketSessions(token),
+      getAdvancedRisk(token),
+      getCircuitBreakers(token),
+      getConcentration(token),
+      getKillSwitchState(token),
     ]);
   const promotionByStrategyId = new Map(
     (strategyLearning ?? []).map((s, i) => [s.strategy_id, promotionChecks[i]])
@@ -470,6 +479,13 @@ export default async function DashboardPage() {
         watchlist={dynamicWatchlist}
         clusters={opportunityClusters}
         sessions={globalMarketSessions}
+      />
+
+      <CapitalDefenseCenter
+        advancedRisk={advancedRisk}
+        breakers={circuitBreakers}
+        concentration={concentration}
+        killSwitchState={killSwitchState}
       />
 
       <NewsIntelligenceCenter

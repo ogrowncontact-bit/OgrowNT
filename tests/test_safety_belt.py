@@ -5,6 +5,8 @@ from packages.portfolio.state import PortfolioState
 from packages.risk.config import (
     CapitalConfig,
     DataQualityConfig,
+    DrawdownLevelConfig,
+    DrawdownLevelsConfig,
     LeverageConfig,
     LiquidityConfig,
     LossLimitsConfig,
@@ -13,6 +15,7 @@ from packages.risk.config import (
     PerTradeConfig,
     PortfolioLimitsConfig,
     PositionRiskPolicyConfig,
+    RecoveryConfig,
     RiskLimits,
     SafetyBeltMultipliersConfig,
 )
@@ -49,6 +52,14 @@ LIMITS = RiskLimits(
     position_risk_policy=PositionRiskPolicyConfig(
         regime_change="close", news_risk="reduce", portfolio_emergency="close", reduce_fraction=0.5
     ),
+    drawdown_levels=DrawdownLevelsConfig(
+        level_1=DrawdownLevelConfig(threshold_pct=3, response="reduce_exposure"),
+        level_2=DrawdownLevelConfig(threshold_pct=6, response="reduce_new_positions"),
+        level_3=DrawdownLevelConfig(threshold_pct=9, response="highest_quality_only"),
+        level_4=DrawdownLevelConfig(threshold_pct=12, response="block_new_trades"),
+        level_5=DrawdownLevelConfig(threshold_pct=15, response="close_and_contain"),
+    ),
+    recovery=RecoveryConfig(cooldown_minutes=60),
 )
 
 

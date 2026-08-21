@@ -800,6 +800,72 @@ export const getOpportunityClusters = (token: string, limit = 20) =>
 export const getGlobalMarketSessions = (token: string) =>
   apiFetch<GlobalMarketSnapshot>("/api/global-market/sessions", token);
 
+// --- "PROMPT 12" (Advanced Risk & Capital Defense Engine) ----------------
+
+export type AdvancedRisk = {
+  ts: string;
+  risk_score: number;
+  risk_state: string;
+  capital_preservation_mode: boolean;
+  zero_trade_mode: boolean;
+  degraded: boolean;
+  reasons: string[];
+  equity: number | null;
+  drawdown_pct: number | null;
+  peak_equity: number | null;
+  drawdown_state: string | null;
+  drawdown_level: number | null;
+  concentration_state: string | null;
+  system_risk_state: string | null;
+  execution_risk_state: string | null;
+  model_risk_state: string | null;
+  data_risk_state: string | null;
+};
+export type CircuitBreaker = { name: string; tripped: boolean; reason: string | null; scope_id: number | null };
+export type ConcentrationCluster = {
+  symbols: string[];
+  direction: string;
+  factor: string | null;
+  avg_correlation: number;
+  ranking_penalty: number;
+};
+export type Concentration = {
+  open_position_count: number;
+  total_exposure_notional: number;
+  max_cluster_exposure_pct: number;
+  concentration_state: string;
+  asset_class_exposure_pct: Record<string, number>;
+  hidden_factor_warnings: string[];
+  clusters: ConcentrationCluster[];
+};
+export type KillSwitchState = { kill_switch_state: string; recovery_mode: boolean; trading_enabled: boolean };
+export type RecoveryReadiness = { ready: boolean; reasons: string[] };
+
+export const getAdvancedRisk = (token: string) => apiFetch<AdvancedRisk>("/api/risk/advanced", token);
+export const getCircuitBreakers = (token: string) => apiFetch<CircuitBreaker[]>("/api/risk/breakers", token);
+export const getConcentration = (token: string) => apiFetch<Concentration>("/api/risk/concentration", token);
+export const getKillSwitchState = (token: string) => apiFetch<KillSwitchState>("/api/risk/kill-switch/state", token);
+
+export async function startKillSwitchRecovery(token: string) {
+  const res = await fetch(`${API_URL}/api/risk/kill-switch/recovery/start`, {
+    method: "POST", headers: { Authorization: `Bearer ${token}` }, cache: "no-store",
+  });
+  if (!res.ok) return null;
+  return (await res.json()) as KillSwitchState;
+}
+
+export async function getRecoveryReadiness(token: string) {
+  return apiFetch<RecoveryReadiness>("/api/risk/kill-switch/recovery/readiness", token);
+}
+
+export async function confirmKillSwitchRecovery(token: string, force: boolean) {
+  const res = await fetch(`${API_URL}/api/risk/kill-switch/recovery/confirm?force=${force}`, {
+    method: "POST", headers: { Authorization: `Bearer ${token}` }, cache: "no-store",
+  });
+  if (!res.ok) return null;
+  return (await res.json()) as KillSwitchState;
+}
+
 export async function login(email: string, password: string) {
   const res = await fetch(`${API_URL}/api/auth/login`, {
     method: "POST",

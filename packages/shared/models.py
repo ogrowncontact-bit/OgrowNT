@@ -29,6 +29,11 @@ that uses them:
     anomalies, volatility_events, watchlist_entries, plus metadata/status
     columns added to assets and opportunity_type/fingerprint/expires_at
     added to signals
+  Post-Phase-7 ("Prompt 12" advanced risk & capital defense engine):
+    risk_config_versions, risk_assessments, plus kill_switch_state/
+    recovery_mode/capital_preservation_mode/zero_trade_mode added to
+    system_state and risk_score/risk_state/per-dimension-state/expiration
+    added to risk_decisions
 """
 from datetime import datetime, timezone
 
@@ -263,6 +268,34 @@ class SystemState(Base):
     # cadence OR an operator's own ad-hoc Strategy Lab job for the same
     # reason those two already have independent processes/columns).
     research_worker_last_heartbeat: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # -- "PROMPT 12" Advanced Risk & Capital Defense Engine -----------------
+    # A richer state machine layered ON TOP of trading_enabled (the Kill
+    # Switch boolean stays the sovereign on/off — see packages/risk/
+    # circuit_breakers.py's EmergencyKillSwitch), not a replacement for it.
+    # 'armed' (normal), 'triggered' (just tripped), 'locked' (tripped and
+    # cooling down — no auto-recovery), 'recovery' (a SUPER_ADMIN started
+    # the manual recovery review — "PROMPT 12" §61-62: only a human can
+    # begin this, and it still requires health review + confirmation before
+    # trading_enabled flips back to true).
+    kill_switch_state: Mapped[str] = mapped_column(String, default="armed", nullable=False)
+    # True only while a SUPER_ADMIN-initiated recovery review is in
+    # progress (kill_switch_state == 'recovery'); a plain boolean mirror so
+    # callers that only care "are we mid-recovery" don't need to parse the
+    # state string.
+    recovery_mode: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # Set by AdvancedRiskEngine once portfolio RiskState reaches
+    # HIGH_RISK/CRITICAL ("PROMPT 12" §10's DD_LEVEL_3/4 responses —
+    # highest_quality_only / block_new_trades): position sizing and signal
+    # admission both read this, independent of safety_belt_level, since the
+    # two composites can diverge (e.g. correlation/event risk high while
+    # drawdown itself is still shallow).
+    capital_preservation_mode: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # Set once RiskState reaches CRITICAL/EMERGENCY or a circuit breaker
+    # trips ("PROMPT 12" §66-69): blocks every NEW trade while leaving
+    # existing positions to be managed by the ordinary exit/stop machinery
+    # (or PositionRiskPolicy's own CLOSE actions) rather than force-closing
+    # them the way the Kill Switch's EMERGENCY response does.
+    zero_trade_mode: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
 
 class Alert(Base):
@@ -468,7 +501,14 @@ class RiskCheck(Base):
 
 class RiskDecision(Base):
     __tablename__ = "risk_decisions"
-    __table_args__ = (UniqueConstraint("signal_id", name="uq_risk_decisions_signal_id"),)
+    __table_args__ = (
+        UniqueConstraint("signal_id", name="uq_risk_decisions_signal_id"),
+        CheckConstraint(
+            "risk_state IS NULL OR risk_state IN "
+            "('normal','caution','defensive','high_risk','critical','emergency','halted')",
+            name="ck_risk_decisions_risk_state",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     signal_id: Mapped[int] = mapped_column(ForeignKey("signals.id"), nullable=False)
@@ -477,6 +517,26 @@ class RiskDecision(Base):
     reason: Mapped[str] = mapped_column(Text, nullable=False)
     safety_belt_level: Mapped[str] = mapped_column(String, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    # -- "PROMPT 12" §100's richer RiskDecision object ----------------------
+    # All nullable: populated only once AdvancedRiskEngine actually runs
+    # (packages/risk/advanced_engine.py, wired in task #140) -- a decision
+    # made before that exists (or in a test that only exercises the
+    # pre-existing 13-step evaluate_signal pipeline) legitimately has none
+    # of this, and NULL says so honestly rather than a fabricated 0/"normal".
+    risk_score: Mapped[float | None] = mapped_column(Float)
+    risk_state: Mapped[str | None] = mapped_column(String)
+    drawdown_state: Mapped[str | None] = mapped_column(String)
+    correlation_state: Mapped[str | None] = mapped_column(String)
+    liquidity_state: Mapped[str | None] = mapped_column(String)
+    event_state: Mapped[str | None] = mapped_column(String)
+    model_state: Mapped[str | None] = mapped_column(String)
+    data_state: Mapped[str | None] = mapped_column(String)
+    system_state: Mapped[str | None] = mapped_column(String)
+    # How long this decision's context may be trusted for before it must be
+    # re-evaluated rather than reused ("PROMPT 12" §100) -- distinct from
+    # Signal.expires_at (Prompt 11), which is about the trading opportunity
+    # going stale, not the risk assessment behind an already-approved one.
+    expiration: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     signal: Mapped["Signal"] = relationship()
 
@@ -1751,4 +1811,83 @@ class WatchlistEntry(Base):
             "('opportunity_disappeared','liquidity_deterioration','data_quality_deterioration','manual')",
             name="ck_watchlist_entries_removal_reason",
         ),
+    )
+
+
+# -- "PROMPT 12" Advanced Risk & Capital Defense Engine ---------------------
+#
+# Deliberately only 2 new tables (+ the SystemState/RiskDecision ALTERs
+# above). This phase is mostly a new orchestration/aggregation layer over
+# already very rich existing risk infrastructure (the sovereign 13-step
+# packages/risk/engine.py::evaluate_signal pipeline, the 5-level Safety
+# Belt, the Loss Streak Detector, the Kill Switch, Position Risk Policy,
+# and Prompt 7/9's Monte Carlo/Risk-of-Ruin/consensus/contradiction
+# primitives) -- see docs/capital-defense-engine.md for the full map of
+# what "PROMPT 12" asks for vs. what already existed before it started.
+
+
+class RiskConfigVersion(Base):
+    """One row per change to a risk limit/threshold — "PROMPT 12" §116-119:
+    every edit to config/risk_limits.yaml's live-tunable values (drawdown
+    levels, loss-streak thresholds, correlation caps, ...) must be
+    versioned and auditable, never a silent in-place file edit. `version`
+    is a simple incrementing sequence (not the row `id`, so a future
+    rollback can re-point "current" at an older version without renumbering
+    history). `parameters` holds the full resolved config snapshot after
+    the change, not just the diff, so any version can be inspected or
+    restored on its own without replaying history.
+    """
+
+    __tablename__ = "risk_config_versions"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('pending','approved','active','superseded','rejected')",
+            name="ck_risk_config_versions_status",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    version: Mapped[int] = mapped_column(nullable=False, unique=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, nullable=False)
+    approved_by: Mapped[str | None] = mapped_column(String)
+    parameters: Mapped[dict] = mapped_column(JSON, nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String, default="pending", nullable=False)
+
+
+class RiskAssessment(Base):
+    """An append-only portfolio-wide risk snapshot, one row per
+    AdvancedRiskEngine pass — "PROMPT 12" §100/§107-108 (the Risk Event
+    Timeline and periodic risk reports read this table's history). Distinct
+    from `risk_decisions` (one row per *signal*, written only when a signal
+    is evaluated): this table is written on every engine cycle regardless
+    of whether any signal arrived, so a quiet market still has a continuous
+    risk-state history to look back on.
+    """
+
+    __tablename__ = "risk_assessments"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, nullable=False, index=True)
+    risk_score: Mapped[float] = mapped_column(Float, nullable=False)
+    risk_state: Mapped[str] = mapped_column(String, nullable=False)
+    drawdown_state: Mapped[str | None] = mapped_column(String)
+    correlation_state: Mapped[str | None] = mapped_column(String)
+    liquidity_state: Mapped[str | None] = mapped_column(String)
+    volatility_state: Mapped[str | None] = mapped_column(String)
+    event_state: Mapped[str | None] = mapped_column(String)
+    model_state: Mapped[str | None] = mapped_column(String)
+    data_state: Mapped[str | None] = mapped_column(String)
+    system_state: Mapped[str | None] = mapped_column(String)
+    execution_state: Mapped[str | None] = mapped_column(String)
+    capital_preservation_mode: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    zero_trade_mode: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    reasons: Mapped[list] = mapped_column(JSON, default=list)
+
+    __table_args__ = (
+        CheckConstraint(
+            "risk_state IN ('normal','caution','defensive','high_risk','critical','emergency','halted')",
+            name="ck_risk_assessments_risk_state",
+        ),
+        CheckConstraint("risk_score >= 0 AND risk_score <= 100", name="ck_risk_assessments_risk_score_range"),
     )

@@ -55,6 +55,13 @@ Runs three independent cadences (docs/blueprint/05-event-flow.md §Cadência):
   whatever Signal the strategy cadence above already created, and
   correlated-opportunity clustering. Runs after the strategy cadence in
   the same iteration so it has this cycle's fresh Signals to enrich.
+- Every CAPITAL_DEFENSE_INTERVAL_SECONDS: AdvancedRiskEngine
+  (apps/worker/capital_defense.py, packages/risk/advanced_engine.py,
+  "PROMPT 12" §1-15/§107-108) — a portfolio-wide RiskScore/RiskState
+  assessment persisted as a RiskAssessment row on every tick (not just
+  when a signal arrives), keeping SystemState.capital_preservation_mode/
+  zero_trade_mode fresh and raising an Alert on a fresh escalation into
+  HIGH_RISK or worse.
 
 Prompt 6 §37 asks for NewsIngestionWorker / NewsAnalysisWorker /
 EventDetectionWorker / SentimentWorker / MacroCalendarWorker /
@@ -91,6 +98,7 @@ import signal
 import time
 
 from apps.worker.alerts import run_alert_delivery_cycle
+from apps.worker.capital_defense import run_capital_defense_cycle
 from apps.worker.history import backfill_active_assets
 from apps.worker.macro_agent import run_macro_calendar_cycle
 from apps.worker.market_alerts import MarketAlertTracker
@@ -140,13 +148,14 @@ def main() -> None:
         "Worker starting — market_data=%s news=%s macro=%s llm_configured=%s "
         "scan_interval=%ss news_interval=%ss strategy_interval=%ss research_interval=%ss "
         "macro_calendar_interval=%ss sentiment_shift_interval=%ss alert_delivery_interval=%ss "
-        "universe_interval=%ss market_intelligence_interval=%ss",
+        "universe_interval=%ss market_intelligence_interval=%ss capital_defense_interval=%ss",
         provider.name, news_provider.name, macro_provider.name, llm_client.is_available(),
         settings.scan_interval_seconds, settings.news_interval_seconds,
         settings.strategy_interval_seconds, settings.research_interval_seconds,
         settings.macro_calendar_interval_seconds, settings.sentiment_shift_interval_seconds,
         settings.alert_delivery_interval_seconds,
         settings.universe_interval_seconds, settings.market_intelligence_interval_seconds,
+        settings.capital_defense_interval_seconds,
     )
     if not llm_client.is_available():
         logger.warning(
@@ -186,6 +195,7 @@ def main() -> None:
     last_health_snapshot_run = 0.0
     last_universe_run = 0.0
     last_market_intelligence_run = 0.0
+    last_capital_defense_run = 0.0
     tracker = CadenceFailureTracker()
     market_alert_tracker = MarketAlertTracker()
 
@@ -273,6 +283,15 @@ def main() -> None:
                     logger.exception("market_intelligence cadence failed")
                     tracker.record_failure(db, "market_intelligence", str(exc))
                 last_market_intelligence_run = cycle_start
+
+            if cycle_start - last_capital_defense_run >= settings.capital_defense_interval_seconds:
+                try:
+                    run_capital_defense_cycle(db)
+                    tracker.record_success("capital_defense")
+                except Exception as exc:  # noqa: BLE001
+                    logger.exception("capital_defense cadence failed")
+                    tracker.record_failure(db, "capital_defense", str(exc))
+                last_capital_defense_run = cycle_start
 
             if cycle_start - last_research_run >= settings.research_interval_seconds:
                 try:

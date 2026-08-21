@@ -19,6 +19,7 @@ from packages.portfolio.manager import evaluate_allocation
 from packages.portfolio.state import compute_state
 from packages.quant.scoring.engine import OpportunityScore as ScoreResult
 from packages.quant.strategies.base import AnalysisResult, MarketContext, Strategy, StrategySignal
+from packages.risk.advanced_engine import AdvancedRiskAssessment
 from packages.risk.config import load_risk_limits
 from packages.risk.engine import SignalForRisk, evaluate_signal
 from packages.shared.models import Asset, Signal, SystemState, TradingEvent
@@ -60,6 +61,7 @@ def maybe_execute(
     signal_row: Signal,
     score: ScoreResult,
     decision: chief_decision.Decision | None = None,
+    advanced_risk: AdvancedRiskAssessment | None = None,
 ) -> str:
     """Returns 'skipped_tier', 'chief_blocked', 'chief_no_trade',
     'risk_rejected', 'portfolio_rejected', or 'executed' for the caller's
@@ -120,7 +122,7 @@ def maybe_execute(
         asset_class=asset.asset_class,
     )
 
-    verdict = evaluate_signal(db, signal_for_risk, portfolio_state, system_state, limits=limits)
+    verdict = evaluate_signal(db, signal_for_risk, portfolio_state, system_state, limits=limits, advanced_risk=advanced_risk)
 
     if not verdict.approved:
         signal_row.status = "risk_rejected"

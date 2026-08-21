@@ -11,6 +11,7 @@ from packages.data.connectors.news.factory import get_news_provider
 from packages.llm.client import LLMClient
 from packages.risk.config import CONFIG_PATH as RISK_CONFIG_PATH
 from packages.risk.config import load_risk_limits
+from packages.risk.config_version import record_config_version
 from packages.shared.models import AdminUser, Alert, AuditLog, SystemState
 from packages.shared.settings import get_settings
 from packages.shared.worker_health import is_heartbeat_stale
@@ -162,6 +163,15 @@ def update_risk_limits(
     RISK_CONFIG_PATH.write_text(yaml.safe_dump(merged, sort_keys=False))
 
     db.add(AuditLog(actor=admin.email, action="risk_limits_updated", detail=updates))
+    # "PROMPT 12" §116-119: every risk-limit change must be versioned, not
+    # just logged — record_config_version() marks any previously ACTIVE
+    # version SUPERSEDED and stores this merged config as the new one, so
+    # GET /api/risk/config-versions/diff/{a}/{b} can show exactly what
+    # changed between any two points in this file's history.
+    record_config_version(
+        db, parameters=merged, reason=f"PATCH /api/system/risk-limits by {admin.email}: {list(updates.keys())}",
+        approved_by=admin.email,
+    )
     db.commit()
 
     return merged
