@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@inner/db";
 import { getAssessmentConfig } from "@/lib/assessments";
-import { ensureAnonymousSession } from "@/lib/anonymousSession";
+import { ensureAnonymousSession, readAnonymousSessionId } from "@/lib/anonymousSession";
 import { track } from "@/lib/analytics";
+import { getSoftLaunchMaxUsers } from "@/lib/launchMode";
 
 export async function POST(request: NextRequest) {
   const body = await request.json().catch(() => null);
@@ -11,6 +12,19 @@ export async function POST(request: NextRequest) {
 
   const config = await getAssessmentConfig(slug);
   if (!config) return NextResponse.json({ error: `Unknown assessment "${slug}"` }, { status: 404 });
+
+  // FASE 32 §SOFT LAUNCH — only gates brand-new visitors (no existing cookie
+  // yet); anyone already in the funnel keeps going regardless of the cap.
+  const maxUsers = getSoftLaunchMaxUsers();
+  if (maxUsers !== null && !(await readAnonymousSessionId())) {
+    const currentUsers = await prisma.anonymousSession.count();
+    if (currentUsers >= maxUsers) {
+      return NextResponse.json(
+        { error: "soft_launch_full", message: "We're in an early access window right now — check back soon." },
+        { status: 503 }
+      );
+    }
+  }
 
   const utm = {
     utmSource: body?.utm?.utm_source,

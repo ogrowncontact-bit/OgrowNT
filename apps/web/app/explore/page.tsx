@@ -10,6 +10,7 @@ import { PublicNav } from "@/components/PublicNav";
 import { ExploreViewTracker } from "@/components/ExploreViewTracker";
 import { ScrollDepthTracker } from "@/components/landing/ScrollDepthTracker";
 import { EXPLORE_CATEGORIES, categoryForSlug } from "@/lib/exploreCategories";
+import { getLaunchModeSlug } from "@/lib/launchMode";
 
 export const metadata: Metadata = {
   title: "Explore all experiences",
@@ -28,8 +29,19 @@ export const metadata: Metadata = {
 // immediately, no deploy" guarantee every other page already has.
 export const dynamic = "force-dynamic";
 
+function ComingSoonCard({ name, hook }: { name: string; hook: string }) {
+  return (
+    <div className="block rounded-[var(--inner-radius-lg)] border border-[var(--inner-line)] bg-[var(--inner-card)] p-5 opacity-60">
+      <p className="mb-1 text-[11px] font-medium uppercase tracking-[0.15em] text-[var(--inner-muted)]">Coming soon</p>
+      <h2 className="font-display text-[19px] text-[var(--inner-ink)]">{name}</h2>
+      <p className="mt-2 text-[14px] leading-relaxed text-[var(--inner-ink-soft)]">{hook}</p>
+    </div>
+  );
+}
+
 export default async function ExplorePage() {
   const slugs = await listPublishedSlugs();
+  const launchModeSlug = getLaunchModeSlug();
   const configs = (await Promise.all(slugs.map((slug) => getAssessmentConfig(slug)))).filter(
     (c): c is NonNullable<typeof c> => c !== null
   );
@@ -88,6 +100,9 @@ export default async function ExplorePage() {
           ? orderedSlugs.map((slug) => {
               const config = configBySlug.get(slug);
               if (!config) return null;
+              if (launchModeSlug && slug !== launchModeSlug) {
+                return <ComingSoonCard key={config.slug} name={config.name} hook={config.hook} />;
+              }
               const completed = completedSlugs.has(slug);
               const recommended = recommendedSlugs.has(slug);
               return (
@@ -117,6 +132,9 @@ export default async function ExplorePage() {
                   <div className="space-y-4">
                     {inCategory.map((slug) => {
                       const config = configBySlug.get(slug)!;
+                      if (launchModeSlug && slug !== launchModeSlug) {
+                        return <ComingSoonCard key={config.slug} name={config.name} hook={config.hook} />;
+                      }
                       return (
                         <Link
                           key={config.slug}

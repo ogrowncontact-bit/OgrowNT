@@ -28,7 +28,10 @@ export function BeginButton({ slug }: { slug: string }) {
           },
         }),
       });
-      if (!res.ok) throw new Error("Could not start the experience. Please try again.");
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw new Error(body?.message || "Could not start the experience. Please try again.");
+      }
       const data = await res.json();
       router.push(`/${slug}/session/${data.assessmentSessionId}`);
     } catch (e) {

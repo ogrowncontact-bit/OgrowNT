@@ -11,6 +11,7 @@ import { track } from "@/lib/analytics";
 import { ReportPolling } from "@/components/ReportPolling";
 import { RecommendationLink } from "@/components/RecommendationLink";
 import { ReportView } from "@/components/ReportView";
+import { ReportFeedbackForm } from "@/components/ReportFeedbackForm";
 
 export const metadata = { robots: { index: false, follow: false } };
 
@@ -111,6 +112,7 @@ export default async function ReportPage({ params }: { params: Promise<{ slug: s
   }
 
   const document = report.content as unknown as ReportDocument;
+  const existingFeedback = await prisma.reportFeedback.findUnique({ where: { reportId: report.id } });
 
   return (
     <Screen align="top">
@@ -126,6 +128,12 @@ export default async function ReportPage({ params }: { params: Promise<{ slug: s
         document={document}
         recommendationSlot={recommendation && <RecommendationCard recommendation={recommendation} fromAssessmentId={session.assessmentId} />}
       />
+
+      {!existingFeedback && (
+        <div className="mb-8">
+          <ReportFeedbackForm reportId={report.id} />
+        </div>
+      )}
 
       <p className="mb-12 mt-12 text-center">
         <Link href="/explore" className="text-[13px] text-[var(--inner-muted)] underline underline-offset-4">

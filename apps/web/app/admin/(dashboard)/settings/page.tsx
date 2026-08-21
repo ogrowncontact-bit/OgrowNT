@@ -1,5 +1,7 @@
 import { SUPPORTED_REPORT_LANGUAGES, PLANNED_REPORT_LANGUAGES, LANGUAGE_NAMES } from "@inner/ai";
 import { getSiteUrl } from "@/lib/siteUrl";
+import { getLaunchModeSlug, getSoftLaunchMaxUsers } from "@/lib/launchMode";
+import { prisma } from "@inner/db";
 
 export const dynamic = "force-dynamic";
 
@@ -15,12 +17,17 @@ const card = "rounded-[var(--inner-radius-lg)] border border-[var(--inner-line)]
 const label = "mb-3 text-[13px] font-medium uppercase tracking-[0.1em] text-[var(--inner-muted)]";
 const row = "flex items-center justify-between border-b border-[var(--inner-line)] py-2 text-[13px] last:border-0";
 
-export default function AdminSettingsPage() {
+export default async function AdminSettingsPage() {
   const stripeConfigured = !!process.env.STRIPE_SECRET_KEY;
+  const stripeWebhookConfigured = !!process.env.STRIPE_WEBHOOK_SECRET;
   const resendConfigured = !!process.env.RESEND_API_KEY;
   const anthropicConfigured = !!process.env.ANTHROPIC_API_KEY;
   const cronConfigured = !!process.env.CRON_SECRET;
   const isProduction = process.env.NODE_ENV === "production";
+
+  const launchModeSlug = getLaunchModeSlug();
+  const softLaunchMax = getSoftLaunchMaxUsers();
+  const currentUserCount = softLaunchMax !== null ? await prisma.anonymousSession.count() : null;
 
   return (
     <div>
@@ -63,6 +70,22 @@ export default function AdminSettingsPage() {
         </div>
 
         <div className={card}>
+          <p className={label}>Launch</p>
+          <div className={row}>
+            <span className="text-[var(--inner-ink-soft)]">Catalog</span>
+            <span className="text-[var(--inner-ink)]">
+              {launchModeSlug ? `LOVE-only launch mode (LAUNCH_MODE_SLUG=${launchModeSlug})` : "Full catalog live"}
+            </span>
+          </div>
+          <div className={row}>
+            <span className="text-[var(--inner-ink-soft)]">Soft launch cap</span>
+            <span className="text-[var(--inner-ink)]">
+              {softLaunchMax !== null ? `${currentUserCount} / ${softLaunchMax} visitors` : "Not enabled — open to all traffic"}
+            </span>
+          </div>
+        </div>
+
+        <div className={card}>
           <p className={label}>Currencies</p>
           <div className={row}>
             <span className="text-[var(--inner-ink-soft)]">Available at checkout</span>
@@ -78,6 +101,19 @@ export default function AdminSettingsPage() {
               Payment (Stripe)
             </span>
             <span className="text-[var(--inner-ink)]">{stripeConfigured ? "Configured" : "Not configured (using dev mock)"}</span>
+          </div>
+          <div className={row}>
+            <span className="flex items-center text-[var(--inner-ink-soft)]">
+              <StatusDot ok={stripeWebhookConfigured} />
+              Stripe webhook signing secret
+            </span>
+            <span className="text-[var(--inner-ink)]">
+              {stripeWebhookConfigured
+                ? "Configured"
+                : isProduction
+                  ? "Missing — the app refuses to start in production without this"
+                  : "Not configured (using dev mock — no webhook needed)"}
+            </span>
           </div>
           <div className={row}>
             <span className="flex items-center text-[var(--inner-ink-soft)]">

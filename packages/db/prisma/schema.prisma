@@ -581,6 +581,29 @@ model Report {
   deliveredAt          DateTime?
 
   entitlement          Entitlement?
+  feedback             ReportFeedback?
+
+  @@schema("commerce")
+}
+
+/** FASE 32 §FEEDBACK — optional, never mandatory. One row per report (rating can be resubmitted/overwritten, not accumulated). */
+enum FeedbackRating {
+  very_accurate
+  mostly_accurate
+  somewhat_accurate
+  not_very_accurate
+  not_accurate
+
+  @@schema("commerce")
+}
+
+model ReportFeedback {
+  id        String         @id @default(cuid())
+  reportId  String         @unique
+  report    Report         @relation(fields: [reportId], references: [id])
+  rating    FeedbackRating
+  comment   String?        @db.Text
+  createdAt DateTime       @default(now())
 
   @@schema("commerce")
 }
