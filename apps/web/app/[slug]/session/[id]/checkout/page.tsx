@@ -28,6 +28,7 @@ export default async function CheckoutPage({ params }: { params: Promise<{ slug:
     <CheckoutForm
       slug={slug}
       assessmentSessionId={id}
+      productName={`${config.name} — Personal Report`}
       priceLabel={price ? formatPrice(price.amountCents, price.currency) : ""}
     />
   );

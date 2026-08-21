@@ -66,6 +66,26 @@ async function sendCheckoutReminders(now: Date): Promise<ReengagementCounts> {
       continue;
     }
 
+    // Per FASE 30's abandoned-checkout rule: this is a proactive recovery
+    // nudge, not a transactional payment-status notice (that's
+    // markOrderCancelled's payment_failed email, sent immediately on a
+    // specific expiry event and left ungated) — so it follows the same
+    // consent gate sendRecommendationNudges below already applies.
+    const consent = await prisma.marketingConsent.findFirst({
+      where: { userId: order.userId },
+      orderBy: { consentTimestamp: "desc" },
+    });
+    if (!consent?.consent) {
+      counts.skipped++;
+      continue;
+    }
+
+    const unsubscribed = await prisma.unsubscribe.findFirst({ where: { userId: order.userId } });
+    if (unsubscribed) {
+      counts.skipped++;
+      continue;
+    }
+
     const checkoutUrl = `${appBaseUrl()}/${order.assessmentSession.sourceSlug}/session/${order.assessmentSessionId}/checkout`;
     const provider = getEmailProvider();
     const result = await provider.send({

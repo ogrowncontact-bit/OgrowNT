@@ -7,12 +7,13 @@ import { Screen, Button, Checkbox } from "@inner/ui";
 interface CheckoutFormProps {
   slug: string;
   assessmentSessionId: string;
+  productName: string;
   priceLabel: string;
 }
 
 const CONSENT_VERSION = "v1";
 
-export function CheckoutForm({ slug, assessmentSessionId, priceLabel }: CheckoutFormProps) {
+export function CheckoutForm({ slug, assessmentSessionId, productName, priceLabel }: CheckoutFormProps) {
   const [email, setEmail] = useState("");
   const [marketingConsent, setMarketingConsent] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -63,6 +64,11 @@ export function CheckoutForm({ slug, assessmentSessionId, priceLabel }: Checkout
         Your report is generated from your own answers, and delivered privately to this address.
       </p>
 
+      <div className="mt-6 flex items-center justify-between rounded-[var(--inner-radius-md)] border border-[var(--inner-line)] bg-[var(--inner-card)] px-4 py-3">
+        <span className="text-[14px] font-medium text-[var(--inner-ink)]">{productName}</span>
+        <span className="text-[14px] font-medium text-[var(--inner-ink)]">{priceLabel}</span>
+      </div>
+
       <div className="mt-8">
         <input
           type="email"
@@ -95,7 +101,11 @@ export function CheckoutForm({ slug, assessmentSessionId, priceLabel }: Checkout
           <Link href="/privacy-policy" className="underline">
             Privacy Policy
           </Link>
-          .
+          . See our{" "}
+          <Link href="/refund" className="underline">
+            Refund Policy
+          </Link>{" "}
+          for how refund requests are handled.
         </p>
       </div>
     </Screen>

@@ -24,6 +24,7 @@ interface DiscoveryRow {
   hook: string;
   kind: AssessmentCtaKind;
   href: string;
+  reportId?: string;
 }
 
 export default async function MyDiscoveriesPage() {
@@ -50,15 +51,23 @@ export default async function MyDiscoveriesPage() {
     const entitlements = completedIds.length
       ? await prisma.entitlement.findMany({ where: { assessmentSessionId: { in: completedIds } } })
       : [];
-    const unlockedSessionIds = new Set(entitlements.map((e) => e.assessmentSessionId));
+    const reportIdBySessionId = new Map(entitlements.filter((e) => e.reportId).map((e) => [e.assessmentSessionId, e.reportId!]));
 
     discoveries = [...latestByAssessment.values()].map((s): DiscoveryRow => {
       if (s.status === "in_progress") {
         return { slug: s.sourceSlug, name: s.assessment.name, hook: s.assessment.hook, kind: "continue", href: `/${s.sourceSlug}/session/${s.id}` };
       }
       if (s.status === "completed") {
-        if (unlockedSessionIds.has(s.id)) {
-          return { slug: s.sourceSlug, name: s.assessment.name, hook: s.assessment.hook, kind: "open_report", href: `/${s.sourceSlug}/session/${s.id}/report` };
+        const reportId = reportIdBySessionId.get(s.id);
+        if (reportId) {
+          return {
+            slug: s.sourceSlug,
+            name: s.assessment.name,
+            hook: s.assessment.hook,
+            kind: "open_report",
+            href: `/${s.sourceSlug}/session/${s.id}/report`,
+            reportId,
+          };
         }
         return { slug: s.sourceSlug, name: s.assessment.name, hook: s.assessment.hook, kind: "view_result", href: `/${s.sourceSlug}/session/${s.id}/result` };
       }
@@ -96,18 +105,24 @@ export default async function MyDiscoveriesPage() {
       ) : (
         <div className="mt-8 space-y-4">
           {discoveries.map((d) => (
-            <Link
-              key={d.slug}
-              href={d.href}
-              className="block rounded-[var(--inner-radius-lg)] border border-[var(--inner-line)] bg-[var(--inner-card)] p-5"
-            >
-              <p className="text-[11px] font-medium uppercase tracking-[0.15em] text-[var(--inner-accent)]">
-                {d.kind === "continue" ? "In progress" : d.kind === "start" ? "Not finished" : "Completed"}
-              </p>
-              <h2 className="font-display mt-1 text-[19px] text-[var(--inner-ink)]">{d.name}</h2>
-              <p className="mt-2 text-[14px] leading-relaxed text-[var(--inner-ink-soft)]">{d.hook}</p>
-              <p className="mt-3 text-[13px] font-medium text-[var(--inner-ink)]">{CTA_LABELS[d.kind]} →</p>
-            </Link>
+            <div key={d.slug} className="rounded-[var(--inner-radius-lg)] border border-[var(--inner-line)] bg-[var(--inner-card)] p-5">
+              <Link href={d.href} className="block">
+                <p className="text-[11px] font-medium uppercase tracking-[0.15em] text-[var(--inner-accent)]">
+                  {d.kind === "continue" ? "In progress" : d.kind === "start" ? "Not finished" : "Completed"}
+                </p>
+                <h2 className="font-display mt-1 text-[19px] text-[var(--inner-ink)]">{d.name}</h2>
+                <p className="mt-2 text-[14px] leading-relaxed text-[var(--inner-ink-soft)]">{d.hook}</p>
+                <p className="mt-3 text-[13px] font-medium text-[var(--inner-ink)]">{CTA_LABELS[d.kind]} →</p>
+              </Link>
+              {d.reportId && (
+                <a
+                  href={`/api/reports/${d.reportId}/pdf`}
+                  className="mt-3 inline-block text-[13px] font-medium text-[var(--inner-muted)] underline underline-offset-4"
+                >
+                  Download PDF
+                </a>
+              )}
+            </div>
           ))}
         </div>
       )}
