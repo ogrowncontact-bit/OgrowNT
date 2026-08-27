@@ -25,7 +25,12 @@ export async function getAssessmentConfig(slug: string): Promise<AssessmentConfi
     prisma.price.findMany({ where: { assessmentId: assessment.id, active: true } }),
   ]);
 
-  return mapVersionToConfig(assessment, version, recommendations, prices);
+  // Admin emergency control (FASE 33) — a disabled question is excluded from
+  // the live question bank here only, never from the admin editor's own
+  // loader, so it stays visible (and re-enable-able) there.
+  const activeVersion = { ...version, questions: version.questions.filter((q) => !q.disabledAt) };
+
+  return mapVersionToConfig(assessment, activeVersion, recommendations, prices);
 }
 
 export async function listPublishedSlugs(): Promise<string[]> {

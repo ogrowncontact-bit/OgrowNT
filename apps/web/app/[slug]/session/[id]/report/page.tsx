@@ -12,11 +12,19 @@ import { ReportPolling } from "@/components/ReportPolling";
 import { RecommendationLink } from "@/components/RecommendationLink";
 import { ReportView } from "@/components/ReportView";
 import { ReportFeedbackForm } from "@/components/ReportFeedbackForm";
+import { PurchaseFeedbackForm } from "@/components/PurchaseFeedbackForm";
 
 export const metadata = { robots: { index: false, follow: false } };
 
-export default async function ReportPage({ params }: { params: Promise<{ slug: string; id: string }> }) {
+export default async function ReportPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ slug: string; id: string }>;
+  searchParams: Promise<{ checkout?: string }>;
+}) {
   const { slug, id } = await params;
+  const { checkout } = await searchParams;
 
   const currentAnonymousSessionId = await readAnonymousSessionId();
   const accessUserId = await readAccessUserId();
@@ -113,9 +121,16 @@ export default async function ReportPage({ params }: { params: Promise<{ slug: s
 
   const document = report.content as unknown as ReportDocument;
   const existingFeedback = await prisma.reportFeedback.findUnique({ where: { reportId: report.id } });
+  const existingPurchaseFeedback = await prisma.purchaseFeedback.findUnique({ where: { orderId: entitlement.orderId } });
 
   return (
     <Screen align="top">
+      {checkout === "success" && !existingPurchaseFeedback && (
+        <div className="mb-8">
+          <PurchaseFeedbackForm orderId={entitlement.orderId} />
+        </div>
+      )}
+
       <a
         href={`/api/reports/${report.id}/pdf`}
         className="mb-6 inline-block rounded-[var(--inner-radius-md)] border border-[var(--inner-line)] bg-[var(--inner-card)] px-5 py-3 text-[15px] font-medium text-[var(--inner-ink)]"

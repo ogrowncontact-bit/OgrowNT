@@ -16,14 +16,28 @@ export const MODELS = {
 } as const;
 
 let client: Anthropic | null | undefined;
+let forceFallback = false;
+
+/**
+ * Admin emergency control (FASE 33 §EMERGENCY CONTROLS) — lets apps/web force
+ * every AI module to its deterministic fallback without a redeploy. This
+ * package stays DB-free by design (§4), so apps/web owns reading the actual
+ * admin-set flag and calling this once per request that might touch AI; the
+ * value itself is process-global, which is correct here since it always
+ * reflects the same single admin-configured switch, not per-request state.
+ */
+export function setAiForceFallback(disabled: boolean): void {
+  forceFallback = disabled;
+}
 
 export function isAiEnabled(): boolean {
-  return !!process.env.ANTHROPIC_API_KEY;
+  return !forceFallback && !!process.env.ANTHROPIC_API_KEY;
 }
 
 function getClient(): Anthropic | null {
+  if (!isAiEnabled()) return null;
   if (client !== undefined) return client;
-  client = process.env.ANTHROPIC_API_KEY ? new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY }) : null;
+  client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! });
   return client;
 }
 

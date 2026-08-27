@@ -17,8 +17,11 @@ export const FUNNEL_STAGES = [
   { key: "report_preview_viewed", label: "Report preview viewed" },
   { key: "checkout_started", label: "Checkout started" },
   { key: "payment_completed", label: "Purchased" },
+  { key: "report_delivered", label: "Report delivered" },
   { key: "report_viewed", label: "Report viewed" },
+  { key: "pdf_downloaded", label: "PDF downloaded" },
   { key: "recommendation_viewed", label: "Next discovery shown" },
+  { key: "recommendation_clicked", label: "Next discovery clicked" },
 ] as const;
 
 export interface FunnelRow {
@@ -137,7 +140,10 @@ export interface QuestionDropoffResult {
  * Where in the core question sequence people stop, for one assessment's
  * published version. Only counts rows in runtime.Response grouped by
  * questionId — never reads selectedOptionIds/scaleValue, so no answer
- * content leaves runtime.* here.
+ * content leaves runtime.* here. Excludes FASE 31's QA-simulation-tagged
+ * sessions (skipAnalytics suppresses their Event tracking, but not the
+ * underlying Response/AssessmentSession rows) so a QA run doesn't silently
+ * skew real drop-off numbers.
  */
 export async function getQuestionDropoff(assessmentId: string): Promise<QuestionDropoffResult | null> {
   const version = await prisma.assessmentVersion.findFirst({
@@ -147,12 +153,14 @@ export async function getQuestionDropoff(assessmentId: string): Promise<Question
   });
   if (!version) return null;
 
+  const notQaSimulation = { assessmentId, anonymousSession: { utmSource: { not: "qa_simulation" } } };
+
   const [totalStarted, responseCounts] = await Promise.all([
-    prisma.assessmentSession.count({ where: { assessmentId } }),
+    prisma.assessmentSession.count({ where: notQaSimulation }),
     prisma.response.groupBy({
       by: ["questionId"],
       _count: { _all: true },
-      where: { assessmentSession: { assessmentId } },
+      where: { assessmentSession: notQaSimulation },
     }),
   ]);
 

@@ -9,6 +9,7 @@ import {
   getRecentAiFailures,
   getRevenueSummary,
 } from "@/lib/admin/analyticsReader";
+import { getRealQuestionAnalytics } from "@/lib/admin/questionAnalyticsReader";
 import { getGlobalSegments, getPerAssessmentSegments } from "@/lib/admin/segmentsReader";
 import { getExperimentResults } from "@/lib/admin/experimentsReader";
 import { ReengagementRunner } from "@/components/admin/ReengagementRunner";
@@ -48,6 +49,7 @@ export default async function AdminAnalyticsPage({
 
   const selectedAssessmentId = requestedAssessmentId ?? funnel[0]?.assessmentId;
   const dropoff = selectedAssessmentId ? await getQuestionDropoff(selectedAssessmentId) : null;
+  const questionAnalytics = selectedAssessmentId ? await getRealQuestionAnalytics(selectedAssessmentId) : null;
 
   return (
     <div>
@@ -221,6 +223,46 @@ export default async function AdminAnalyticsPage({
                   <td className="whitespace-nowrap px-4 py-3 text-[var(--inner-ink-soft)]">
                     {q.answered} / {dropoff.totalStarted}
                     <span className="ml-1 text-[11px] text-[var(--inner-muted)]">({q.pctOfStarted}%)</span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      <h2 className="font-display mb-3 text-[18px] text-[var(--inner-ink)]">Question performance (real traffic)</h2>
+      <p className="mb-3 text-[13px] text-[var(--inner-ink-soft)]">
+        Views, answers, skip rate, and average response time from real sessions — distinct from the simulated
+        100-persona QA run under LOVE QA. Never reads answer content.
+      </p>
+      <div className="mb-8 overflow-x-auto rounded-[var(--inner-radius-lg)] border border-[var(--inner-line)] bg-[var(--inner-card)]">
+        {!questionAnalytics || questionAnalytics.questions.length === 0 ? (
+          <p className="px-4 py-6 text-center text-[13px] text-[var(--inner-muted)]">
+            No published core questions for this experience yet.
+          </p>
+        ) : (
+          <table className="w-full text-left text-[13px]">
+            <thead>
+              <tr className="border-b border-[var(--inner-line)] text-[var(--inner-muted)]">
+                <th className="px-4 py-3 font-medium">Question</th>
+                <th className="whitespace-nowrap px-4 py-3 font-medium">Views</th>
+                <th className="whitespace-nowrap px-4 py-3 font-medium">Answers</th>
+                <th className="whitespace-nowrap px-4 py-3 font-medium">Skip rate</th>
+                <th className="whitespace-nowrap px-4 py-3 font-medium">Avg. time</th>
+              </tr>
+            </thead>
+            <tbody>
+              {questionAnalytics.questions.map((q) => (
+                <tr key={q.key} className="border-b border-[var(--inner-line)] last:border-0">
+                  <td className="px-4 py-3 text-[var(--inner-ink)]">{q.prompt}</td>
+                  <td className="whitespace-nowrap px-4 py-3 text-[var(--inner-ink-soft)]">{q.views}</td>
+                  <td className="whitespace-nowrap px-4 py-3 text-[var(--inner-ink-soft)]">{q.answers}</td>
+                  <td className="whitespace-nowrap px-4 py-3 text-[var(--inner-ink-soft)]">
+                    {q.skipRatePct === null ? "—" : `${q.skipRatePct}%`}
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-3 text-[var(--inner-ink-soft)]">
+                    {q.avgResponseTimeMs === null ? "—" : `${Math.round(q.avgResponseTimeMs / 1000)}s`}
                   </td>
                 </tr>
               ))}

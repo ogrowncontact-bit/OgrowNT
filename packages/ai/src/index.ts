@@ -1,4 +1,4 @@
-export { isAiEnabled, MODELS } from "./client";
+export { isAiEnabled, setAiForceFallback, MODELS } from "./client";
 export { interpretOpenAnswer } from "./responseAI";
 export type { OpenAnswerAnalysis } from "./responseAI";
 export { chooseFollowup } from "./questionAI";

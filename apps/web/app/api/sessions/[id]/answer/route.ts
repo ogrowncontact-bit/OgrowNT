@@ -9,6 +9,7 @@ import { ensureAiTelemetryRegistered } from "@/lib/aiTelemetry";
 import { getAiModelConfig } from "@/lib/aiConfig";
 import { completeAssessmentSession } from "@/lib/completeAssessmentSession";
 import { recordSessionAnswer } from "@/lib/recordSessionAnswer";
+import { applyAiForceFallback } from "@/lib/emergencyControls";
 
 // Registers once per module instance — instrumentation.ts's startup hook runs
 // in a separate module realm from route handlers in Next.js's dev server, so
@@ -32,6 +33,9 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const config = await getAssessmentConfig(session.sourceSlug);
   if (!config) return NextResponse.json({ error: "Unknown assessment" }, { status: 500 });
 
+  // Admin emergency control (FASE 33) — reflects the current admin-set
+  // "force AI fallback" switch on this request without a redeploy.
+  await applyAiForceFallback();
   const modelConfig = await getAiModelConfig();
 
   const body = await request.json().catch(() => null);

@@ -20,21 +20,25 @@ datasource db {
 // ============================================================================
 
 model AnonymousSession {
-  id              String   @id @default(cuid())
-  createdAt       DateTime @default(now())
-  lastSeenAt      DateTime @updatedAt
+  id               String   @id @default(cuid())
+  createdAt        DateTime @default(now())
+  lastSeenAt       DateTime @updatedAt
   firstLandingSlug String
-  utmSource       String?
-  utmMedium       String?
-  utmCampaign     String?
-  utmContent      String?
-  utmTerm         String?
-  referrer        String?
-  ipHash          String?
-  uaHash          String?
+  utmSource        String?
+  utmMedium        String?
+  utmCampaign      String?
+  utmContent       String?
+  utmTerm          String?
+  referrer         String?
+  ipHash           String?
+  uaHash           String?
+  /**
+   * Coarse device family only (mobile/tablet/desktop/unknown), classified from the raw user-agent at creation time — the raw string itself is never stored, only uaHash. See FASE 33 §PRIVACY.
+   */
+  deviceType       String?
 
-  userId          String?
-  user            User?    @relation(fields: [userId], references: [id])
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id])
 
   assessmentSessions AssessmentSession[]
 
@@ -42,12 +46,12 @@ model AnonymousSession {
 }
 
 model User {
-  id                String   @id @default(cuid())
-  email             String   @unique
-  emailVerifiedAt   DateTime?
-  stripeCustomerId  String?
-  createdAt         DateTime @default(now())
-  lastSeenAt        DateTime @default(now())
+  id               String    @id @default(cuid())
+  email            String    @unique
+  emailVerifiedAt  DateTime?
+  stripeCustomerId String?
+  createdAt        DateTime  @default(now())
+  lastSeenAt       DateTime  @default(now())
 
   anonymousSessions AnonymousSession[]
   marketingConsents MarketingConsent[]
@@ -78,7 +82,9 @@ model DeletionRequest {
   @@schema("identity")
 }
 
-/** Marks an access-link token as spent — see lib/access.ts. Stores a hash of the token, never the token itself, and only for the lifetime of the token's own expiry. */
+/**
+ * Marks an access-link token as spent — see lib/access.ts. Stores a hash of the token, never the token itself, and only for the lifetime of the token's own expiry.
+ */
 model UsedAccessToken {
   tokenHash String   @id
   usedAt    DateTime @default(now())
@@ -87,7 +93,9 @@ model UsedAccessToken {
   @@schema("identity")
 }
 
-/** Generic sliding-window request counter — see lib/security/rateLimit.ts. One row per attempt (allowed or not); rows past their own window are pruned lazily on the next check for the same scope+identifier. */
+/**
+ * Generic sliding-window request counter — see lib/security/rateLimit.ts. One row per attempt (allowed or not); rows past their own window are pruned lazily on the next check for the same scope+identifier.
+ */
 model RateLimitHit {
   id         String   @id @default(cuid())
   scope      String
@@ -112,14 +120,14 @@ enum AssessmentStatus {
 }
 
 model Assessment {
-  id               String            @id @default(cuid())
-  slug             String            @unique
-  name             String
-  category         String
-  description      String
-  hook             String
-  targetAudience   String
-  status           AssessmentStatus  @default(draft)
+  id                 String           @id @default(cuid())
+  slug               String           @unique
+  name               String
+  category           String
+  description        String
+  hook               String
+  targetAudience     String
+  status             AssessmentStatus @default(draft)
   // Landing-page-specific CMS copy — all optional, all with sensible
   // code-level fallbacks (see apps/web/lib/landingContent.ts) so an
   // unedited assessment still renders a complete landing page. Lives
@@ -131,42 +139,46 @@ model Assessment {
   curiosityHook      String?
   exampleInsight     String?
   ctaLabel           String?
-  extraFaqItems      Json?   // { question, answer }[] — appended after the generated base FAQ
-  createdAt        DateTime          @default(now())
-  updatedAt        DateTime          @updatedAt
+  extraFaqItems      Json? // { question, answer }[] — appended after the generated base FAQ
+  /**
+   * Human-facing release tag (e.g. "1.0", "1.1") — distinct from AssessmentVersion.versionNumber, which is the content/scoring snapshot number. Admin-editable; snapshotted onto Report.assessmentReleaseVersion at generation time. See FASE 33 §VERSIONING.
+   */
+  releaseVersion     String           @default("1.0")
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
 
-  versions         AssessmentVersion[]
-  prices           Price[]
-  recommendedFrom  RecommendationRule[] @relation("RecommendationFrom")
-  recommendedTo    RecommendationRule[] @relation("RecommendationTo")
+  versions           AssessmentVersion[]
+  prices             Price[]
+  recommendedFrom    RecommendationRule[] @relation("RecommendationFrom")
+  recommendedTo      RecommendationRule[] @relation("RecommendationTo")
   assessmentSessions AssessmentSession[]
-  campaigns        Campaign[]
+  campaigns          Campaign[]
 
   @@schema("catalog")
 }
 
 model AssessmentVersion {
-  id              String     @id @default(cuid())
-  assessmentId    String
-  assessment      Assessment @relation(fields: [assessmentId], references: [id])
-  versionNumber   Int
-  minQuestions    Int
-  recommendedQuestions Int
-  maxQuestions    Int
-  aiInfluenceCap  Float      @default(0.15)
-  freeResultTemplate Json?   // { headline, insightIntro, lockedInsightsLabel }
-  shareTemplate   Json?      // { shareTitleTemplate, shareTextTemplate }
-  tensionPairs    Json?      // TensionPairDefinition[]
+  id                     String     @id @default(cuid())
+  assessmentId           String
+  assessment             Assessment @relation(fields: [assessmentId], references: [id])
+  versionNumber          Int
+  minQuestions           Int
+  recommendedQuestions   Int
+  maxQuestions           Int
+  aiInfluenceCap         Float      @default(0.15)
+  freeResultTemplate     Json? // { headline, insightIntro, lockedInsightsLabel }
+  shareTemplate          Json? // { shareTitleTemplate, shareTextTemplate }
+  tensionPairs           Json? // TensionPairDefinition[]
   contradictionFollowups Json? // ContradictionFollowupRule[]
-  publishedAt     DateTime?
-  createdBy       String?
-  createdAt       DateTime   @default(now())
+  publishedAt            DateTime?
+  createdBy              String?
+  createdAt              DateTime   @default(now())
 
-  dimensions      AssessmentDimension[]
-  questions       Question[]
-  adaptiveRules   AdaptiveRule[]
-  profiles        Profile[]
-  reportTemplate  ReportTemplate?
+  dimensions         AssessmentDimension[]
+  questions          Question[]
+  adaptiveRules      AdaptiveRule[]
+  profiles           Profile[]
+  reportTemplate     ReportTemplate?
   assessmentSessions AssessmentSession[]
 
   @@unique([assessmentId, versionNumber])
@@ -174,8 +186,8 @@ model AssessmentVersion {
 }
 
 model Dimension {
-  id          String   @id @default(cuid())
-  key         String   @unique
+  id          String @id @default(cuid())
+  key         String @unique
   label       String
   description String
 
@@ -215,21 +227,25 @@ model Question {
   prompt              String
   orderHint           Int
   metadata            Json?
+  /**
+   * Admin emergency control (FASE 33) — a disabled question is excluded from the live question bank (see lib/assessments.ts) without touching content or requiring a new version. Never affects historical Response rows.
+   */
+  disabledAt          DateTime?
 
-  options             QuestionOption[]
+  options QuestionOption[]
 
   @@unique([assessmentVersionId, key])
   @@schema("catalog")
 }
 
 model QuestionOption {
-  id                    String   @id @default(cuid())
-  questionId            String
-  question              Question @relation(fields: [questionId], references: [id])
-  key                   String
-  label                 String
-  dimensionContributions Json    // { [dimensionKey]: weight }
-  orderHint             Int
+  id                     String   @id @default(cuid())
+  questionId             String
+  question               Question @relation(fields: [questionId], references: [id])
+  key                    String
+  label                  String
+  dimensionContributions Json // { [dimensionKey]: weight }
+  orderHint              Int
 
   @@unique([questionId, key])
   @@schema("catalog")
@@ -240,8 +256,8 @@ model AdaptiveRule {
   assessmentVersionId String
   assessmentVersion   AssessmentVersion @relation(fields: [assessmentVersionId], references: [id])
   key                 String
-  trigger             Json              // { dimensionKey, questionKey?, condition }
-  action              Json              // { type: 'ask_followup'|'increase_confidence'|'skip', ... }
+  trigger             Json // { dimensionKey, questionKey?, condition }
+  action              Json // { type: 'ask_followup'|'increase_confidence'|'skip', ... }
   priority            Int               @default(0)
 
   @@unique([assessmentVersionId, key])
@@ -249,14 +265,14 @@ model AdaptiveRule {
 }
 
 model Profile {
-  id                    String            @id @default(cuid())
-  assessmentVersionId   String
-  assessmentVersion     AssessmentVersion @relation(fields: [assessmentVersionId], references: [id])
-  key                   String
-  name                  String
-  descriptionTemplate   String
-  matchingRule          Json              // { dimensionRanges, optionalConditions?, excludeConditions? }
-  priority              Int               @default(0)
+  id                  String            @id @default(cuid())
+  assessmentVersionId String
+  assessmentVersion   AssessmentVersion @relation(fields: [assessmentVersionId], references: [id])
+  key                 String
+  name                String
+  descriptionTemplate String
+  matchingRule        Json // { dimensionRanges, optionalConditions?, excludeConditions? }
+  priority            Int               @default(0)
 
   @@unique([assessmentVersionId, key])
   @@schema("catalog")
@@ -266,7 +282,7 @@ model ReportTemplate {
   id                  String            @id @default(cuid())
   assessmentVersionId String            @unique
   assessmentVersion   AssessmentVersion @relation(fields: [assessmentVersionId], references: [id])
-  sections            Json              // ordered [{ key, title, promptRef }]
+  sections            Json // ordered [{ key, title, promptRef }]
 
   @@schema("catalog")
 }
@@ -279,7 +295,7 @@ model RecommendationRule {
   toAssessment     Assessment @relation("RecommendationTo", fields: [toAssessmentId], references: [id])
   condition        Json
   weight           Float      @default(1.0)
-  bridgeCopy       String     // static fallback narration; Recommendation AI narrates when available (§8)
+  bridgeCopy       String // static fallback narration; Recommendation AI narrates when available (§8)
 
   @@schema("catalog")
 }
@@ -304,7 +320,7 @@ model Price {
   active        Boolean     @default(true)
   effectiveFrom DateTime    @default(now())
 
-  orders        Order[]
+  orders Order[]
 
   @@schema("catalog")
 }
@@ -368,7 +384,9 @@ model QaSimulationRun {
   @@schema("catalog")
 }
 
-/** Blog foundation (FASE 23 §BLOG FOUNDATION) — CMS + template only, not a full editorial system. */
+/**
+ * Blog foundation (FASE 23 §BLOG FOUNDATION) — CMS + template only, not a full editorial system.
+ */
 model JournalPost {
   id          String            @id @default(cuid())
   slug        String            @unique
@@ -417,6 +435,32 @@ model AssessmentSession {
   orders              Order[]
   reports             Report[]
   entitlements        Entitlement[]
+  abandonmentFeedback AbandonmentFeedback?
+
+  @@schema("runtime")
+}
+
+/**
+ * FASE 33 §ABANDONMENT FEEDBACK — optional, offered inline on the paywall for anyone who reached it without purchasing. Never surfaced as a popup/interruption, never mandatory.
+ */
+enum AbandonmentFeedbackReason {
+  too_expensive
+  not_sure_useful
+  wanted_to_think
+  not_enough_info
+  technical_problem
+  other
+
+  @@schema("runtime")
+}
+
+model AbandonmentFeedback {
+  id                  String                    @id @default(cuid())
+  assessmentSessionId String                    @unique
+  assessmentSession   AssessmentSession         @relation(fields: [assessmentSessionId], references: [id])
+  reason              AbandonmentFeedbackReason
+  otherText           String?                   @db.Text
+  createdAt           DateTime                  @default(now())
 
   @@schema("runtime")
 }
@@ -425,9 +469,9 @@ model Response {
   id                  String            @id @default(cuid())
   assessmentSessionId String
   assessmentSession   AssessmentSession @relation(fields: [assessmentSessionId], references: [id])
-  questionId          String            // references catalog Question.key, not its id — runtime stays loosely coupled to catalog
-  selectedOptionIds   Json?             // string[], for single/multi select
-  scaleValue          Int?              // for scale questions
+  questionId          String // references catalog Question.key, not its id — runtime stays loosely coupled to catalog
+  selectedOptionIds   Json? // string[], for single/multi select
+  scaleValue          Int? // for scale questions
   answeredAt          DateTime          @default(now())
   responseTimeMs      Int?
 
@@ -439,7 +483,7 @@ model OpenResponse {
   assessmentSessionId String
   assessmentSession   AssessmentSession @relation(fields: [assessmentSessionId], references: [id])
   questionId          String
-  rawTextEncrypted    String            // encrypted at the application layer before write
+  rawTextEncrypted    String // encrypted at the application layer before write
   aiTags              Json?
   aiSentiment         String?
   safetyFlag          Boolean           @default(false)
@@ -469,7 +513,9 @@ model DimensionScore {
   rawScore            Float
   normalizedScore     Float
   confidence          Float
-  /** What fraction of this dimension's contributing answers agreed in direction (assessment-engine's explainDimension()) — separate from `confidence`, which also factors in answer count. A low value here, with enough answers to mean something, is the deterministic evidence behind a possible contradiction (see packages/ai's detectContradictions()). Null for sessions scored before this column existed. */
+  /**
+   * What fraction of this dimension's contributing answers agreed in direction (assessment-engine's explainDimension()) — separate from `confidence`, which also factors in answer count. A low value here, with enough answers to mean something, is the deterministic evidence behind a possible contradiction (see packages/ai's detectContradictions()). Null for sessions scored before this column existed.
+   */
   consistency         Float?
 
   @@unique([assessmentSessionId, dimensionKey])
@@ -477,15 +523,15 @@ model DimensionScore {
 }
 
 model ProfileResult {
-  id                  String            @id @default(cuid())
-  assessmentSessionId String            @unique
-  assessmentSession   AssessmentSession @relation(fields: [assessmentSessionId], references: [id])
-  primaryProfileKey   String
-  secondaryProfileKeys Json             // string[]
-  tensions            Json?             // TensionResult[] from the deterministic tension engine
-  contradictions      Json?             // ContradictionResult[] from the deterministic contradiction engine (assessment-engine's detectContradictions())
-  aiSemanticNotes     Json?
-  computedAt          DateTime          @default(now())
+  id                   String            @id @default(cuid())
+  assessmentSessionId  String            @unique
+  assessmentSession    AssessmentSession @relation(fields: [assessmentSessionId], references: [id])
+  primaryProfileKey    String
+  secondaryProfileKeys Json // string[]
+  tensions             Json? // TensionResult[] from the deterministic tension engine
+  contradictions       Json? // ContradictionResult[] from the deterministic contradiction engine (assessment-engine's detectContradictions())
+  aiSemanticNotes      Json?
+  computedAt           DateTime          @default(now())
 
   @@schema("runtime")
 }
@@ -526,16 +572,19 @@ model Order {
   amountCents         Int
   currency            String
   status              OrderStatus       @default(pending)
-  provider             String
-  providerRef          String?
-  /** ISO 639-1, captured at checkout (explicit selection or Accept-Language) — the report is generated in this language. */
-  language             String           @default("en")
-  createdAt            DateTime         @default(now())
-  paidAt                DateTime?
+  provider            String
+  providerRef         String?
+  /**
+   * ISO 639-1, captured at checkout (explicit selection or Accept-Language) — the report is generated in this language.
+   */
+  language            String            @default("en")
+  createdAt           DateTime          @default(now())
+  paidAt              DateTime?
 
-  entitlement         Entitlement?
-  reports              Report[]
-  refunds              Refund[]
+  entitlement      Entitlement?
+  reports          Report[]
+  refunds          Refund[]
+  purchaseFeedback PurchaseFeedback?
 
   @@schema("commerce")
 }
@@ -557,36 +606,50 @@ model Entitlement {
 }
 
 model Report {
-  id                  String            @id @default(cuid())
-  assessmentSessionId String
-  assessmentSession   AssessmentSession @relation(fields: [assessmentSessionId], references: [id])
-  orderId             String            @unique
-  order               Order             @relation(fields: [orderId], references: [id])
-  /** @deprecated always hardcoded to 1 — superseded by assessmentVersion below. Kept (rather than dropped) so this migration stays additive-only; not read anywhere. */
-  templateVersion     Int
-  /** The assessment content version (AssessmentConfig.version) this report was generated from — genuinely populated, unlike templateVersion above. Full reproducibility = this + reportEngineVersion + promptVersion + personaVersion + modelVersion. Default only backfills pre-migration rows; every write always sets a real value. */
-  assessmentVersion   Int               @default(1)
-  status              ReportStatus      @default(ready)
-  /** null content is only valid alongside status=failed — see lib/commerce.ts's failure path. Stores the full ReportDocument (packages/ai/src/reportDocument.ts) — the single shape both the web report page and the PDF renderer consume. */
-  content             Json?             // assembled ReportDocument, source of truth
-  pdfObjectKey         String?
-  language             String           @default("en")
-  reportEngineVersion  Int?
-  promptVersion        Int?
-  /** Which PromptTemplate.version (the published assessment persona at generation time) narrated this report — null for reports generated before the Prompt Orchestration System existed. */
-  personaVersion       Int?
-  modelVersion         String?
-  failureReason        String?
-  generatedAt          DateTime         @default(now())
-  deliveredAt          DateTime?
+  id                       String            @id @default(cuid())
+  assessmentSessionId      String
+  assessmentSession        AssessmentSession @relation(fields: [assessmentSessionId], references: [id])
+  orderId                  String            @unique
+  order                    Order             @relation(fields: [orderId], references: [id])
+  /**
+   * @deprecated always hardcoded to 1 — superseded by assessmentVersion below. Kept (rather than dropped) so this migration stays additive-only; not read anywhere.
+   */
+  templateVersion          Int
+  /**
+   * The assessment content version (AssessmentConfig.version) this report was generated from — genuinely populated, unlike templateVersion above. Full reproducibility = this + reportEngineVersion + promptVersion + personaVersion + modelVersion. Default only backfills pre-migration rows; every write always sets a real value.
+   */
+  assessmentVersion        Int               @default(1)
+  /**
+   * Snapshot of Assessment.releaseVersion (e.g. "1.0") at generation time — the human-facing "LOVE 1.0" release tag, distinct from the numeric assessmentVersion above. Null for reports generated before FASE 33.
+   */
+  assessmentReleaseVersion String?
+  status                   ReportStatus      @default(ready)
+  /**
+   * null content is only valid alongside status=failed — see lib/commerce.ts's failure path. Stores the full ReportDocument (packages/ai/src/reportDocument.ts) — the single shape both the web report page and the PDF renderer consume.
+   */
+  content                  Json? // assembled ReportDocument, source of truth
+  pdfObjectKey             String?
+  language                 String            @default("en")
+  reportEngineVersion      Int?
+  promptVersion            Int?
+  /**
+   * Which PromptTemplate.version (the published assessment persona at generation time) narrated this report — null for reports generated before the Prompt Orchestration System existed.
+   */
+  personaVersion           Int?
+  modelVersion             String?
+  failureReason            String?
+  generatedAt              DateTime          @default(now())
+  deliveredAt              DateTime?
 
-  entitlement          Entitlement?
-  feedback             ReportFeedback?
+  entitlement Entitlement?
+  feedback    ReportFeedback?
 
   @@schema("commerce")
 }
 
-/** FASE 32 §FEEDBACK — optional, never mandatory. One row per report (rating can be resubmitted/overwritten, not accumulated). */
+/**
+ * FASE 32 §FEEDBACK — optional, never mandatory. One row per report (rating can be resubmitted/overwritten, not accumulated).
+ */
 enum FeedbackRating {
   very_accurate
   mostly_accurate
@@ -619,6 +682,31 @@ model Refund {
   @@schema("commerce")
 }
 
+/**
+ * FASE 33 §PURCHASE FEEDBACK — optional, asked once right after checkout succeeds. "Other" pairs with optional free text; never required to proceed to the report.
+ */
+enum PurchaseFeedbackReason {
+  curiosity
+  free_result_accurate
+  wanted_more_detail
+  preview_convinced
+  price_reasonable
+  other
+
+  @@schema("commerce")
+}
+
+model PurchaseFeedback {
+  id        String                 @id @default(cuid())
+  orderId   String                 @unique
+  order     Order                  @relation(fields: [orderId], references: [id])
+  reason    PurchaseFeedbackReason
+  otherText String?                @db.Text
+  createdAt DateTime               @default(now())
+
+  @@schema("commerce")
+}
+
 // ============================================================================
 // marketing — explicit, versioned, revocable consent. Never inferred.
 // ============================================================================
@@ -638,28 +726,29 @@ model MarketingConsent {
 }
 
 model EmailEvent {
-  id            String    @id @default(cuid())
-  userId        String
-  user          User      @relation(fields: [userId], references: [id])
-  type          String    // report_delivery | purchase_confirmation | report_preparing | payment_failed | refund_confirmation | magic_link | checkout_reminder | recommendation_nudge | report_resend
-  templateKey   String
-  transactional Boolean   @default(true) // false only for recommendation_nudge — everything else is triggered by the recipient's own action, not a campaign
-  providerRef   String?   // provider's message id, for correlating an async delivered/bounced webhook back to this row
-  /** Report.id for report_delivery/report_preparing, Order.id for purchase_confirmation/payment_failed/refund_confirmation — lets a user with multiple purchases be retried against the right one. Untyped on purpose: which table it points into is determined by `type`. */
+  id              String    @id @default(cuid())
+  userId          String
+  user            User      @relation(fields: [userId], references: [id])
+  type            String // report_delivery | purchase_confirmation | report_preparing | payment_failed | refund_confirmation | magic_link | checkout_reminder | recommendation_nudge | report_resend
+  templateKey     String
+  transactional   Boolean   @default(true) // false only for recommendation_nudge — everything else is triggered by the recipient's own action, not a campaign
+  providerRef     String? // provider's message id, for correlating an async delivered/bounced webhook back to this row
+  /**
+   * Report.id for report_delivery/report_preparing, Order.id for purchase_confirmation/payment_failed/refund_confirmation — lets a user with multiple purchases be retried against the right one. Untyped on purpose: which table it points into is determined by `type`.
+   */
   relatedEntityId String?
-  status        String    @default("sent") // sent | delivered | bounced | failed
-  failureReason String?
-  attempts      Int       @default(1)
-  sentAt        DateTime  @default(now())
-  deliveredAt   DateTime?
-  bouncedAt     DateTime?
-  openedAt      DateTime?
-  clickedAt     DateTime?
+  status          String    @default("sent") // sent | delivered | bounced | failed
+  failureReason   String?
+  attempts        Int       @default(1)
+  sentAt          DateTime  @default(now())
+  deliveredAt     DateTime?
+  bouncedAt       DateTime?
+  openedAt        DateTime?
+  clickedAt       DateTime?
 
   @@index([providerRef])
   @@schema("marketing")
 }
-
 
 enum UnsubscribeScope {
   all
@@ -669,11 +758,11 @@ enum UnsubscribeScope {
 }
 
 model Unsubscribe {
-  id               String           @id @default(cuid())
-  userId           String
-  user             User             @relation(fields: [userId], references: [id])
-  scope            UnsubscribeScope
-  unsubscribedAt   DateTime         @default(now())
+  id             String           @id @default(cuid())
+  userId         String
+  user           User             @relation(fields: [userId], references: [id])
+  scope          UnsubscribeScope
+  unsubscribedAt DateTime         @default(now())
 
   @@unique([userId, scope])
   @@schema("marketing")
@@ -740,19 +829,52 @@ model AdminUser {
 }
 
 model AuditLog {
-  id           String    @id @default(cuid())
-  adminUserId  String
-  adminUser    AdminUser @relation(fields: [adminUserId], references: [id])
-  action       String
-  entityType   String
-  entityId     String
-  diff         Json?
-  createdAt    DateTime  @default(now())
+  id          String    @id @default(cuid())
+  adminUserId String
+  adminUser   AdminUser @relation(fields: [adminUserId], references: [id])
+  action      String
+  entityType  String
+  entityId    String
+  diff        Json?
+  createdAt   DateTime  @default(now())
 
   @@schema("admin")
 }
 
-/** Cost/latency monitoring for every AI module call (§7) — written via packages/ai's onAiCall() hook, registered once in apps/web/instrumentation.ts. */
+/**
+ * FASE 33 §SUPPORT — a lightweight issue-report queue, distinct from the existing "resend my report" self-serve flow (lib/support.ts). No answer content — email + free-text message only.
+ */
+enum SupportTicketCategory {
+  payment
+  report
+  email
+  technical
+  content
+
+  @@schema("admin")
+}
+
+enum SupportTicketStatus {
+  open
+  resolved
+
+  @@schema("admin")
+}
+
+model SupportTicket {
+  id        String                @id @default(cuid())
+  category  SupportTicketCategory
+  email     String
+  message   String                @db.Text
+  status    SupportTicketStatus   @default(open)
+  createdAt DateTime              @default(now())
+
+  @@schema("admin")
+}
+
+/**
+ * Cost/latency monitoring for every AI module call (§7) — written via packages/ai's onAiCall() hook, registered once in apps/web/instrumentation.ts.
+ */
 model AiCallLog {
   id           String   @id @default(cuid())
   module       String
@@ -777,14 +899,33 @@ model AiCallLog {
  * rather than modeling a table that could ever have a second row.
  */
 model AiSettings {
-  id               String    @id @default("singleton")
+  id               String   @id @default("singleton")
   fastModel        String
   qualityModel     String
   temperature      Float
   maxTokens        Int
   timeoutMs        Int
-  updatedAt        DateTime  @updatedAt
+  updatedAt        DateTime @updatedAt
   updatedByAdminId String?
+
+  @@schema("admin")
+}
+
+/**
+ * FASE 33 §EMERGENCY CONTROLS — single-row admin-editable kill switches, so
+ * an admin can pause purchases, pause report generation, or force every AI
+ * module to its deterministic fallback without a deploy. "Disable specific
+ * assessment/product" reuses the existing publish/unpublish action; "disable
+ * specific question" is Question.disabledAt, not here. `id` is always the
+ * literal string "singleton", matching AiSettings above.
+ */
+model FeatureFlags {
+  id                     String   @id @default("singleton")
+  purchasesPaused        Boolean  @default(false)
+  reportGenerationPaused Boolean  @default(false)
+  aiForceFallback        Boolean  @default(false)
+  updatedAt              DateTime @updatedAt
+  updatedByAdminId       String?
 
   @@schema("admin")
 }
@@ -808,7 +949,6 @@ enum PromptTemplateStatus {
  * AiSettings/AIModelConfig. Never stores Layer 1 (the global INNER safety
  * voice) — that stays a code constant nobody, including an admin, can edit
  * from the UI, so a persona rewrite can never silently weaken a guardrail.
- *
  * Versioned like AssessmentVersion's draft -> publish flow: only ever one
  * `published` row per assessmentSlug at a time (enforced in
  * lib/promptTemplates.ts, not the DB, mirroring how assessment publishing
@@ -821,9 +961,13 @@ model PromptTemplate {
   version          Int
   status           PromptTemplateStatus @default(draft)
   personaName      String
-  /** The perspective/focus description — e.g. "connection, trust, independence, vulnerability, emotional patterns". */
+  /**
+   * The perspective/focus description — e.g. "connection, trust, independence, vulnerability, emotional patterns".
+   */
   personaFocus     String
-  /** Layer 2 system-prompt text itself — the persona's voice instructions. */
+  /**
+   * Layer 2 system-prompt text itself — the persona's voice instructions.
+   */
   personaPrompt    String               @db.Text
   toneWarmth       Float                @default(0.5)
   toneDirectness   Float                @default(0.5)

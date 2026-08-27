@@ -5,6 +5,7 @@ import { getAssessmentConfig } from "@/lib/assessments";
 import { readAnonymousSessionId } from "@/lib/anonymousSession";
 import { getPaymentProvider } from "@/lib/payments";
 import { track } from "@/lib/analytics";
+import { getEmergencyControls } from "@/lib/emergencyControls";
 
 function appBaseUrl(request: NextRequest): string {
   return process.env.APP_BASE_URL ?? request.nextUrl.origin;
@@ -50,6 +51,17 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       checkoutUrl: `${appBaseUrl(request)}/${session.sourceSlug}/session/${assessmentSessionId}/report`,
     });
+  }
+
+  // Admin emergency control (FASE 33) — only blocks genuinely new purchase
+  // attempts; anyone who already has an entitlement (checked above) can
+  // still reach their own report regardless of this switch.
+  const emergencyControls = await getEmergencyControls();
+  if (emergencyControls.purchasesPaused) {
+    return NextResponse.json(
+      { error: "Purchases are briefly paused — your answers and free result are still saved. Please try again shortly." },
+      { status: 503 }
+    );
   }
 
   const user = await prisma.user.upsert({

@@ -14,6 +14,7 @@ import { ensureAiTelemetryRegistered } from "./aiTelemetry";
 import { getAiModelConfig } from "./aiConfig";
 import { getPublishedPersona } from "./promptTemplates";
 import { selectRecommendation } from "./recommendation";
+import { getEmergencyControls, applyAiForceFallback } from "./emergencyControls";
 
 // See the comment in app/api/sessions/[id]/answer/route.ts — registered per
 // module realm, not just once globally via instrumentation.ts.
@@ -43,6 +44,7 @@ export async function completeOrder(orderId: string): Promise<void> {
   const session = order.assessmentSession;
   const config = await getAssessmentConfig(session.sourceSlug);
   if (!config) throw new Error(`Unknown assessment for order ${orderId}`);
+  const assessmentRow = await prisma.assessment.findUniqueOrThrow({ where: { id: session.assessmentId }, select: { releaseVersion: true } });
 
   const existingReport = await prisma.report.findUnique({ where: { orderId: order.id } });
   const isFirstAttempt = !existingReport;
@@ -113,6 +115,19 @@ export async function completeOrder(orderId: string): Promise<void> {
   await track({ anonymousSessionId: session.anonymousSessionId, eventName: "report_generation_started", assessmentId: session.assessmentId });
 
   try {
+    // Admin emergency controls (FASE 33) — a paused generation throws into
+    // the existing failure path below, which already leaves a retryable
+    // Report(status: "failed") row and keeps the order "pending" rather than
+    // granting access to nothing; the existing admin retry-generation action
+    // resumes it once unpaused. AI fallback is applied per-attempt (not
+    // cached across requests) so an admin flipping the switch mid-launch
+    // takes effect on the very next generation, not just the next deploy.
+    const emergencyControls = await getEmergencyControls();
+    if (emergencyControls.reportGenerationPaused) {
+      throw new Error("Report generation is paused by admin — will resume automatically once unpaused");
+    }
+    await applyAiForceFallback();
+
     const reportContext: ReportContext = {
       assessmentName: config.name,
       assessmentVersion: config.version,
@@ -181,6 +196,7 @@ export async function completeOrder(orderId: string): Promise<void> {
         content: document as any,
         language: generated.language,
         assessmentVersion: config.version,
+        assessmentReleaseVersion: assessmentRow.releaseVersion,
         reportEngineVersion: generated.reportEngineVersion,
         promptVersion: generated.promptVersion,
         personaVersion: generated.personaVersion,
@@ -192,6 +208,7 @@ export async function completeOrder(orderId: string): Promise<void> {
         orderId: order.id,
         templateVersion: 1,
         assessmentVersion: config.version,
+        assessmentReleaseVersion: assessmentRow.releaseVersion,
         status: "ready",
         content: document as any,
         language: generated.language,

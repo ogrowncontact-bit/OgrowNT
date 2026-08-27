@@ -7,6 +7,7 @@ import { readAnonymousSessionId } from "@/lib/anonymousSession";
 import { track } from "@/lib/analytics";
 import { formatPrice } from "@/lib/money";
 import { getPremiumPreviewItems, TRUST_POINTS } from "@/lib/landingContent";
+import { AbandonmentFeedbackForm } from "@/components/AbandonmentFeedbackForm";
 
 export default async function PaywallPage({
   params,
@@ -127,6 +128,8 @@ export default async function PaywallPage({
           </li>
         ))}
       </ul>
+
+      {!paymentFailed && <AbandonmentFeedbackForm assessmentSessionId={id} />}
     </Screen>
   );
 }

@@ -17,3 +17,13 @@ export function getSoftLaunchMaxUsers(): number | null {
   const raw = Number(process.env.SOFT_LAUNCH_MAX_USERS);
   return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : null;
 }
+
+/**
+ * FASE 33 §SOFT LAUNCH MODE — set SOFT_LAUNCH=true to flag that this
+ * deployment is in the controlled soft-launch window. Purely a diagnostics
+ * signal surfaced on /admin/launch/love (the dashboard reads real data
+ * regardless of this flag) — it changes no runtime behavior on its own.
+ */
+export function isSoftLaunchDiagnosticsEnabled(): boolean {
+  return process.env.SOFT_LAUNCH?.trim().toLowerCase() === "true";
+}

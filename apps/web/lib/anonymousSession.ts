@@ -1,6 +1,7 @@
 import { cookies, headers } from "next/headers";
 import { prisma } from "@inner/db";
 import { hashIdentifier, signSessionToken, verifySessionToken } from "./security/sessionToken";
+import { classifyDeviceType } from "./deviceDetection";
 
 export const SESSION_COOKIE = "inner_sid";
 const COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 180; // 180 days
@@ -51,6 +52,7 @@ export async function ensureAnonymousSession(params: { firstLandingSlug: string;
       referrer,
       ipHash: hashIdentifier(ip),
       uaHash: hashIdentifier(ua),
+      deviceType: classifyDeviceType(ua),
     },
   });
 
