@@ -1532,3 +1532,49 @@ class ExecutionHealthOut(BaseModel):
     avg_slippage_bps: float | None
     avg_price_deviation_pct: float | None
     market_impact_estimate_bps: float | None
+
+
+# -- "PROMPT 14" Real-Time Trading Operating System & Command Center --------
+
+
+class AuditLogOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    ts: datetime
+    actor: str
+    action: str
+    entity_type: str | None
+    entity_id: int | None
+    detail: dict
+
+
+class IncidentOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    detected_at: datetime
+    category: str
+    severity: str
+    status: str
+    title: str
+    description: str | None
+    source_event_type: str | None
+    source_entity_type: str | None
+    source_entity_id: int | None
+    resolved_at: datetime | None
+    updated_at: datetime
+    meta: dict
+
+
+class IncidentUpdateIn(BaseModel):
+    status: str | None = None
+    description: str | None = None
+
+
+class CommandQueryIn(BaseModel):
+    text: str
+
+
+class CommandQueryOut(BaseModel):
+    classification: str
+    intent: str
+    data: list | dict | None = None

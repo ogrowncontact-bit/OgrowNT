@@ -4,7 +4,7 @@
 **paper trading only** — no real orders are ever sent. See the full engineering
 specification in [`docs/blueprint/`](docs/blueprint/00-overview.md).
 
-## Status: Phase 7 (Advanced Analytics, Alerts, Optimization) + post-Phase-7 security hardening + Supervisor 24/7 + Market Data Engine + Scanner + Pattern/Strategy/Opportunity confidence & evidence + Risk Engine/Portfolio Intelligence hardening (Risk Center, Risk Heatmap, Strategy Health, configurable Safety Belts) + News Intelligence Center (sentiment, macro calendar, event risk, source consensus) + Strategy Lab (walk-forward optimization, Monte Carlo, stress testing, robustness/quality scoring, async backtest job system) + Autonomous Paper Trading (TradingMode gate, Portfolio Manager allocation cap, trailing stops, HOLD/REDUCE/CLOSE position risk policy, anti-martingale loss-streak protection, idempotency keys, event sourcing, reconciliation engine, RBAC, manual trading controls, Autonomous Trading Center dashboard) + Multi-Agent Quant Intelligence (18 named specialist agents, Consensus/Contradiction/Chief Decision Engine, reliability/calibration/quarantine, AI Command Center dashboard) + Autonomous Research & Evolution Engine (hypothesis generation, ExperimentEngine, bounded genetic search, StrategyVersion Champion/Challenger, drift detection, knowledge graph, human-approval-gated promotion, Autonomous Research Lab dashboard) + Global Market Intelligence & 24/7 Opportunity Discovery (global session clock, asset universe manager, fast-scan → deep-scan pipeline, multi-timeframe agreement/conflict, market structure, volatility regime transitions, anomaly scanner, closed-vocabulary opportunity classification, correlated-opportunity clustering, risk-adjusted ranking, dynamic watchlist, Global Market Command Center dashboard) + Advanced Risk & Capital Defense Engine (config-driven drawdown response ladder with recovery-cooldown hysteresis, portfolio concentration/hidden-factor exposure, transaction-cost-aware net expectancy gate, live Monte Carlo/Risk-of-Ruin/VaR/CVaR stress testing, system/execution/model/data risk engines, 6 named circuit breakers, 4-state Emergency Kill Switch with admin-gated recovery, a 7-level RiskState/RiskScore aggregator sitting alongside the existing Safety Belt, risk-config version audit trail, failover market data provider, Capital Defense Center dashboard) + Universal Broker & Exchange Connectivity (BrokerAdapter protocol, PaperBrokerAdapter with volume-capped partial fills and marketable-limit orders, four-layer live-trading firewall, ExecutionGate final revalidation wiring the net-expectancy gate, instrument precision, broker health/quarantine, broker-level reconciliation, execution router, credential isolation, Execution Command Center dashboard)
+## Status: Phase 7 (Advanced Analytics, Alerts, Optimization) + post-Phase-7 security hardening + Supervisor 24/7 + Market Data Engine + Scanner + Pattern/Strategy/Opportunity confidence & evidence + Risk Engine/Portfolio Intelligence hardening (Risk Center, Risk Heatmap, Strategy Health, configurable Safety Belts) + News Intelligence Center (sentiment, macro calendar, event risk, source consensus) + Strategy Lab (walk-forward optimization, Monte Carlo, stress testing, robustness/quality scoring, async backtest job system) + Autonomous Paper Trading (TradingMode gate, Portfolio Manager allocation cap, trailing stops, HOLD/REDUCE/CLOSE position risk policy, anti-martingale loss-streak protection, idempotency keys, event sourcing, reconciliation engine, RBAC, manual trading controls, Autonomous Trading Center dashboard) + Multi-Agent Quant Intelligence (18 named specialist agents, Consensus/Contradiction/Chief Decision Engine, reliability/calibration/quarantine, AI Command Center dashboard) + Autonomous Research & Evolution Engine (hypothesis generation, ExperimentEngine, bounded genetic search, StrategyVersion Champion/Challenger, drift detection, knowledge graph, human-approval-gated promotion, Autonomous Research Lab dashboard) + Global Market Intelligence & 24/7 Opportunity Discovery (global session clock, asset universe manager, fast-scan → deep-scan pipeline, multi-timeframe agreement/conflict, market structure, volatility regime transitions, anomaly scanner, closed-vocabulary opportunity classification, correlated-opportunity clustering, risk-adjusted ranking, dynamic watchlist, Global Market Command Center dashboard) + Advanced Risk & Capital Defense Engine (config-driven drawdown response ladder with recovery-cooldown hysteresis, portfolio concentration/hidden-factor exposure, transaction-cost-aware net expectancy gate, live Monte Carlo/Risk-of-Ruin/VaR/CVaR stress testing, system/execution/model/data risk engines, 6 named circuit breakers, 4-state Emergency Kill Switch with admin-gated recovery, a 7-level RiskState/RiskScore aggregator sitting alongside the existing Safety Belt, risk-config version audit trail, failover market data provider, Capital Defense Center dashboard) + Universal Broker & Exchange Connectivity (BrokerAdapter protocol, PaperBrokerAdapter with volume-capped partial fills and marketable-limit orders, four-layer live-trading firewall, ExecutionGate final revalidation wiring the net-expectancy gate, instrument precision, broker health/quarantine, broker-level reconciliation, execution router, credential isolation, Execution Command Center dashboard) + Real-Time Trading Operating System & Command Center (unified `/command-center` interface over Phases 1-13, CentralEventBus real-time WebSocket architecture over a DB-tail bridge, System Health Score/Trading Readiness, Self-Diagnostic, Incident Center, Audit Center, Decision Trace, a language-classifying Command Bar that structurally can never execute a trade)
 
 Per [`docs/blueprint/12-roadmap.md`](docs/blueprint/12-roadmap.md):
 
@@ -501,6 +501,44 @@ for the full list and
 [`docs/broker-execution-infrastructure.md`](docs/broker-execution-infrastructure.md)
 for the as-built reference.
 
+**Real-Time Trading Operating System & Command Center.** A unified
+`/command-center` interface (top bar + sidebar + 18 routed pages) brings
+everything built across Phases 1-13 under one roof, backed by a genuine
+real-time `CentralEventBus` (`packages/events/`) — an in-process `asyncio`
+pub/sub living only in `apps/api`, bridged from the existing
+`TradingEvent`/`Alert` tables via a short, fixed-interval DB tail rather
+than Postgres `LISTEN`/`NOTIFY` or a message broker (avoids retrofitting
+~150 existing write sites for a latency gain this single-user system
+doesn't need — the client-facing WebSocket contract is still genuine push).
+10 independently-subscribable channels; `market`/`opportunities`/`agents`/
+`news` are structurally ready but honestly documented as having few or no
+current real-time producers, never a fabricated live feed. `packages/system/`
+adds a System Health Score + Trading Readiness state (`READY`/`CAUTION`/
+`DEGRADED`/`NOT_READY`/`HALTED`, `HALTED` reserved for DB-down or
+Kill-Switch-triggered only), a 5-probe Self-Diagnostic, a daily briefing,
+and the Command Bar's safety classifier — a word-boundary regex gate that
+proves an execution verb (`buy`/`sell`/`close`/`enable live`/...) never
+reaches a query handler, structurally incapable of even importing the
+database layer. A new `Incident` model (the one genuinely new table this
+phase) is auto-created from a small set of already-existing critical-event
+detectors, with a manually-driven, server-enforced monotonic-forward-only
+lifecycle. `AuditLog` (written since Phase 1) gets its first-ever read
+endpoint. Decision Trace/Explainability reuses the existing
+Signal→Decision→RiskDecision→Order→Trade chain and `Decision.agent_inputs`
+(Prompt 9) rather than a new engine. No new frontend dependency — native
+`WebSocket`, hand-rolled SVG, matching the existing dashboard's own
+architecture. 174 new tests (1575/1575 in the full suite), a 26-item
+red-team battery, 4 chaos scenarios, and a live Playwright run across all
+18 pages that caught and fixed 5 real runtime bugs static analysis missed
+(an infinite `useSyncExternalStore` loop, a missing route file, a React
+"objects as children" crash, an inverted percentage scale, and a
+`Query(...)`-marker pitfall from calling FastAPI handlers directly) plus 2
+genuine correctness gaps found while writing this phase's own tests (a
+paused-trading state that could still read as fully `READY`, and a
+self-diagnostic that only guarded its first check against a DB exception).
+See `docs/blueprint/12-roadmap.md`'s "PROMPT 14" section and
+[`docs/command-center.md`](docs/command-center.md) for the full write-up.
+
 ## Architecture at a glance
 
 ```text
@@ -519,7 +557,12 @@ apps/
                test, kill-switch state/recovery, risk-config version audit
                trail), brokers (list/detail/health), execution (accounts,
                order detail, executions, reconciliation runs, instruments,
-               execution health))
+               execution health), realtime.py (GET /ws/{channel} WebSocket
+               gateway, token-authenticated), dashboard (15 GET
+               /api/dashboard/* aggregation endpoints composing existing
+               routers), audit (AuditLog's first-ever read endpoint),
+               incidents (list/detail/PATCH lifecycle), command-center
+               (query + daily briefing))
   worker/      24/7 loop: Market Data Agent (scan), Trade Monitor + safety-belt
                refresh + Learning Agent (per trade close, every scan), News
                Intelligence Agent (ingestion + DET analysis, own cadence),
@@ -549,8 +592,21 @@ apps/
                by kind (hypothesis/experiment/feature_test/strategy_test/
                regime_test/event_test/knowledge_update) — never competes with
                worker/'s live loop or backtest_worker/'s operator-triggered jobs
-  dashboard/   Next.js dashboard (single admin user)
+  dashboard/   Next.js dashboard (single admin user) — plus /command-center:
+               a unified top-bar+sidebar shell over 18 routed pages
+               (markets/opportunities/portfolio/risk/strategies/agents/
+               research/learning/news/execution/events/system/data/
+               incidents/alerts/audit/settings), each backed by an
+               /api/dashboard/* aggregation call plus, where a live
+               producer exists, a useEventStream() WebSocket subscription
 packages/
+  events/      CentralEventBus (in-process asyncio pub/sub, apps/api only) +
+               channel/severity mapping + the Postgres-to-bus DB-tail
+               bridge (tail_new_events/build_heartbeat_event/detect_incidents)
+  system/      System Health Score + Trading Readiness (READY/CAUTION/
+               DEGRADED/NOT_READY/HALTED), 5-probe Self-Diagnostic, daily
+               briefing, and the Command Bar's classify_command()/
+               route_query_intent() safety gate
   shared/      DB models, settings, logging, OHLCV lookup — shared across apps/packages
   data/        Market data + news provider interfaces, mock providers for both
   quant/       indicators, regime classifier, pattern detectors, pluggable

@@ -955,3 +955,144 @@ export async function login(email: string, password: string) {
   if (!res.ok) return null;
   return (await res.json()) as { access_token: string; expires_at: string };
 }
+
+// -- "PROMPT 14" Real-Time Trading Operating System & Command Center -------
+
+export type Incident = {
+  id: number;
+  detected_at: string;
+  category: "system" | "risk" | "data" | "execution" | "broker" | "agent";
+  severity: "info" | "low" | "medium" | "high" | "critical" | "emergency";
+  status: "detected" | "investigating" | "mitigated" | "recovering" | "resolved" | "closed";
+  title: string;
+  description: string | null;
+  source_event_type: string | null;
+  source_entity_type: string | null;
+  source_entity_id: number | null;
+  resolved_at: string | null;
+  updated_at: string;
+  meta: Record<string, unknown>;
+};
+
+export type AuditLogEntry = {
+  id: number;
+  ts: string;
+  actor: string;
+  action: string;
+  entity_type: string | null;
+  entity_id: number | null;
+  detail: Record<string, unknown>;
+};
+
+export type SystemHealthScore = {
+  score: number;
+  readiness_state: "ready" | "caution" | "degraded" | "not_ready" | "halted";
+  components: Record<string, number>;
+  reasons: string[];
+};
+
+export type SelfDiagnosticCheck = { name: string; ok: boolean; detail: string };
+export type SelfDiagnosticReport = { ok: boolean; checks: SelfDiagnosticCheck[]; ran_at: string };
+
+export type DailyBriefing = {
+  generated_at: string;
+  window_hours: number;
+  equity: number;
+  daily_pnl: number;
+  drawdown_pct: number;
+  trades_closed: number;
+  win_rate: number | null;
+  open_positions: number;
+  top_opportunity_count: number;
+  active_incidents: number;
+  unacknowledged_alerts: number;
+  safety_belt_level: string;
+  trading_enabled: boolean;
+};
+
+export type CommandQueryResult = {
+  classification: "query" | "unauthorized";
+  intent: string;
+  data: unknown;
+};
+
+// Each of these mirrors one apps/api/routers/dashboard.py aggregation
+// endpoint — deliberately loosely typed (Record<string, unknown> for
+// sub-objects whose own shape is already typed elsewhere, e.g. Agent[]) so
+// this file doesn't have to hand-duplicate a second copy of every existing
+// *Out schema's fields just to describe a wrapper object.
+export type DashboardOverview = {
+  system_state: { trading_enabled: boolean | null; trading_paused: boolean | null; safety_belt_level: string | null; trading_mode: string | null };
+  portfolio: Portfolio;
+  positions_open: number;
+  top_opportunities: Opportunity[];
+  active_incidents: number;
+  health_score: SystemHealthScore;
+};
+export type DashboardMarketPulse = { overview: MarketOverview; sessions: GlobalMarketSnapshot };
+export type DashboardOpportunities = { opportunities: Opportunity[]; clusters: OpportunityClusterEntry[]; watchlist: WatchlistEntryItem[] };
+export type DashboardPortfolio = { portfolio: Portfolio; exposure: PortfolioExposure; positions: Position[]; recent_trades: Trade[] };
+export type DashboardRisk = { risk_state: RiskState; advanced: AdvancedRisk; breakers: CircuitBreaker[]; concentration: Concentration };
+export type DashboardAgents = { agents: Agent[]; recent_decisions: Decision[]; contradictions: Contradiction[] };
+export type DashboardStrategies = { strategies: Strategy[]; learning: StrategyLearning[] };
+export type DashboardResearch = ResearchReport;
+export type DashboardLearning = { strategy_performance: StrategyLearning[]; trade_journal: TradeJournalEntry[] };
+export type DashboardNews = { news: NewsEvent[]; risk: NewsRisk; macro_events: MacroEvent[] };
+export type DashboardEvents = { macro_events: MacroEvent[]; market_events: MarketEvent[]; activity_feed: TradingEvent[] };
+export type DashboardExecution = { accounts: Account[]; executions: Execution[]; reconciliation: ReconciliationRun[]; health: ExecutionHealth };
+export type DashboardSystem = { component_health: Record<string, string>; health_score: SystemHealthScore; self_diagnostic: SelfDiagnosticReport };
+export type DashboardIncidents = { incidents: Incident[]; open_count: number };
+export type DashboardAudit = { entries: AuditLogEntry[] };
+
+export const getDashboardOverview = (token: string) => apiFetch<DashboardOverview>("/api/dashboard/overview", token);
+export const getDashboardMarketPulse = (token: string) => apiFetch<DashboardMarketPulse>("/api/dashboard/market-pulse", token);
+export const getDashboardOpportunities = (token: string) => apiFetch<DashboardOpportunities>("/api/dashboard/opportunities", token);
+export const getDashboardPortfolio = (token: string) => apiFetch<DashboardPortfolio>("/api/dashboard/portfolio", token);
+export const getDashboardRisk = (token: string) => apiFetch<DashboardRisk>("/api/dashboard/risk", token);
+export const getDashboardAgents = (token: string) => apiFetch<DashboardAgents>("/api/dashboard/agents", token);
+export const getDashboardStrategies = (token: string) => apiFetch<DashboardStrategies>("/api/dashboard/strategies", token);
+export const getDashboardResearch = (token: string) => apiFetch<DashboardResearch>("/api/dashboard/research", token);
+export const getDashboardLearning = (token: string) => apiFetch<DashboardLearning>("/api/dashboard/learning", token);
+export const getDashboardNews = (token: string) => apiFetch<DashboardNews>("/api/dashboard/news", token);
+export const getDashboardEvents = (token: string) => apiFetch<DashboardEvents>("/api/dashboard/events", token);
+export const getDashboardExecution = (token: string) => apiFetch<DashboardExecution>("/api/dashboard/execution", token);
+export const getDashboardSystem = (token: string) => apiFetch<DashboardSystem>("/api/dashboard/system", token);
+export const getDashboardIncidents = (token: string) => apiFetch<DashboardIncidents>("/api/dashboard/incidents", token);
+export const getDashboardAudit = (token: string) => apiFetch<DashboardAudit>("/api/dashboard/audit", token);
+
+export const getIncidents = (token: string) => apiFetch<Incident[]>("/api/incidents?limit=200", token);
+export const getAuditLog = (token: string) => apiFetch<AuditLogEntry[]>("/api/audit?limit=200", token);
+export const getDailyBriefing = (token: string) => apiFetch<DailyBriefing>("/api/command-center/briefing", token);
+
+export async function updateIncident(token: string, incidentId: number, payload: { status?: string; description?: string }) {
+  const res = await fetch(`${API_URL}/api/incidents/${incidentId}`, {
+    method: "PATCH",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+    cache: "no-store",
+  });
+  const body = await res.json().catch(() => null);
+  if (!res.ok) return { ok: false as const, detail: body?.detail ?? `Update failed (${res.status})` };
+  return { ok: true as const, result: body as Incident };
+}
+
+export async function postCommandQuery(token: string, text: string) {
+  const res = await fetch(`${API_URL}/api/command-center/query`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ text }),
+    cache: "no-store",
+  });
+  const body = await res.json().catch(() => null);
+  if (!res.ok) return { ok: false as const, detail: body?.detail ?? `Query failed (${res.status})` };
+  return { ok: true as const, result: body as CommandQueryResult };
+}
+
+// WebSocket base URL — same origin the rest of this file already talks to,
+// just ws(s):// instead of http(s)://. The browser connects directly to
+// apps/api (never proxied through a Next.js Route Handler — WebSocket
+// upgrade doesn't fit that proxy pattern), authenticated with a
+// short-lived-use token fetched once from /api/ws-ticket (this dashboard's
+// own Route Handler, which reads the httpOnly ogrownt_token cookie
+// server-side — client JS can never read that cookie directly).
+export const getWsBaseUrl = () => API_URL.replace(/^http/, "ws");

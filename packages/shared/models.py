@@ -43,6 +43,13 @@ that uses them:
     min_quantity/min_notional added to assets, and two new trading_events
     event types (order_partially_filled/order_cancelled/
     broker_health_degraded)
+  Post-Phase-7 ("Prompt 14" real-time trading OS & command center):
+    incidents, plus health_score/readiness_state added to system_health.
+    No trace_id/correlation_id column anywhere -- Decision Trace and the
+    CentralEventBus's correlation_id are both derived read-side from the
+    already-existing entity_type/entity_id keys every table in the
+    Signal->Decision->RiskDecision->Order->Trade chain already carries; see
+    packages/events/ and docs/command-center.md.
 """
 from datetime import datetime, timezone
 
@@ -1287,6 +1294,15 @@ class SystemHealth(Base):
     worker_alive: Mapped[bool] = mapped_column(Boolean, nullable=False)
     open_positions_count: Mapped[int] = mapped_column(nullable=False)
     cadence_failures: Mapped[dict] = mapped_column(JSON, default=dict)
+    # -- "PROMPT 14" (real-time trading OS & command center) --
+    # §116-119: a 0-100 composite (packages/system/health_score.py) and a
+    # READY/CAUTION/DEGRADED/NOT_READY/HALTED readiness state, computed
+    # alongside this same snapshot rather than a second persisted table —
+    # both are pure functions of data this row (plus the live component
+    # checks GET /api/system/health already does) already carries. NULL on
+    # every snapshot written before this phase, honestly, not backfilled.
+    health_score: Mapped[float | None] = mapped_column(Float)
+    readiness_state: Mapped[str | None] = mapped_column(String)
     notes: Mapped[dict] = mapped_column(JSON, default=dict)
 
 
@@ -2150,3 +2166,50 @@ class ReconciliationRun(Base):
     position_mismatches: Mapped[list] = mapped_column(JSON, default=list)
     order_mismatches: Mapped[list] = mapped_column(JSON, default=list)
     balance_diff: Mapped[float | None] = mapped_column(Float)
+
+
+# -- "PROMPT 14" Real-Time Trading Operating System & Command Center --------
+#
+# One new table, deliberately not the many the prompt's per-domain framing
+# might suggest (a Session/TradingSession replay table, a trace_id column
+# threaded through half the schema, an EventBus outbox table): see
+# packages/shared/models.py's own top-of-file changelog entry above and
+# docs/command-center.md for why each of those was a deliberate,
+# documented divergence rather than an oversight.
+
+
+class Incident(Base):
+    """§59-62 — auto-created from this system's own EXISTING critical-event
+    detectors (Kill Switch trigger, crash-loop protection, broker
+    reconciliation mismatch, a worker cadence crossing
+    CadenceFailureTracker's consecutive-failure threshold) as they're tailed
+    by packages/events/tailer.py — this table adds no new detection logic of
+    its own, only a durable, admin-workable lifecycle on top of alerts this
+    codebase already raises. `status` is a manually-driven state machine
+    (§61: detected -> investigating -> mitigated -> recovering -> resolved
+    -> closed) since none of the existing detectors know how to auto-mitigate
+    or auto-recover on their own — see apps/api/routers/incidents.py."""
+
+    __tablename__ = "incidents"
+    __table_args__ = (
+        CheckConstraint("category IN ('system','risk','data','execution','broker','agent')", name="ck_incidents_category"),
+        CheckConstraint("severity IN ('info','low','medium','high','critical','emergency')", name="ck_incidents_severity"),
+        CheckConstraint(
+            "status IN ('detected','investigating','mitigated','recovering','resolved','closed')",
+            name="ck_incidents_status",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    detected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, nullable=False, index=True)
+    category: Mapped[str] = mapped_column(String, nullable=False)
+    severity: Mapped[str] = mapped_column(String, nullable=False)
+    status: Mapped[str] = mapped_column(String, default="detected", nullable=False, index=True)
+    title: Mapped[str] = mapped_column(String, nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
+    source_event_type: Mapped[str | None] = mapped_column(String)
+    source_entity_type: Mapped[str | None] = mapped_column(String)
+    source_entity_id: Mapped[int | None] = mapped_column()
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False)
+    meta: Mapped[dict] = mapped_column(JSON, default=dict)

@@ -2434,6 +2434,178 @@ Divergências deliberadas, documentadas (não silenciosas):
    de forma conservadora (nada muda, o Trade Monitor tenta de novo no
    próximo ciclo), a mesma forma como uma rejeição total já era tratada.
 
+## "PROMPT 14" — Real-Time Trading Operating System & Command Center (pós-Fase 13) — **status: implementada e validada nesta sessão**
+
+O "PROMPT 14" (138 §§, a maior fase até agora) pede uma interface unificada
+`/command-center` (top bar + sidebar + ~18 páginas roteadas) que junte tudo
+o que foi construído nas Fases 1-13, sobre uma arquitetura WebSocket/
+CentralEventBus genuinamente real-time, um Incident Center, um Audit
+Center, System Health/Self-Diagnostic, uma Command Bar (só query, verbos de
+execução DEVEM ser UNAUTHORIZED — **"NO DIRECT EXECUTION"**), Decision
+Trace/Explainability, e testes extensos de chaos/red-team — nunca
+fabricando dados real-time (estados stale/degraded devem ser mostrados
+honestamente) e mantendo live trading estruturalmente inalcançável ao longo
+de tudo isto (a defesa de quatro camadas do Prompt 13 continua intacta).
+Um survey prévio (task #162) encontrou que ~80% do que o prompt pede já
+existia nalguma forma — 8 painéis "Center" reutilizáveis, RBAC, infra de
+health/heartbeat, dados de explicabilidade completos desde o Prompt 9, e um
+`AuditLog` já escrito desde a Fase 1 mas sem endpoint de leitura — reduzindo
+a pegada de schema genuína a **1 tabela nova** (`Incident`) e duas colunas
+nullable em `SystemHealth`, não os ~14 conceitos nomeados no prompt
+literalmente. Ver `docs/command-center.md` para o write-up completo.
+
+- [x] **DB — migração `0021`: 1 tabela nova + 2 colunas** (§59-62,
+      §116-119) — `incidents` (categoria/severidade/status com CHECK
+      constraints, lifecycle manual); `system_health` ganha
+      `health_score`/`readiness_state` (nullable — honestamente `NULL` em
+      linhas pré-fase). upgrade→downgrade→upgrade verificado contra
+      Postgres real + `inspect()` das colunas
+- [x] **`packages/events/`** (§70-74, §101, §130-132) — `channels.py` (10
+      canais + mapeamento `TradingEvent`/`Alert` → canal/severidade +
+      `INCIDENT_WORTHY_EVENT_TYPES`), `bus.py` (`CentralEventBus`, pub/sub
+      `asyncio` puro, só dentro de `apps/api`, fila limitada por
+      subscritor com drop-oldest contado — nunca silencioso), `tailer.py`
+      (`tail_new_events()` faz a ponte Postgres→bus por polling curto e
+      fixo — ver "Divergências deliberadas" abaixo — mais
+      `build_heartbeat_event()` e `detect_incidents()`, idempotente
+      enquanto um Incident do mesmo `source_event_type` continuar aberto)
+- [x] **`packages/system/`** (§78-93, §116-129) — `health_score.py`
+      (`compute_system_health_score()`: score 0-100 + estado
+      READY/CAUTION/DEGRADED/NOT_READY/HALTED, reutilizando os mesmos
+      component-checks de `GET /api/system/health`; HALTED reservado só
+      para DB-down ou Kill-Switch-disparado), `diagnostics.py`
+      (`run_self_diagnostic()`: 5 sondas reais — database/data/workers/
+      broker/event_bus, nunca uma alegação sobre um subsistema que não
+      consegue mesmo alcançar), `briefing.py` (`generate_daily_briefing()`,
+      janela de tempo arbitrária), `command_router.py`
+      (`classify_command()`/`route_query_intent()` — ver Command Bar abaixo)
+- [x] **API — `apps/api/realtime.py` + 4 routers novos** (§70, §94-95,
+      §59-62, §76-81, §91-93, §130-132) — `GET /ws/{channel}`
+      (autenticado via `?token=`, já que um handshake WebSocket nativo não
+      pode enviar Authorization header; 10 canais independentemente
+      subscritíveis); `dashboard.py` (15 endpoints `GET
+      /api/dashboard/*`, cada um compondo handlers de routers já
+      existentes como chamadas Python diretas — nunca lógica de query
+      nova); `audit.py` (`GET /api/audit` — primeiro endpoint de leitura
+      que `AuditLog` alguma vez teve, sem método de escrita); `incidents.py`
+      (list/detail/`PATCH`, lifecycle server-enforced monotonic-forward-only,
+      inclusive contra reabrir um incidente `closed`); `command_center.py`
+      (`POST /api/command-center/query` + `GET /api/command-center/briefing`)
+- [x] **Command Center shell + 18 páginas roteadas** (§1-18, §130-138) —
+      `apps/dashboard/app/command-center/` (`layout.tsx` + `page.tsx` +
+      17 sub-rotas: markets/opportunities/portfolio/risk/strategies/agents/
+      research/learning/news/execution/events/system/data/incidents/
+      alerts/audit/settings), `Sidebar.tsx` + `GlobalStatusBar.tsx` (top
+      bar), mais `OpportunityRadar.tsx`, `ChiefDecisionPanel.tsx`,
+      `IncidentFeed.tsx`, `AuditLogViewer.tsx`, `SystemHealthPanel.tsx`,
+      `DataFreshnessPanel.tsx`, `AlertCenterPanel.tsx`, `CommandBar.tsx`,
+      `SettingsSummary.tsx` — zero dependência frontend nova (sem
+      biblioteca de gráficos/WebSocket-client/state-management; SVG
+      manual + `WebSocket` nativo, mesmo padrão já usado pelo resto do
+      dashboard)
+- [x] **Wiring real-time no frontend** (§101-109) — `useEventStream.ts`
+      (hook `WebSocket` nativo), `app/api/ws-ticket/route.ts` (entrega o
+      JWT httpOnly a client JS uma vez, sobre a mesma conexão same-origin),
+      `app/api/incident-update/route.ts` + `command-query/route.ts` (proxies
+      autenticados por cookie); estados stale/degraded mostrados
+      honestamente, nunca dados fabricados
+- [x] **Command Bar — classify-then-route, nunca classify-then-execute**
+      (§91-93, §136) — `classify_command()` é um classificador regex puro
+      com word-boundary sobre os verbos de execução citados literalmente
+      no prompt (buy/sell/close/cancel/increase risk/decrease risk/enable
+      live/disable kill switch/override/force execute/place order/submit
+      order/open position/go live), case-insensitive, sem importar
+      `sqlalchemy`/`packages.shared.db`/`packages.shared.models` —
+      estruturalmente incapaz de tocar a base de dados mesmo que alguém
+      tentasse. `query_command_bar()` chama-o incondicionalmente ANTES de
+      olhar para qualquer handler de query; um verbo de execução nunca
+      chega à base de dados (prova comportamental + estrutural AST em
+      `test_command_center_red_team.py`)
+- [x] **Testes** — 174 novos (1575/1575 no total): `test_events_bus.py`
+      (10), `test_events_tailer.py` (16), `test_system_health_score.py`
+      (7), `test_system_diagnostics.py` (11), `test_system_briefing.py`
+      (7), `test_command_router.py` (6), `test_dashboard_api.py` (18),
+      `test_audit_incidents_api.py` (14), `test_command_center_api.py`
+      (8), `test_websocket_realtime.py` (8) — usa uma fixture com
+      `SessionLocal()` genuinamente commitada, já que
+      `apps/api/realtime.py`'s `_authenticate()` abre a sua própria sessão
+      fresca, invisível ao SAVEPOINT isolado da fixture `db_session`
+      padrão — bateria red-team de 26 itens (`test_command_center_red_team.py`,
+      AST-walk + comportamental) e chaos testing de 4 itens
+      (`test_command_center_chaos.py` — flood multi-canal nunca esfoma um
+      canal saudável, tail loop sobrevive a uma iteração má e a uma
+      interrupção sustida de várias iterações, self-diagnostic sobrevive à
+      conexão à base de dados morrer a meio da sequência de checks)
+- [x] **verificado ao vivo** contra Postgres real + browser real: as 84
+      combinações de `ruff`/`mypy`/`pytest` correram limpas por módulo
+      antes da suite completa; suite completa (1575/1575) e
+      `tsc --noEmit`/`eslint` limpos no dashboard; Playwright completo
+      contra as 18 páginas do Command Center revelou e corrigiu 5 bugs
+      reais que análise estática nenhuma apanhou: (1) `useSyncExternalStore`
+      em loop infinito por `getSnapshot` devolver um `new Date()` fresco
+      em cada chamada em vez de uma referência cache — "Maximum update
+      depth exceeded" em TODAS as páginas; (2) `/command-center/portfolio`
+      devolvia 404 genuíno — o ficheiro nunca tinha sido efetivamente
+      criado apesar de planeado; (3) `SettingsSummary.tsx` rebentava com
+      "Objects are not valid as a React child" nos objetos aninhados de
+      `drawdown_levels` do `risk_limits.yaml`; (4) `ChiefDecisionPanel.tsx`
+      mostrava "consensus 1962%" — multiplicação por 100 errada sobre um
+      `consensus_score` cujo intervalo real é [-100, 100], não [-1, 1]
+      (confirmado no docstring do próprio `packages/agents/consensus.py`);
+      (5) `market_router.market_events(db=db, _=admin)` rebentava com
+      `TypeError` quando chamado diretamente de `dashboard.py` — o marcador
+      `Query(...)` do FastAPI só resolve via DI, nunca em chamada Python
+      direta. Mais dois bugs genuínos encontrados a escrever os testes
+      desta fase (não bugs de execução ao vivo, mas gaps de correção
+      reais): `compute_system_health_score()` podia devolver READY para um
+      sistema com `trading_paused=True` (peso de 10% nunca suficiente para
+      cruzar o limiar CAUTION sozinho) e `run_self_diagnostic()` só
+      protegia a primeira verificação contra uma exceção de base de dados,
+      rebentando inteiro se a conexão morresse a meio da sequência — ambos
+      corrigidos
+
+Divergências deliberadas, documentadas (não silenciosas):
+
+1. **1 tabela nova (`incidents`), não os ~14 conceitos nomeados no
+   prompt** — `SystemHealth` ganha 2 colunas nullable em vez de uma tabela
+   paralela; ver `docs/command-center.md`.
+2. **Sem coluna `trace_id`/`correlation_id` nova** — sintetizado no
+   momento da publicação como `f"{entity_type}:{entity_id}"` a partir de
+   colunas que `TradingEvent` já tem.
+3. **Sem tabela `TradingSession`/session-replay nova** — este sistema
+   corre 24/7 sem fronteiras de sessão; "replay" é uma query de janela de
+   tempo arbitrária sobre tabelas já existentes.
+4. **Ponte DB-tail (cadência fixa de 2s), não Postgres `LISTEN`/`NOTIFY`
+   nem um message broker** — evita retrofit em ~150 pontos de escrita já
+   existentes e um segundo padrão de acesso assíncrono à base de dados; o
+   contrato face ao cliente continua a ser push genuíno (WebSocket
+   persistente, zero polling client-side), só a ponte interna
+   Postgres→bus tem latência limitada (≤2s), não sub-segundo.
+5. **Command Bar é um router de keywords curado, não uma pipeline LLM NLU
+   completa** — 4 intents, cada um sobre uma query parametrizada simples;
+   a única propriedade provada como airtight é que um verbo de execução
+   nunca chega a um handler de query.
+6. **Zero dependência frontend nova** — sem biblioteca de gráficos/
+   WebSocket-client/state-management; `WebSocket` nativo, SVG manual,
+   prop-drilling a partir de server components, mesma arquitetura do
+   dashboard já existente.
+7. **Canais `market`/`opportunities`/`agents`/`news` estruturalmente
+   prontos mas com poucos ou nenhum produtor real-time atual** —
+   documentado honestamente; essas páginas nunca fabricam um feed live
+   que não existe.
+8. **Notification Center (§90) fica só arquitetura nesta fase** — mesmo
+   scoping "nesta fase: implementar arquitetura" já usado no unlock de
+   duas chaves de live trading do Prompt 13.
+9. **Dois bugs genuínos encontrados e corrigidos a escrever os testes
+   desta fase**, não desenhados de propósito desde o início: (a)
+   `compute_system_health_score()` podia reportar READY para um sistema
+   com `trading_paused=True`, já que o peso de 10% desse estado nunca
+   bastava para cruzar o limiar CAUTION sozinho — agora explicitamente
+   limitado; (b) `run_self_diagnostic()` só protegia a primeira
+   verificação contra uma exceção de base de dados, então uma conexão que
+   morresse a meio da sequência rebentava o relatório inteiro em vez de o
+   degradar — agora cada verificação é protegida independentemente.
+
 ## Evolução futura (fora de âmbito até validação completa)
 
 Live brokers, exchanges reais (crypto/forex/ações), ML avançado, deep learning,

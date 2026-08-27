@@ -179,6 +179,14 @@ class Settings(BaseSettings):
     # "catch a mismatch quickly" rationale.
     broker_reconciliation_interval_seconds: int = 300
 
+    # "PROMPT 14" §70-71, §101's CentralEventBus DB-tail bridge
+    # (packages/events/tailer.py, run from apps/api's own lifespan — see
+    # that module's docstring for why this is a short poll rather than
+    # Postgres LISTEN/NOTIFY or a message broker). Short enough that a
+    # WebSocket-connected dashboard client feels near-real-time without
+    # hammering Postgres between ticks.
+    event_poll_interval_seconds: float = 2.0
+
 
 @lru_cache
 def get_settings() -> Settings:

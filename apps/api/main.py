@@ -3,16 +3,21 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from apps.api import realtime
 from apps.api.routers import (
     agents,
     alerts,
     analytics,
     assets,
+    audit,
     auth,
     backtests,
     brokers,
+    command_center,
+    dashboard,
     execution,
     global_market,
+    incidents,
     learning,
     market,
     market_data,
@@ -35,9 +40,11 @@ logger = configure_logging("api")
 
 
 @asynccontextmanager
-async def lifespan(_: FastAPI):
+async def lifespan(app: FastAPI):
     logger.info("OgrowNT API starting up")
+    realtime.start_realtime(app)
     yield
+    await realtime.stop_realtime(app)
 
 
 app = FastAPI(
@@ -85,6 +92,11 @@ app.include_router(research_lab.router)
 app.include_router(global_market.router)
 app.include_router(brokers.router)
 app.include_router(execution.router)
+app.include_router(dashboard.router)
+app.include_router(audit.router)
+app.include_router(incidents.router)
+app.include_router(command_center.router)
+app.include_router(realtime.router)
 
 
 @app.get("/")
