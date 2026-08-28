@@ -10,6 +10,7 @@
     "onlyBuiltDependencies": ["@prisma/client", "@prisma/engines", "esbuild", "prisma", "sharp"]
   },
   "scripts": {
+    "postinstall": "pnpm --filter @inner/db generate",
     "dev": "pnpm --filter @inner/web dev",
     "build": "pnpm -r --if-present --filter=!@inner/web build && pnpm --filter @inner/web build",
     "lint": "pnpm -r lint",
