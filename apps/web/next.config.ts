@@ -11,9 +11,12 @@ const nextConfig: NextConfig = {
   outputFileTracingRoot: path.join(__dirname, "../../"),
   // The tracer's static analysis can't follow Prisma's runtime-computed
   // require() for the platform-specific engine .node file even with the
-  // root fixed above, so it has to be included explicitly.
+  // root fixed above, so it has to be included explicitly. A relative glob
+  // here resolves against the Next.js build cwd (apps/web, still one level
+  // short of the pnpm store), not outputFileTracingRoot — hence an absolute
+  // path built the same way as outputFileTracingRoot itself.
   outputFileTracingIncludes: {
-    "/**/*": ["./node_modules/.pnpm/@prisma+client*/node_modules/.prisma/client/**/*"],
+    "/**/*": [path.join(__dirname, "../../node_modules/.pnpm/@prisma+client*/node_modules/.prisma/client/**/*")],
   },
   transpilePackages: [
     "@inner/ui",
