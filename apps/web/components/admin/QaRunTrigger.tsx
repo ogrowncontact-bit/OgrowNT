@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 
-export function QaRunTrigger() {
+export function QaRunTrigger({ slug }: { slug: string }) {
   const router = useRouter();
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -12,7 +12,7 @@ export function QaRunTrigger() {
     setRunning(true);
     setError(null);
     try {
-      const res = await fetch("/api/admin/qa/love/run", {
+      const res = await fetch(`/api/admin/qa/${slug}/run`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ count: 100 }),

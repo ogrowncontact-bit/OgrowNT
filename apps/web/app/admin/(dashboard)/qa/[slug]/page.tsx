@@ -1,4 +1,6 @@
-import { getLatestLoveQaRun } from "@/lib/admin/qaReader";
+import { notFound } from "next/navigation";
+import { getLatestQaRun } from "@/lib/admin/qaReader";
+import { getAssessmentConfig } from "@/lib/assessments";
 import { QaRunTrigger } from "@/components/admin/QaRunTrigger";
 
 export const dynamic = "force-dynamic";
@@ -11,30 +13,38 @@ const card = "rounded-[var(--inner-radius-lg)] border border-[var(--inner-line)]
 const sectionTitle = "font-display mb-3 text-[16px] text-[var(--inner-ink)]";
 
 /**
- * FASE 31 §QUALITY DASHBOARD — /admin/qa/love. Shows the latest 100-persona
- * simulation run: profile distribution (flagging >25%/<1%), dimension score
- * ranges, tension/contradiction firing rates, per-question ask/option
- * stats, and structurally-detected redundant questions. Every number here
- * comes from a real run of the actual engine (lib/qa/runLoveQaSimulation.ts)
- * — nothing on this page is invented. AI-dependent quality checks (safety
- * language, generic-content score, report similarity, personalization,
- * prompt-injection handling, multi-language output) are explicitly called
- * out as not evaluated when no ANTHROPIC_API_KEY is configured, rather than
- * shown as a fabricated pass.
+ * FASE 31 §QUALITY DASHBOARD, generalized — /admin/qa/[slug]. Originally
+ * LOVE-only (/admin/qa/love); a dynamic route with the segment value "love"
+ * resolves to that exact same URL, so this change is transparent to any
+ * existing bookmark/link. Shows the latest 100-persona simulation run for
+ * whichever assessment slug is in the URL: profile distribution (flagging
+ * >25%/<1%), dimension score ranges, tension/contradiction firing rates,
+ * per-question ask/option stats, and structurally-detected redundant
+ * questions. Every number here comes from a real run of the actual engine
+ * (lib/qa/runLoveQaSimulation.ts for "love", lib/qa/runAssessmentQaSimulation.ts
+ * for every other slug) — nothing on this page is invented. AI-dependent
+ * quality checks (safety language, generic-content score, report similarity,
+ * personalization, prompt-injection handling, multi-language output) are
+ * explicitly called out as not evaluated when no ANTHROPIC_API_KEY is
+ * configured, rather than shown as a fabricated pass.
  */
-export default async function AdminQaLovePage() {
-  const run = await getLatestLoveQaRun();
+export default async function AdminQaPage({ params }: { params: Promise<{ slug: string }> }) {
+  const { slug } = await params;
+  const config = await getAssessmentConfig(slug);
+  if (!config) notFound();
+
+  const run = await getLatestQaRun(slug);
 
   return (
     <div>
       <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h1 className="font-display text-[24px] text-[var(--inner-ink)]">LOVE Quality Dashboard</h1>
+          <h1 className="font-display text-[24px] text-[var(--inner-ink)]">{config.name} Quality Dashboard</h1>
           <p className="mt-1 text-[13px] text-[var(--inner-ink-soft)]">
             {run ? `Last run: ${formatDate(run.createdAt)} — ${run.result.personaCount} personas` : "No simulation has been run yet."}
           </p>
         </div>
-        <QaRunTrigger />
+        <QaRunTrigger slug={slug} />
       </div>
 
       {!run ? (

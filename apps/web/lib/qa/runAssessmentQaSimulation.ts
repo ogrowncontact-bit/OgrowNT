@@ -7,77 +7,22 @@ import { getAiModelConfig } from "@/lib/aiConfig";
 import { recordSessionAnswer } from "@/lib/recordSessionAnswer";
 import { completeAssessmentSession } from "@/lib/completeAssessmentSession";
 import { chooseAnswerForPersona } from "@/lib/demoAnswerSelection";
-import { generateLoveQaPersonas } from "@/lib/qa/loveQaPersonas";
+import { generateQaPersonas } from "@/lib/qa/genericQaPersonas";
 import { dimensionPool } from "@inner/content/dimensions";
+import type {
+  QaResult,
+  ProfileDistributionRow,
+  DimensionStatsRow,
+  RateRow,
+  QuestionStatsRow,
+  RedundantPairRow,
+} from "@/lib/qa/runLoveQaSimulation";
 
-const QA_SLUG = "love";
 const MAX_STEPS_GUARD = 60;
 const HIGH_DISTRIBUTION_FLAG_PCT = 25;
 const LOW_DISTRIBUTION_FLAG_PCT = 1;
 
-export interface ProfileDistributionRow {
-  profileKey: string;
-  profileName: string;
-  count: number;
-  pct: number;
-  flag: "too_common" | "too_rare" | null;
-}
-
-export interface DimensionStatsRow {
-  key: string;
-  label: string;
-  min: number;
-  max: number;
-  avg: number;
-}
-
-export interface RateRow {
-  key: string;
-  label: string;
-  firedCount: number;
-  pct: number;
-}
-
-export interface QuestionStatsRow {
-  key: string;
-  prompt: string;
-  type: string;
-  isCore: boolean;
-  timesAsked: number;
-  askedPct: number;
-  optionDistribution: { optionKey: string; label: string; count: number; pct: number }[] | null;
-}
-
-export interface RedundantPairRow {
-  a: string;
-  aPrompt: string;
-  b: string;
-  bPrompt: string;
-  sharedDimensions: string[];
-}
-
-// Shared shape reused by lib/qa/runAssessmentQaSimulation.ts (the generic,
-// any-assessment sibling of this LOVE-specific module) — aliased as
-// `QaResult` there since the result of a QA run isn't LOVE-specific even
-// though this original interface predates the generic runner and keeps its
-// original name for backward compatibility with existing imports.
-export interface LoveQaResult {
-  runAt: string;
-  assessmentSlug: string;
-  personaCount: number;
-  averageQuestionsPerSession: number;
-  profileDistribution: ProfileDistributionRow[];
-  dimensionStats: DimensionStatsRow[];
-  tensionFiringRates: RateRow[];
-  contradictionFiringRates: RateRow[];
-  questionStats: QuestionStatsRow[];
-  redundantQuestionPairs: RedundantPairRow[];
-  aiWasEnabled: boolean;
-}
-
-export type QaResult = LoveQaResult;
-
-/** Structural redundancy: two option-based questions whose options touch the exact same set of ≥1 dimensions read as measuring the same thing twice — computed directly from the authored config, not from runtime answers. */
+/** Same structural-redundancy check as runLoveQaSimulation.ts's private helper — duplicated rather than imported/exported across files to keep each simulation module self-contained. */
 function findRedundantQuestionPairs(config: AssessmentConfig): RedundantPairRow[] {
   const allQuestions = [...config.questionBank.core, ...config.questionBank.adaptivePool];
   const signatures = allQuestions
@@ -107,41 +52,42 @@ function findRedundantQuestionPairs(config: AssessmentConfig): RedundantPairRow[
 }
 
 /**
- * FASE 31 §100-PERSONA QA SIMULATION — drives the real LOVE engine through
- * `count` deterministic synthetic personas (lib/qa/loveQaPersonas.ts),
- * exactly the same real code path the FASE 29 demo route uses
- * (recordSessionAnswer/completeAssessmentSession), with skipAnalytics so
- * these throwaway sessions never inflate the real funnel. Aggregates
- * profile/dimension/question/tension/contradiction statistics from what
- * actually happened — no fabricated numbers. AI-dependent quality checks
- * (safety language scanning, generic-content/similarity scoring,
- * personalization evidence, prompt-injection handling, multi-language
- * output) are NOT computed here: with no ANTHROPIC_API_KEY configured in
- * this environment, every AI call already falls back to the same static
- * template content regardless of persona, so "comparing" that output would
- * only measure the fallback template, not real AI behavior. `aiWasEnabled`
- * records which case this run is, so the dashboard states that honestly
- * instead of presenting a fabricated pass.
+ * §GENERIC 100-PERSONA QA SIMULATION — assessment-agnostic sibling of
+ * lib/qa/runLoveQaSimulation.ts (FASE 31), built to extend the same QA
+ * process to the other 9 assessments now that LOVE has been soft-launched
+ * and validated (FASE 33). Deliberately does NOT touch runLoveQaSimulation.ts
+ * or loveQaPersonas.ts — LOVE keeps its exact original, hand-tuned QA code
+ * path so its existing run history stays a fair apples-to-apples comparison
+ * against future LOVE re-runs. This module reimplements the same aggregation
+ * logic parametrized by `slug`, driving personas from the generic,
+ * dimension-agnostic generator in lib/qa/genericQaPersonas.ts.
+ *
+ * Same honesty constraint as the LOVE version: AI-dependent quality checks
+ * are not fabricated here. With no ANTHROPIC_API_KEY configured, every AI
+ * call falls back to identical static content regardless of persona, so
+ * `aiWasEnabled` records which case a given run is instead of presenting a
+ * fabricated pass.
  */
-export async function runLoveQaSimulation(count = 100): Promise<LoveQaResult> {
-  const config = await getAssessmentConfig(QA_SLUG);
-  if (!config) throw new Error("LOVE assessment is not available");
+export async function runAssessmentQaSimulation(slug: string, count = 100): Promise<QaResult> {
+  const config = await getAssessmentConfig(slug);
+  if (!config) throw new Error(`Assessment "${slug}" is not available`);
 
-  const assessment = await prisma.assessment.findUnique({ where: { slug: QA_SLUG } });
-  if (!assessment) throw new Error("LOVE assessment is not seeded");
+  const assessment = await prisma.assessment.findUnique({ where: { slug } });
+  if (!assessment) throw new Error(`Assessment "${slug}" is not seeded`);
 
   const version = await prisma.assessmentVersion.findFirst({
     where: { assessmentId: assessment.id, publishedAt: { not: null } },
     orderBy: { versionNumber: "desc" },
   });
-  if (!version) throw new Error("LOVE assessment has no published version");
+  if (!version) throw new Error(`Assessment "${slug}" has no published version`);
 
   const modelConfig = await getAiModelConfig();
-  const personas = generateLoveQaPersonas(count);
+  const dimensionKeys = config.dimensions.map((d) => d.key);
+  const personas = generateQaPersonas(dimensionKeys, count);
 
   const profileCounts = new Map<string, { name: string; count: number }>();
   const dimensionValues = new Map<string, number[]>();
-  const tensionCounts = new Map<string, string>(); // key -> label, count tracked separately
+  const tensionCounts = new Map<string, string>();
   const tensionFireCounts = new Map<string, number>();
   const contradictionFireCounts = new Map<string, number>();
   const questionAskedCounts = new Map<string, number>();
@@ -152,10 +98,10 @@ export async function runLoveQaSimulation(count = 100): Promise<LoveQaResult> {
 
   for (const persona of personas) {
     const anon = await prisma.anonymousSession.create({
-      data: { firstLandingSlug: QA_SLUG, utmSource: "qa_simulation", utmCampaign: persona.key },
+      data: { firstLandingSlug: slug, utmSource: "qa_simulation", utmCampaign: persona.key },
     });
     const session = await prisma.assessmentSession.create({
-      data: { anonymousSessionId: anon.id, assessmentId: assessment.id, assessmentVersionId: version.id, sourceSlug: QA_SLUG },
+      data: { anonymousSessionId: anon.id, assessmentId: assessment.id, assessmentVersionId: version.id, sourceSlug: slug },
     });
 
     let state = startSession(config);
@@ -236,7 +182,6 @@ export async function runLoveQaSimulation(count = 100): Promise<LoveQaResult> {
     })
     .sort((a, b) => b.count - a.count);
 
-  // Profiles that never fired at all are exactly as worth flagging as "too rare" — the map above only has profiles that fired at least once.
   for (const profile of config.profiles) {
     if (!profileCounts.has(profile.key)) {
       profileDistribution.push({ profileKey: profile.key, profileName: profile.name, count: 0, pct: 0, flag: "too_rare" });
@@ -294,7 +239,7 @@ export async function runLoveQaSimulation(count = 100): Promise<LoveQaResult> {
 
   return {
     runAt: new Date().toISOString(),
-    assessmentSlug: QA_SLUG,
+    assessmentSlug: slug,
     personaCount: personas.length,
     averageQuestionsPerSession: Math.round((totalQuestionsAsked / Math.max(1, completedSessions)) * 10) / 10,
     profileDistribution,
