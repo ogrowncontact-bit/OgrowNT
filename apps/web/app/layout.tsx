@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { getSiteUrl } from "@/lib/siteUrl";
+import { MetaPixel } from "@/components/MetaPixel";
 
 const title = "INNER — Discover what makes you, you.";
 const description = "A short, adaptive conversation that reveals a pattern in how you relate to others.";
@@ -32,7 +33,10 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body>
+        <MetaPixel />
+        {children}
+      </body>
     </html>
   );
 }
