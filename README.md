@@ -12,3 +12,4 @@ The `ogrownt` Vercel project deploys `apps/web` from this repo's `main` branch. 
 2. Add `CRON_SECRET` (any random string) — it gates the scheduled job routes and the one-time bootstrap route below.
 3. Push to `main`. `apps/web`'s build script runs `prisma migrate deploy` before `next build`, so schema setup is automatic once `DATABASE_URL` exists.
 4. Once the deploy is `READY`, populate the catalog once: `GET /api/admin/jobs/bootstrap-seed?secret=<CRON_SECRET>`. It's a no-op if the database already has any `Assessment` row, so it's safe to call more than once. See `packages/db/src/seed.ts`.
+5. (Optional) Add `NEXT_PUBLIC_META_PIXEL_ID` for paid-traffic attribution — see `components/MetaPixel.tsx`. `NEXT_PUBLIC_` vars are inlined at build time, so a redeploy is required after adding one.
