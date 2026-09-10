@@ -116,7 +116,7 @@ export async function enrichProfileWithAI(
     insights: { type: string; text: string; confidence: number }[];
   }>({
     module: "profileEnrichmentAI",
-    model: config.qualityModel,
+    model: config.fastModel,
     system:
       compiled?.system ??
       "You enrich an already-decided personality-pattern profile for a self-reflection app. The primary and " +
