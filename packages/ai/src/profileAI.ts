@@ -32,7 +32,7 @@ export async function generateFreeInsight(params: GenerateInsightParams, modelCo
 
   const result = await callStructured<{ insight: string }>({
     module: "profileAI",
-    model: config.qualityModel,
+    model: config.fastModel,
     system:
       "You write one short, warm, specific sentence (max 240 characters) for a self-reflection app's free " +
       "result screen. The person's dominant pattern has ALREADY been determined — you are narrating it, " +
